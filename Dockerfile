@@ -22,5 +22,5 @@ RUN cargo version
 RUN cargo install --path .
 
 ENV ROCKET_ADDRESS=0.0.0.0
-EXPOSE 2525
+EXPOSE 25
 CMD ["cargo", "run"]
