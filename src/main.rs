@@ -1,5 +1,7 @@
 use dotenv::dotenv;
 
+use base64::{engine::general_purpose, Engine as _};
+
 use std::io::{BufReader, Write};
 use std::sync::Arc;
 use std::fs::{self, File};
@@ -136,7 +138,7 @@ async fn handle_client(tls_stream: TlsStream<TcpStream>) -> std::io::Result<()> 
                             current_email.body.push_str(&buffer);                 
                     }
                 } else {
-                    let response = process_command(&buffer, &mut current_email).await?;
+                    let response = process_command(&buffer, &mut current_email, &mut stream).await?;
                     println!("Response: {}", response);
                     write_response(&mut stream, &response).await?;
 
@@ -157,7 +159,7 @@ async fn handle_client(tls_stream: TlsStream<TcpStream>) -> std::io::Result<()> 
     Ok(())
 }
 
-async fn process_command(command: &str, email: &mut Email) -> std::io::Result<String> {
+async fn process_command(command: &str, email: &mut Email, stream: &mut StreamType) -> std::io::Result<String> {
     // Implement your SMTP command processing logic here
     // This is a basic example and should be expanded based on your needs
 
@@ -165,6 +167,10 @@ async fn process_command(command: &str, email: &mut Email) -> std::io::Result<St
 
     if command.starts_with("HELO") || command.starts_with("EHLO") {
         Ok("250-mail.misfits.ai\r\n250-STARTTLS\r\n250 OK\r\n".to_string())
+    } else if command.starts_with("AUTH LOGIN") {
+        handle_auth_login(stream).await
+    } else if command.starts_with("AUTH PLAIN") {
+        handle_auth_plain(command).await
     } else if command.starts_with("MAIL FROM:") {
         //email.from = command[10..].trim().to_string();
         email.from = command.trim_start_matches("MAIL FROM:").trim().to_string();
@@ -204,6 +210,43 @@ async fn process_command(command: &str, email: &mut Email) -> std::io::Result<St
     }
 }
 
+async fn handle_auth_login(stream: &mut StreamType) -> std::io::Result<String> {
+    write_response(stream, "334 VXNlcm5hbWU6\r\n").await?; // Base64 for "Username:"
+    let mut username = String::new();
+    stream.read_line(&mut username).await?;
+    let username = general_purpose::STANDARD.decode(username.trim_end()).unwrap();
+
+    write_response(stream, "334 UGFzc3dvcmQ6\r\n").await?; // Base64 for "Password:"
+    let mut password = String::new();
+    stream.read_line(&mut password).await?;
+    let password = general_purpose::STANDARD.decode(password.trim_end()).unwrap();
+
+    if check_credentials(&username, &password) {
+        Ok("235 Authentication successful\r\n".to_string())
+    } else {
+        Ok("535 Authentication failed\r\n".to_string())
+    }
+}
+
+async fn handle_auth_plain(command: &str) -> std::io::Result<String> {
+    let auth_data = command.split_whitespace().nth(2).unwrap_or("");
+    let decoded = general_purpose::STANDARD.decode(auth_data).unwrap();
+    let parts: Vec<&[u8]> = decoded.split(|&b| b == 0).collect();
+    
+    if parts.len() != 3 {
+        return Ok("501 Malformed AUTH PLAIN\r\n".to_string());
+    }
+
+    let username = parts[1];
+    let password = parts[2];
+
+    if check_credentials(username, password) {
+        Ok("235 Authentication successful\r\n".to_string())
+    } else {
+        Ok("535 Authentication failed\r\n".to_string())
+    }
+}
+
 async fn write_response(stream: &mut StreamType, response: &str) -> std::io::Result<()> {
     match stream {
 
@@ -226,6 +269,13 @@ fn load_key(path: &Path) -> std::io::Result<PrivateKeyDer<'static>> {
             "no private key found".to_string(),
         ))?)
 }
+fn check_credentials(username: &[u8], password: &[u8]) -> bool {
+    // Implement your authentication logic here
+    // For example:
+    let expected_username = env::var("SMTP_USERNAME").expect("SMTP_USERNAME must be set");
+    let expected_password = env::var("SMTP_PASSWORD").expect("SMTP_PASSWORD must be set");
+    
+    username == expected_username.as_bytes() && password == expected_password.as_bytes()}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
