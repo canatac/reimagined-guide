@@ -18,7 +18,6 @@ use std::env;
 
 #[derive(Debug)]
 enum StreamType {
-    Plain(tokio::io::BufReader<TcpStream>),
     Tls(tokio::io::BufReader<TlsStream<TcpStream>>),
 }
 impl AsyncRead for StreamType {
@@ -28,7 +27,6 @@ impl AsyncRead for StreamType {
         buf: &mut tokio::io::ReadBuf<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
         match self.get_mut() {
-            StreamType::Plain(s) => std::pin::Pin::new(s).poll_read(cx, buf),
             StreamType::Tls(s) => std::pin::Pin::new(s).poll_read(cx, buf),
         }
     }
@@ -36,14 +34,12 @@ impl AsyncRead for StreamType {
 impl AsyncBufRead for StreamType {
     fn poll_fill_buf(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<std::io::Result<&[u8]>> {
         match self.get_mut() {
-            StreamType::Plain(s) => std::pin::Pin::new(s).poll_fill_buf(cx),
             StreamType::Tls(s) => std::pin::Pin::new(s).poll_fill_buf(cx),
         }
     }
 
     fn consume(self: std::pin::Pin<&mut Self>, amt: usize) {
         match self.get_mut() {
-            StreamType::Plain(s) => std::pin::Pin::new(s).consume(amt),
             StreamType::Tls(s) => std::pin::Pin::new(s).consume(amt),
         }
     }
@@ -176,9 +172,6 @@ async fn process_command(command: &str, email: &mut Email) -> std::io::Result<St
     } else if command.starts_with("RCPT TO:") {
         email.to = command.trim_start_matches("RCPT TO:").trim().to_string();
         Ok("250 OK\r\n".to_string())
-
-      //  email.to = command[8..].trim().to_string();
-       // Ok("250 OK\r\n".to_string())
     } else if command.starts_with("SUBJECT:") {
         email.subject = command[8..].trim().to_string();
         Ok("250 OK\r\n".to_string())
@@ -204,62 +197,22 @@ async fn process_command(command: &str, email: &mut Email) -> std::io::Result<St
     } else if command.starts_with("AUTH") {
         // In a real implementation, you'd handle authentication here
         Ok("235 Authentication successful\r\n".to_string())
-    } 
-    else {
+    } else if command.starts_with("STARTTLS") {
+        Ok("220 TLS ready\r\n".to_string())
+    } else {
         Ok("500 Syntax error, command unrecognized\r\n".to_string())
-    }
-}
-
-
-
-async fn read_line(stream: &mut StreamType, buffer: &mut String) -> std::io::Result<usize> {
-    match stream {
-        StreamType::Plain(ref mut s) => s.read_line(buffer).await,
-        StreamType::Tls(ref mut s) => s.read_line(buffer).await,
     }
 }
 
 async fn write_response(stream: &mut StreamType, response: &str) -> std::io::Result<()> {
     match stream {
-        StreamType::Plain(ref mut s) => {
-            s.write_all(response.as_bytes()).await?;
-            s.flush().await
-        }
+
         StreamType::Tls(ref mut s) => {
             s.write_all(response.as_bytes()).await?;
             s.flush().await
         }
     }
 }
-
-
-/*
-async fn process_command(command: &str, email: &mut Email ) -> std::io::Result<String> {
-    let command = command.trim();
-    
-    if command.starts_with("HELO") || command.starts_with("EHLO") {
-        Ok("250-mail.misfits.ai\r\n250-STARTTLS\r\n250 OK\r\n".to_string())
-    } else if command.starts_with("MAIL FROM:") {
-        email.from = command[10..].trim().to_string();
-        Ok("250 OK\r\n".to_string())
-    } else if command.starts_with("RCPT TO:") {
-        email.to = command[8..].trim().to_string();
-        Ok("250 OK\r\n".to_string())
-    } else if command.starts_with("SUBJECT:") {
-        email.subject = command[8..].trim().to_string();
-        Ok("250 OK\r\n".to_string())
-    } else if command == "DATA" {
-        Ok("354 Start mail input; end with <CRLF>.<CRLF>\r\n".to_string())
-    } else if command == "." {
-        Ok("250 OK\r\n".to_string())
-    } else if command == "QUIT" {
-        Ok("221 Bye\r\n".to_string())
-    } else {
-        Ok("500 Syntax error, command unrecognized\r\n".to_string())
-    }
-}
-
-*/
 
 fn load_certs(path: &Path) -> std::io::Result<Vec<CertificateDer<'static>>> {
     certs(&mut BufReader::new(File::open(path)?)).collect()
@@ -321,19 +274,7 @@ let subscriber = tracing_subscriber::fmt()
         
         info!("New client connected from {}", peer_addr);
     
-        
-
         let acceptor = acceptor.clone();
-    /*
-        tokio::spawn(async move {
-                    if let Err(e) = handle_client(stream, acceptor, mail_server).await {
-                        error!("Error handling client {}: {}", peer_addr, e);
-                    }else{
-                        info!("Client session completed successfully");
-                    
-            }
-        });
-      */
 
         tokio::spawn(async move {
                     match acceptor.accept(stream).await {
