@@ -126,7 +126,7 @@ async fn handle_client(tls_stream: TlsStream<TcpStream>) -> std::io::Result<()> 
                     if buffer.trim() == "." {
                         in_data_mode = false;
                         mail_server.store_email(&current_email)?;
-                        mail_server.send_email(&current_email)?;
+                        //mail_server.send_email(&current_email)?;
                         current_email = Email {
                             from: String::new(),
                             to: String::new(),
@@ -166,7 +166,7 @@ async fn process_command(command: &str, email: &mut Email, stream: &mut StreamTy
     println!("In process_command with: {}", command.trim().to_uppercase().as_str());
 
     if command.starts_with("HELO") || command.starts_with("EHLO") {
-        Ok("250-mail.misfits.ai\r\n250-STARTTLS\r\n250 OK\r\n".to_string())
+        Ok("250-mail.misfits.ai Hello\r\n250-STARTTLS\r\n250-AUTH LOGIN PLAIN\r\n250 OK\r\n".to_string())
     } else if command.starts_with("AUTH LOGIN") {
         handle_auth_login(stream).await
     } else if command.starts_with("AUTH PLAIN") {
