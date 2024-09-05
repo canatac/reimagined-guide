@@ -1,3 +1,5 @@
+use dotenv::dotenv;
+
 use std::io::{BufReader, Write};
 use std::sync::Arc;
 use std::fs::{self, File};
@@ -11,6 +13,8 @@ use tokio::net::{TcpStream,TcpListener};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use tokio_rustls::server::TlsStream;
 use rustls_pemfile::{certs, private_key};
+use std::env;
+
 
 #[derive(Debug)]
 enum StreamType {
@@ -93,7 +97,7 @@ impl MailServer {
     }
 }
 
-async fn handle_client(mut tls_stream: TlsStream<TcpStream>) -> std::io::Result<()> {
+async fn handle_client(tls_stream: TlsStream<TcpStream>) -> std::io::Result<()> {
     let mut stream = StreamType::Tls(tokio::io::BufReader::new(tls_stream));
     
     // Send initial greeting
@@ -117,7 +121,7 @@ async fn handle_client(mut tls_stream: TlsStream<TcpStream>) -> std::io::Result<
                 println!("Client disconnected  : {}", buffer.trim());
                 break;
             }
-            Ok(n) => {                
+            Ok(_n) => {                
                 println!("Calling process_command with: {}", buffer.trim());
 
                 if in_data_mode {
@@ -273,6 +277,8 @@ fn load_key(path: &Path) -> std::io::Result<PrivateKeyDer<'static>> {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
+    dotenv().ok();
+
     env_logger::Builder::new()
         .filter_level(log::LevelFilter::Debug)
         .init();
@@ -294,10 +300,9 @@ let subscriber = tracing_subscriber::fmt()
     .finish();    // use that subscriber to process traces emitted after this point
     tracing::subscriber::set_global_default(subscriber)?;
 
-    let addr = "0.0.0.0:465";
-    let cert_path:PathBuf = PathBuf::from("localhost.crt");
-    let key_path:PathBuf = PathBuf::from("localhost.key");
-
+    let addr = env::var("SMTP_ADDR").unwrap_or_else(|_| "0.0.0.0:465".to_string());
+    let cert_path: PathBuf = PathBuf::from(env::var("CERT_PATH").unwrap_or_else(|_| "localhost.crt".to_string()));
+    let key_path: PathBuf = PathBuf::from(env::var("KEY_PATH").unwrap_or_else(|_| "localhost.key".to_string()));
 
     let certs = load_certs(&cert_path)?;
     let key = load_key(&key_path)?;
@@ -308,10 +313,8 @@ let subscriber = tracing_subscriber::fmt()
     
     let acceptor = TlsAcceptor::from(Arc::new(config));
 
-    let listener = TcpListener::bind(addr).await?;
+    let listener = TcpListener::bind(addr.clone()).await?;
     info!("Server listening on {}", addr);
-
-
 
     loop {
         let (stream, peer_addr) = listener.accept().await?;
@@ -334,7 +337,7 @@ let subscriber = tracing_subscriber::fmt()
 
         tokio::spawn(async move {
                     match acceptor.accept(stream).await {
-                        Ok(mut tls_stream) => {
+                        Ok(tls_stream) => {
                             println!("TLS connection established with {}", peer_addr);
 
                             if let Err(e) = handle_client(tls_stream).await {
