@@ -455,6 +455,22 @@ async fn process_command(command: &str, email: &mut Email, stream: &mut StreamTy
             Ok("250 OK\r\n".to_string())
         } 
         "QUIT" => {
+            if !email.from.is_empty() && !email.to.is_empty() {
+                match extract_email_content(&email.body) {
+                    Ok(content) => {
+                        println!("Extracted email content: {}", content);
+                        
+                        let reply_subject = "Re: ".to_string() + &email.subject;
+                        let reply_body = "Thank you for your email. This is an automated response.";
+                        
+                        match send_reply_email(&email.from, &reply_subject, reply_body) {
+                            Ok(_) => println!("Reply sent successfully"),
+                            Err(e) => eprintln!("Error sending reply: {}", e),
+                        }
+                    },
+                    Err(e) => eprintln!("Error extracting email content: {}", e),
+                }
+            }
             Ok("221 Bye\r\n".to_string())
         } 
         "RSET" => {
