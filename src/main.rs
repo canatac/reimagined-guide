@@ -249,50 +249,67 @@ async fn process_command(command: &str, email: &mut Email, stream: &mut StreamTy
 
     println!("In process_command with: {}", command.trim().to_uppercase().as_str());
 
-    if command.starts_with("HELO") || command.starts_with("EHLO") {
-        Ok("250-mail.misfits.ai Hello\r\n250-STARTTLS\r\n250-AUTH LOGIN PLAIN\r\n250 OK\r\n".to_string())
-    } else if command.starts_with("AUTH LOGIN") {
-        handle_auth_login(stream).await
-    } else if command.starts_with("AUTH PLAIN") {
-        handle_auth_plain(command).await
-    } else if command.starts_with("MAIL FROM:") {
-        //email.from = command[10..].trim().to_string();
-        email.from = command.trim_start_matches("MAIL FROM:").trim().to_string();
-        Ok("250 OK\r\n".to_string())
-    } else if command.starts_with("RCPT TO:") {
-
-        email.to = command.trim_start_matches("RCPT TO:").trim().to_string();
-        Ok("250 OK\r\n".to_string())
-    } else if command.starts_with("SUBJECT:") {
-        email.subject = command[8..].trim().to_string();
-        Ok("250 OK\r\n".to_string())
-    } else if command == "DATA" {
-        Ok("354 Start mail input; end with <CRLF>.<CRLF>\r\n".to_string())
-    } else if command == "." {
-        Ok("250 OK\r\n".to_string())
-    } else if command == "QUIT" {
-        Ok("221 Bye\r\n".to_string())
-    } else if command == "RSET" {
-        email.subject = String::new();
-        email.from = String::new();
-        email.to = String::new();
-        email.subject = String::new();
-        email.body = String::new();
-         // Reset the email using new() instead of default()
-        Ok("250 OK\r\n".to_string())
-    } else if command == "NOOP" {
-        Ok("250 OK\r\n".to_string())
-    } else if command.starts_with("VRFY") {
-        // In a real implementation, you'd verify the email address here
-        Ok("252 Cannot VRFY user, but will accept message and attempt delivery\r\n".to_string())
-    } else if command.starts_with("AUTH") {
-        // In a real implementation, you'd handle authentication here
-        Ok("235 Authentication successful\r\n".to_string())
-    } else if command.starts_with("STARTTLS") {
-        Ok("220 TLS ready\r\n".to_string())
-    } else {
-        Ok("500 Syntax error, command unrecognized\r\n".to_string())
-    }
+    match command.trim().to_uppercase().as_str() {
+        s if s.starts_with("HELO") || s.starts_with("EHLO") => {
+            Ok("250-mail.misfits.ai Hello\r\n250-STARTTLS\r\n250-AUTH LOGIN PLAIN\r\n250 OK\r\n".to_string())
+        } 
+        s if s.starts_with("AUTH LOGIN") => {
+            handle_auth_login(stream).await
+        } 
+        s if s.starts_with("AUTH PLAIN") => {
+            handle_auth_plain(command).await
+        } 
+        s if s.starts_with("MAIL FROM:") => {
+            //email.from = command[10..].trim().to_string();
+            email.from = s.trim_start_matches("MAIL FROM:").trim().to_string();
+            Ok("250 OK\r\n".to_string())
+        } 
+        s if s.starts_with("RCPT TO:") => {
+            email.to = s.trim_start_matches("RCPT TO:").trim().to_string();
+            Ok("250 OK\r\n".to_string())
+        } 
+        s if s.starts_with("SUBJECT:") => {
+            email.subject = s[8..].trim().to_string();
+            Ok("250 OK\r\n".to_string())
+        } 
+        "DATA" => {
+            Ok("354 Start mail input; end with <CRLF>.<CRLF>\r\n".to_string())
+        } 
+        "." => {
+            Ok("250 OK\r\n".to_string())
+        } 
+        "QUIT" => {
+            Ok("221 Bye\r\n".to_string())
+        } 
+        "RSET" => {
+            *email = Email {
+                from: String::new(),
+                to: String::new(),
+                subject: String::new(),
+                body: String::new(),
+            };
+             // Reset the email using new() instead of default()
+            Ok("250 OK\r\n".to_string())
+        } 
+        "NOOP" => {
+            Ok("250 OK\r\n".to_string())
+        } 
+        s if s.starts_with("VRFY") => {
+            // In a real implementation, you'd verify the email address here
+            Ok("252 Cannot VRFY user, but will accept message and attempt delivery\r\n".to_string())
+        } 
+        s if s.starts_with("AUTH") => {
+            // In a real implementation, you'd handle authentication here
+            Ok("235 Authentication successful\r\n".to_string())
+        } 
+        s if s.starts_with("STARTTLS") => {
+            Ok("220 TLS ready\r\n".to_string())
+        } 
+        _ => {
+            Ok("500 Syntax error, command unrecognized\r\n".to_string())
+        }
+    }    
+    
 }
 
 async fn handle_auth_login(stream: &mut StreamType) -> std::io::Result<String> {
