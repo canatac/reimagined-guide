@@ -21,6 +21,7 @@ use std::env;
 #[derive(Debug)]
 enum StreamType {
     Tls(tokio::io::BufReader<TlsStream<TcpStream>>),
+    Plain(tokio::io::BufReader<TcpStream>),
 }
 impl AsyncRead for StreamType {
     fn poll_read(
@@ -30,6 +31,8 @@ impl AsyncRead for StreamType {
     ) -> std::task::Poll<std::io::Result<()>> {
         match self.get_mut() {
             StreamType::Tls(s) => std::pin::Pin::new(s).poll_read(cx, buf),
+            StreamType::Plain(s) => std::pin::Pin::new(s).poll_read(cx, buf),
+
         }
     }
 }
@@ -37,12 +40,14 @@ impl AsyncBufRead for StreamType {
     fn poll_fill_buf(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<std::io::Result<&[u8]>> {
         match self.get_mut() {
             StreamType::Tls(s) => std::pin::Pin::new(s).poll_fill_buf(cx),
+            StreamType::Plain(s) => std::pin::Pin::new(s).poll_fill_buf(cx),
         }
     }
 
     fn consume(self: std::pin::Pin<&mut Self>, amt: usize) {
         match self.get_mut() {
             StreamType::Tls(s) => std::pin::Pin::new(s).consume(amt),
+            StreamType::Plain(s) => std::pin::Pin::new(s).consume(amt),
         }
     }
 }
@@ -97,6 +102,70 @@ impl MailServer {
 
 async fn handle_client(tls_stream: TlsStream<TcpStream>) -> std::io::Result<()> {
     let mut stream = StreamType::Tls(tokio::io::BufReader::new(tls_stream));
+    
+    // Send initial greeting
+    let greeting = "220 SMTPS Server Ready\r\n";
+    write_response(&mut stream, &greeting).await?;
+
+    let mut in_data_mode = false;
+
+    let mut current_email = Email {
+        from: String::new(),
+        to: String::new(),
+        subject: String::new(),
+        body: String::new(),
+    };
+
+    let mail_server = Arc::new(MailServer::new("./emails"));
+    loop {
+        let mut buffer = String::new();
+        match stream.read_line(&mut buffer).await {
+            Ok(0) => {
+                println!("Client disconnected  : {}", buffer.trim());
+                break;
+            }
+            Ok(_n) => {                
+                println!("Calling process_command with: {}", buffer.trim());
+
+                if in_data_mode {
+                    if buffer.trim() == "." {
+                        in_data_mode = false;
+                        mail_server.store_email(&current_email)?;
+                        //mail_server.send_email(&current_email)?;
+                        current_email = Email {
+                            from: String::new(),
+                            to: String::new(),
+                            subject: String::new(),
+                            body: String::new(),
+                        };
+                        write_response(&mut stream, "250 OK\r\n").await?;
+                    } else {
+                            current_email.body.push_str(&buffer);                 
+                    }
+                } else {
+                    let response = process_command(&buffer, &mut current_email, &mut stream).await?;
+                    println!("Response: {}", response);
+                    write_response(&mut stream, &response).await?;
+
+                    if buffer.trim() == "DATA" {
+                        in_data_mode = true;
+                    } else if buffer.trim() == "QUIT" {
+                        break;
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("Error reading from client: {}", e);
+                break;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_plain_client(stream: TlsStream<TcpStream>) -> std::io::Result<()> {
+    let mut stream = StreamType::Tls(tokio::io::BufReader::new(stream));
     
     // Send initial greeting
     let greeting = "220 SMTP Server Ready\r\n";
@@ -158,7 +227,6 @@ async fn handle_client(tls_stream: TlsStream<TcpStream>) -> std::io::Result<()> 
 
     Ok(())
 }
-
 async fn process_command(command: &str, email: &mut Email, stream: &mut StreamType) -> std::io::Result<String> {
     // Implement your SMTP command processing logic here
     // This is a basic example and should be expanded based on your needs
@@ -176,6 +244,7 @@ async fn process_command(command: &str, email: &mut Email, stream: &mut StreamTy
         email.from = command.trim_start_matches("MAIL FROM:").trim().to_string();
         Ok("250 OK\r\n".to_string())
     } else if command.starts_with("RCPT TO:") {
+
         email.to = command.trim_start_matches("RCPT TO:").trim().to_string();
         Ok("250 OK\r\n".to_string())
     } else if command.starts_with("SUBJECT:") {
@@ -249,8 +318,11 @@ async fn handle_auth_plain(command: &str) -> std::io::Result<String> {
 
 async fn write_response(stream: &mut StreamType, response: &str) -> std::io::Result<()> {
     match stream {
-
         StreamType::Tls(ref mut s) => {
+            s.write_all(response.as_bytes()).await?;
+            s.flush().await
+        }
+        StreamType::Plain(ref mut s) => {
             s.write_all(response.as_bytes()).await?;
             s.flush().await
         }
@@ -303,7 +375,9 @@ let subscriber = tracing_subscriber::fmt()
     .finish();    // use that subscriber to process traces emitted after this point
     tracing::subscriber::set_global_default(subscriber)?;
 
-    let addr = env::var("SMTP_ADDR").unwrap_or_else(|_| "0.0.0.0:465".to_string());
+    let tls_addr = env::var("SMTP_TLS_ADDR").unwrap_or_else(|_| "0.0.0.0:465".to_string());
+    let plain_addr = env::var("SMTP_PLAIN_ADDR").unwrap_or_else(|_| "0.0.0.0:25".to_string());
+
     let cert_path: PathBuf = PathBuf::from(env::var("CERT_PATH").unwrap_or_else(|_| "localhost.crt".to_string()));
     let key_path: PathBuf = PathBuf::from(env::var("KEY_PATH").unwrap_or_else(|_| "localhost.key".to_string()));
 
@@ -316,31 +390,52 @@ let subscriber = tracing_subscriber::fmt()
     
     let acceptor = TlsAcceptor::from(Arc::new(config));
 
-    let listener = TcpListener::bind(addr.clone()).await?;
-    info!("Server listening on {}", addr);
+    let tls_listener = TcpListener::bind(tls_addr.clone()).await?;
+    let plain_listener = TcpListener::bind(plain_addr.clone()).await?;
+    info!("TLS Server listening on {}", tls_addr);
+    info!("Plain Server listening on {}", plain_addr);
 
     loop {
-        let (stream, peer_addr) = listener.accept().await?;
+        tokio::select! {
+            //let (stream, peer_addr) = listener.accept().await?;
+            result = tls_listener.accept() => {
+                if let Ok((stream, peer_addr)) = result {
+                    info!("New TLS client connected from {}", peer_addr);
         
-        info!("New client connected from {}", peer_addr);
-    
-        let acceptor = acceptor.clone();
-
-        tokio::spawn(async move {
-                    match acceptor.accept(stream).await {
-                        Ok(tls_stream) => {
-                            println!("TLS connection established with {}", peer_addr);
-
-                            if let Err(e) = handle_client(tls_stream).await {
-                                error!("Error handling client {}: {}", peer_addr, e);
-                            } else {
-                                info!("Client session completed successfully");
-                            }
+                    let acceptor = acceptor.clone();
+            
+                    tokio::spawn(async move {
+                                match acceptor.accept(stream).await {
+                                    Ok(tls_stream) => {
+                                        println!("TLS connection established with {}", peer_addr);
+            
+                                        if let Err(e) = handle_client(tls_stream).await {
+                                            error!("Error handling client {}: {}", peer_addr, e);
+                                        } else {
+                                            info!("Client session completed successfully");
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!("Erreur lors de la connexion TLS: {}", e);
+                                    }
+                                }
+                    });
+                }
+            }
+            result = plain_listener.accept() => {
+                if let Ok((stream, peer_addr)) = result {
+                    info!("New plain client connected from {}", peer_addr);
+                    tokio::spawn(async move {
+                        if let Err(e) = handle_plain_client(stream).await {
+                            error!("Error handling plain client {}: {}", peer_addr, e);
+                        } else {
+                            info!("Plain client session completed successfully");
                         }
-                        Err(e) => {
-                            eprintln!("Erreur lors de la connexion TLS: {}", e);
-                        }
-                    }
-        }); 
+                    });
+                }
+            }
+            
+        }
+         
     }
 }
