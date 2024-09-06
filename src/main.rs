@@ -138,11 +138,65 @@ fn send_reply_email(to: &str, subject: &str, body: &str) -> Result<(), Box<dyn s
         .header(ContentType::TEXT_PLAIN)
         .body(body.to_string())?;
 
-        let mailer = SmtpTransport::builder_dangerous("0.0.0.0")
+        let mailer = SmtpTransport::builder_dangerous("127.0.0.1")
         .port(2525)
         .build();
 
     mailer.send(&email)?;
+
+    Ok(())
+}
+
+async fn handle_outgoing_client(stream: TcpStream) -> std::io::Result<()> {
+    let mut stream = StreamType::Plain(tokio::io::BufReader::new(stream));
+    
+    // Send initial greeting
+    let greeting = "220 Outgoing SMTP Server Ready\r\n";
+    write_response(&mut stream, &greeting).await?;
+    let mut in_data_mode: bool = false;
+
+    let mut current_email = Email {
+        from: String::new(),
+        to: String::new(),
+        subject: String::new(),
+        body: String::new(),
+    };
+
+    loop {
+        let mut buffer = String::new();
+        match stream.read_line(&mut buffer).await {
+            Ok(0) => break,
+            Ok(_) => {
+                let response = process_command(&buffer, &mut current_email, &mut stream).await?;
+                write_response(&mut stream, &response).await?;
+
+                if buffer.trim() == "DATA" {
+                    in_data_mode = true;
+                    write_response(&mut stream, "354 Start mail input; end with <CRLF>.<CRLF>\r\n").await?;
+                } else if in_data_mode {
+                    if buffer.trim() == "." {
+                        in_data_mode = false;
+                        current_email = Email {
+                            from: String::new(),
+                            to: String::new(),
+                            subject: String::new(),
+                            body: String::new(),
+                        };
+                        write_response(&mut stream, "250 OK\r\n").await?;
+                    } else {
+                        current_email.body.push_str(&buffer);
+                    }
+                }
+                if buffer.trim() == "QUIT" {
+                    break;
+                }
+            }
+            Err(e) => {
+                eprintln!("Error reading from outgoing client: {}", e);
+                break;
+            }
+        }
+    }
 
     Ok(())
 }
@@ -154,7 +208,7 @@ async fn handle_client(tls_stream: TlsStream<TcpStream>) -> std::io::Result<()> 
     let greeting = "220 SMTPS Server Ready\r\n";
     write_response(&mut stream, &greeting).await?;
 
-    let mut in_data_mode = false;
+    let mut in_data_mode: bool = false;
 
     let mut current_email = Email {
         from: String::new(),
@@ -455,7 +509,8 @@ let subscriber = tracing_subscriber::fmt()
 
     let tls_addr = env::var("SMTP_TLS_ADDR").unwrap_or_else(|_| "0.0.0.0:465".to_string());
     let plain_addr = env::var("SMTP_PLAIN_ADDR").unwrap_or_else(|_| "0.0.0.0:25".to_string());
-
+    let outgoing_listener = TcpListener::bind("0.0.0.0:2525").await?;
+    
     let cert_path: PathBuf = PathBuf::from(env::var("CERT_PATH").unwrap_or_else(|_| "localhost.crt".to_string()));
     let key_path: PathBuf = PathBuf::from(env::var("KEY_PATH").unwrap_or_else(|_| "localhost.key".to_string()));
 
@@ -509,6 +564,18 @@ let subscriber = tracing_subscriber::fmt()
                             error!("Error handling plain client {}: {}", peer_addr, e);
                         } else {
                             info!("Plain client session completed successfully");
+                        }
+                    });
+                }
+            }
+            result = outgoing_listener.accept() => {
+                if let Ok((stream, peer_addr)) = result {
+                    info!("New outgoing client connected from {}", peer_addr);
+                    tokio::spawn(async move {
+                        if let Err(e) = handle_outgoing_client(stream).await {
+                            error!("Error handling outgoing client {}: {}", peer_addr, e);
+                        } else {
+                            info!("Outgoing client session completed successfully");
                         }
                     });
                 }
