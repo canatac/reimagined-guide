@@ -17,7 +17,9 @@ use tokio_rustls::server::TlsStream;
 use rustls_pemfile::{certs, private_key};
 use std::env;
 use mailparse::{parse_mail, MailHeaderMap};
-
+use lettre::message::{header::ContentType, Mailbox, MessageBuilder};
+use lettre::transport::smtp::authentication::Credentials;
+use lettre::{SmtpTransport, Transport};
 
 #[derive(Debug)]
 enum StreamType {
@@ -103,24 +105,46 @@ impl MailServer {
         write!(file, "{}", email.body)?;
         // Extract and log the actual content
         match extract_email_content(&email.body) {
-            Ok(content) => println!("Extracted email content: {}", content),
+            Ok(content) => {
+                println!("Extracted email content: {}", content);
+                
+                // Send a reply email
+                let reply_subject = "Re: ".to_string() + &email.subject;
+                let reply_body = "Thank you for joining me! Please subscribe first before talking with me!";
+                
+                match send_reply_email(&email.from, &reply_subject, reply_body) {
+                    Ok(_) => println!("Reply sent successfully"),
+                    Err(e) => eprintln!("Error sending reply: {}", e),
+                }
+            },
             Err(e) => eprintln!("Error extracting email content: {}", e),
         }
         Ok(())
     }
 
-    fn send_email(&self, email: &Email) -> std::io::Result<()> {
-        // In a real implementation, you'd connect to the recipient's SMTP server here
-        // For now, we'll just print the email details
-        println!("Sending email:");
-        println!("From: {}", email.from);
-        println!("To: {}", email.to);
-        println!("Subject: {}", email.subject);
-        println!("Body: {}", email.body);
-        
-        // Store the sent email
-        self.store_email(email)
-    }
+}
+
+fn send_reply_email(to: &str, subject: &str, body: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let smtp_username = env::var("SMTP_USERNAME").expect("SMTP_USERNAME must be set");
+    let smtp_password = env::var("SMTP_PASSWORD").expect("SMTP_PASSWORD must be set");
+    let smtp_server = env::var("SMTP_SERVER").expect("SMTP_SERVER must be set");
+
+    let email = MessageBuilder::new()
+        .from(Mailbox::new(Some("AI Assistant".to_string()), smtp_username.parse()?))
+        .to(to.parse()?)
+        .subject(subject)
+        .header(ContentType::TEXT_PLAIN)
+        .body(body.to_string())?;
+
+    let creds = Credentials::new(smtp_username, smtp_password);
+
+    let mailer = SmtpTransport::relay(&smtp_server)?
+        .credentials(creds)
+        .build();
+
+    mailer.send(&email)?;
+
+    Ok(())
 }
 
 async fn handle_client(tls_stream: TlsStream<TcpStream>) -> std::io::Result<()> {
@@ -154,7 +178,6 @@ async fn handle_client(tls_stream: TlsStream<TcpStream>) -> std::io::Result<()> 
                     if buffer.trim() == "." {
                         in_data_mode = false;
                         mail_server.store_email(&current_email)?;
-                        //mail_server.send_email(&current_email)?;
                         current_email = Email {
                             from: String::new(),
                             to: String::new(),
@@ -234,7 +257,6 @@ async fn handle_plain_client(stream: TcpStream, tls_acceptor: Arc<TlsAcceptor>) 
                     if buffer.trim() == "." {
                         in_data_mode = false;
                         mail_server.store_email(&current_email)?;
-                        //mail_server.send_email(&current_email)?;
                         current_email = Email {
                             from: String::new(),
                             to: String::new(),
