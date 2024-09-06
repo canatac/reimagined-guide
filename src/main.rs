@@ -388,6 +388,24 @@ async fn handle_plain_client(stream: TcpStream, tls_acceptor: Arc<TlsAcceptor>) 
                     if buffer.trim() == "DATA" {
                         in_data_mode = true;
                     } else if buffer.trim() == "QUIT" {
+                        // Send reply email before closing the connection
+                    if !current_email.from.is_empty() && !current_email.to.is_empty() {
+                        match extract_email_content(&current_email.body) {
+                            Ok(content) => {
+                                println!("Extracted email content: {}", content);
+                                
+                                let reply_subject = "Re: ".to_string() + &current_email.subject;
+                                let reply_body = "Thank you for your email. This is an automated response.";
+                                
+                                match send_reply_email(&current_email.from, &reply_subject, reply_body) {
+                                    Ok(_) => println!("Reply sent successfully"),
+                                    Err(e) => eprintln!("Error sending reply: {}", e),
+                                }
+                            },
+                            Err(e) => eprintln!("Error extracting email content: {}", e),
+                        }
+                    }
+                    write_response(&mut stream, "221 Bye\r\n").await?;
                         break;
                     }
                 }
