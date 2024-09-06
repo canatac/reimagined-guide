@@ -24,6 +24,7 @@ use trust_dns_resolver::config::{ResolverConfig, ResolverOpts};
 use trust_dns_resolver::TokioAsyncResolver;
 use std::net::IpAddr;
 use std::io::{Error as IoError, ErrorKind};
+use lettre::transport::smtp::authentication::Credentials;
 
 #[derive(Debug)]
 enum StreamType {
@@ -131,24 +132,35 @@ impl MailServer {
 
 fn send_reply_email(to: &str, subject: &str, body: &str) -> Result<(), Box<dyn std::error::Error>> {
     let smtp_username = env::var("SMTP_USERNAME").expect("SMTP_USERNAME must be set");
-    let address = Address::new(smtp_username, "misfits.ai")?;
+    let smtp_password = env::var("SMTP_PASSWORD").expect("SMTP_PASSWORD must be set");
 
-    println!("Sending email from: {} to: {}", address.to_string(), to);
+    let from_address = format!("{}@misfits.ai", smtp_username);
+
+    println!("Sending email from: {} to: {}", from_address.to_string(), to);
 
     let email = MessageBuilder::new()
-        .from(Mailbox::new(Some("AI Assistant".to_string()), address))
+        .from(from_address.parse().unwrap())
         .to(to.parse()?)
         .subject(subject)
         .header(ContentType::TEXT_PLAIN)
         .body(body.to_string())?;
 
-        let mailer = SmtpTransport::builder_dangerous("127.0.0.1")
-        .port(2525)
-        .build();
+        let creds = Credentials::new(smtp_username, smtp_password);
 
-    mailer.send(&email)?;
+        // Create a new SMTP transport
+    let mailer = SmtpTransport::builder_dangerous("0.0.0.0")
+    .port(2525)
+    .credentials(creds)
+    .build();
 
-    Ok(())
+// Send the email
+match mailer.send(&email) {
+    Ok(_) => {
+        println!("Reply email sent successfully!");
+        Ok(())
+    }
+    Err(e) => Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))),
+}
 }
 
 
@@ -553,6 +565,7 @@ let subscriber = tracing_subscriber::fmt()
 
     let tls_addr = env::var("SMTP_TLS_ADDR").unwrap_or_else(|_| "0.0.0.0:8465".to_string());
     let plain_addr = env::var("SMTP_PLAIN_ADDR").unwrap_or_else(|_| "0.0.0.0:8025".to_string());
+    let outbound_addr = "0.0.0.0:2525";
 
     let cert_path: PathBuf = PathBuf::from(env::var("CERT_PATH").unwrap_or_else(|_| "localhost.crt".to_string()));
     let key_path: PathBuf = PathBuf::from(env::var("KEY_PATH").unwrap_or_else(|_| "localhost.key".to_string()));
@@ -568,8 +581,12 @@ let subscriber = tracing_subscriber::fmt()
 
     let tls_listener = TcpListener::bind(tls_addr.clone()).await?;
     let plain_listener = TcpListener::bind(plain_addr.clone()).await?;
+    let outbound_listener = TcpListener::bind(outbound_addr.clone()).await?;
+    
     info!("TLS Server listening on {}", tls_addr);
     info!("Plain Server listening on {}", plain_addr);
+    info!("Outbound Server listening on {}", outbound_addr);
+    
 
     loop {
         tokio::select! {
@@ -611,7 +628,20 @@ let subscriber = tracing_subscriber::fmt()
                     });
                 }
             }
-            
+            result = outbound_listener.accept() => {
+                if let Ok((stream, peer_addr)) = result {
+                    info!("New outbound client connected from {}", peer_addr);
+                    let acceptor = tls_acceptor.clone();
+
+                    tokio::spawn(async move {
+                        if let Err(e) = handle_plain_client(stream, acceptor.into()).await {
+                            error!("Error handling plain client {}: {}", peer_addr, e);
+                        } else {
+                            info!("Plain client session completed successfully");
+                        }
+                    });
+                }
+            }
         }
          
     }
