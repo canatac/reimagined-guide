@@ -10,17 +10,20 @@ use chrono::Utc;
 use log::{info, error};
 use rustls::ServerConfig;
 use tokio_rustls::TlsAcceptor;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, AsyncBufRead, AsyncRead}; 
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, AsyncBufRead, AsyncRead, AsyncReadExt}; 
 use tokio::net::{TcpStream,TcpListener};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use tokio_rustls::server::TlsStream;
 use rustls_pemfile::{certs, private_key};
 use std::env;
-use mailparse::{parse_mail, MailHeaderMap};
+use mailparse::{parse_mail};
 use lettre::message::{header::ContentType, Mailbox, MessageBuilder};
-use lettre::transport::smtp::authentication::Credentials;
 use lettre::{SmtpTransport, Transport};
 use lettre::Address;
+use trust_dns_resolver::config::{ResolverConfig, ResolverOpts};
+use trust_dns_resolver::TokioAsyncResolver;
+use std::net::IpAddr;
+use std::io::{Error as IoError, ErrorKind};
 
 #[derive(Debug)]
 enum StreamType {
@@ -61,6 +64,7 @@ struct Email {
     to: String,
     subject: String,
     body: String,
+    headers: Vec<(String, String)>,
 }
 
 fn extract_email_content(email_content: &str) -> Result<String, Box<dyn std::error::Error>> {
@@ -147,56 +151,67 @@ fn send_reply_email(to: &str, subject: &str, body: &str) -> Result<(), Box<dyn s
     Ok(())
 }
 
-async fn handle_outgoing_client(stream: TcpStream) -> std::io::Result<()> {
-    let mut stream = StreamType::Plain(tokio::io::BufReader::new(stream));
-    
-    // Send initial greeting
-    let greeting = "220 Outgoing SMTP Server Ready\r\n";
-    write_response(&mut stream, &greeting).await?;
-    let mut in_data_mode: bool = false;
 
-    let mut current_email = Email {
-        from: String::new(),
-        to: String::new(),
-        subject: String::new(),
-        body: String::new(),
-    };
 
-    loop {
-        let mut buffer = String::new();
-        match stream.read_line(&mut buffer).await {
-            Ok(0) => break,
-            Ok(_) => {
-                let response = process_command(&buffer, &mut current_email, &mut stream).await?;
-                write_response(&mut stream, &response).await?;
+async fn send_outgoing_email(email: &Email) -> std::io::Result<()> {
+    // Parse the recipient's domain
+    //let recipient_domain = email.to.split('@').nth(1).ok_or("Invalid recipient email")?;
+    let recipient_domain = email.to.split('@').nth(1)
+    .ok_or_else(|| IoError::new(ErrorKind::InvalidInput, "Invalid recipient email"))?;
+    // Create a new resolver
+    let resolver = TokioAsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default());
 
-                if buffer.trim() == "DATA" {
-                    in_data_mode = true;
-                    write_response(&mut stream, "354 Start mail input; end with <CRLF>.<CRLF>\r\n").await?;
-                } else if in_data_mode {
-                    if buffer.trim() == "." {
-                        in_data_mode = false;
-                        current_email = Email {
-                            from: String::new(),
-                            to: String::new(),
-                            subject: String::new(),
-                            body: String::new(),
-                        };
-                        write_response(&mut stream, "250 OK\r\n").await?;
-                    } else {
-                        current_email.body.push_str(&buffer);
-                    }
-                }
-                if buffer.trim() == "QUIT" {
-                    break;
-                }
-            }
-            Err(e) => {
-                eprintln!("Error reading from outgoing client: {}", e);
-                break;
-            }
-        }
+    // Lookup MX records
+    let mx_lookup = resolver.mx_lookup(recipient_domain).await?;
+    let mx_records: Vec<_> = mx_lookup.iter().collect();
+
+    if mx_records.is_empty() {
+        return Err(IoError::new(ErrorKind::Other, "No MX records found"))
     }
+
+    // Connect to the first MX server
+    let mut stream = TcpStream::connect(format!("{}:25", mx_records[0].exchange())).await?;
+
+    // SMTP conversation
+    async fn expect_code(stream: &mut TcpStream, expected: &str) -> std::io::Result<()> {
+        let mut response = String::new();
+        stream.read_to_string(&mut response).await?;
+        if !response.starts_with(expected) {
+            return Err(IoError::new(ErrorKind::Other, format!("Unexpected response: {}", response)));
+        }
+        Ok(())
+    }
+
+    expect_code(&mut stream, "220").await?;
+    stream.write_all(b"HELO misfits.ai\r\n").await?;
+    expect_code(&mut stream, "250").await?;
+
+    stream.write_all(format!("MAIL FROM:<{}>\r\n", email.from).as_bytes()).await?;
+    expect_code(&mut stream, "250").await?;
+
+    stream.write_all(format!("RCPT TO:<{}>\r\n", email.to).as_bytes()).await?;
+    expect_code(&mut stream, "250").await?;
+
+    stream.write_all(b"DATA\r\n").await?;
+    expect_code(&mut stream, "354").await?;
+
+    // Send headers
+    for (key, value) in &email.headers {
+        stream.write_all(format!("{}: {}\r\n", key, value).as_bytes()).await?;
+    }
+    stream.write_all(format!("Subject: {}\r\n", email.subject).as_bytes()).await?;
+    stream.write_all(format!("From: {}\r\n", email.from).as_bytes()).await?;
+    stream.write_all(format!("To: {}\r\n", email.to).as_bytes()).await?;
+    stream.write_all(b"\r\n").await?;
+
+    // Send body
+    stream.write_all(email.body.as_bytes()).await?;
+
+    stream.write_all(b"\r\n.\r\n").await?;
+    expect_code(&mut stream, "250").await?;
+
+    stream.write_all(b"QUIT\r\n").await?;
+    expect_code(&mut stream, "221").await?;
 
     Ok(())
 }
@@ -215,6 +230,7 @@ async fn handle_client(tls_stream: TlsStream<TcpStream>) -> std::io::Result<()> 
         to: String::new(),
         subject: String::new(),
         body: String::new(),
+        headers: Vec::new(),
     };
 
     let mail_server = Arc::new(MailServer::new("./emails"));
@@ -237,6 +253,7 @@ async fn handle_client(tls_stream: TlsStream<TcpStream>) -> std::io::Result<()> 
                             to: String::new(),
                             subject: String::new(),
                             body: String::new(),
+                            headers: Vec::new(),
                         };
                         write_response(&mut stream, "250 OK\r\n").await?;
                     } else {
@@ -264,6 +281,12 @@ async fn handle_client(tls_stream: TlsStream<TcpStream>) -> std::io::Result<()> 
     Ok(())
 }
 
+fn is_outgoing_email(mail_from: &str) -> bool {
+    // Implement logic to determine if this is an outgoing email
+    // For example, check if the MAIL FROM address is from your domain
+    mail_from.contains("@misfits.ai")
+}
+
 async fn handle_plain_client(stream: TcpStream, tls_acceptor: Arc<TlsAcceptor>) -> std::io::Result<()> {
     let mut stream = StreamType::Plain(tokio::io::BufReader::new(stream));
     
@@ -272,12 +295,14 @@ async fn handle_plain_client(stream: TcpStream, tls_acceptor: Arc<TlsAcceptor>) 
     write_response(&mut stream, &greeting).await?;
 
     let mut in_data_mode = false;
+    let mut is_outgoing = false;
 
     let mut current_email = Email {
         from: String::new(),
         to: String::new(),
         subject: String::new(),
         body: String::new(),
+        headers: Vec::new(),
     };
 
     let mail_server = Arc::new(MailServer::new("./emails"));
@@ -310,12 +335,27 @@ async fn handle_plain_client(stream: TcpStream, tls_acceptor: Arc<TlsAcceptor>) 
                 if in_data_mode {
                     if buffer.trim() == "." {
                         in_data_mode = false;
-                        mail_server.store_email(&current_email)?;
-                        current_email = Email {
+                        if is_outgoing {
+                            // Handle outgoing email
+                            println!("Sending outgoing email: From: {}, To: {}, Subject: {}", current_email.from, current_email.to, current_email.subject);
+                            match send_outgoing_email(&current_email).await {
+                                Ok(_) => {
+                                    println!("Email sent successfully");
+                                    write_response(&mut stream, "250 OK\r\n").await?
+                                },
+                                Err(e) => {
+                                    eprintln!("Error sending email: {}", e);
+                                    write_response(&mut stream, "554 Transaction failed\r\n").await?
+                                }
+                            }                        } else {
+                            // Handle incoming email
+                            mail_server.store_email(&current_email)?;
+                        }                        current_email = Email {
                             from: String::new(),
                             to: String::new(),
                             subject: String::new(),
                             body: String::new(),
+                            headers: Vec::new(),
                         };
                         write_response(&mut stream, "250 OK\r\n").await?;
                     } else {
@@ -325,7 +365,10 @@ async fn handle_plain_client(stream: TcpStream, tls_acceptor: Arc<TlsAcceptor>) 
                     let response = process_command(&buffer, &mut current_email, &mut stream).await?;
                     println!("Response: {}", response);
                     write_response(&mut stream, &response).await?;
-
+                    if buffer.trim().starts_with("MAIL FROM:") {
+                        // Determine if this is an outgoing email based on the MAIL FROM address
+                        is_outgoing = is_outgoing_email(&buffer);
+                    }
                     if buffer.trim() == "DATA" {
                         in_data_mode = true;
                     } else if buffer.trim() == "QUIT" {
@@ -386,6 +429,7 @@ async fn process_command(command: &str, email: &mut Email, stream: &mut StreamTy
                 to: String::new(),
                 subject: String::new(),
                 body: String::new(),
+                headers: Vec::new(),
             };
              // Reset the email using new() instead of default()
             Ok("250 OK\r\n".to_string())
@@ -507,10 +551,9 @@ let subscriber = tracing_subscriber::fmt()
     .finish();    // use that subscriber to process traces emitted after this point
     tracing::subscriber::set_global_default(subscriber)?;
 
-    let tls_addr = env::var("SMTP_TLS_ADDR").unwrap_or_else(|_| "0.0.0.0:465".to_string());
-    let plain_addr = env::var("SMTP_PLAIN_ADDR").unwrap_or_else(|_| "0.0.0.0:25".to_string());
-    let outgoing_listener = TcpListener::bind("0.0.0.0:2525").await?;
-    
+    let tls_addr = env::var("SMTP_TLS_ADDR").unwrap_or_else(|_| "0.0.0.0:8465".to_string());
+    let plain_addr = env::var("SMTP_PLAIN_ADDR").unwrap_or_else(|_| "0.0.0.0:8025".to_string());
+
     let cert_path: PathBuf = PathBuf::from(env::var("CERT_PATH").unwrap_or_else(|_| "localhost.crt".to_string()));
     let key_path: PathBuf = PathBuf::from(env::var("KEY_PATH").unwrap_or_else(|_| "localhost.key".to_string()));
 
@@ -564,18 +607,6 @@ let subscriber = tracing_subscriber::fmt()
                             error!("Error handling plain client {}: {}", peer_addr, e);
                         } else {
                             info!("Plain client session completed successfully");
-                        }
-                    });
-                }
-            }
-            result = outgoing_listener.accept() => {
-                if let Ok((stream, peer_addr)) = result {
-                    info!("New outgoing client connected from {}", peer_addr);
-                    tokio::spawn(async move {
-                        if let Err(e) = handle_outgoing_client(stream).await {
-                            error!("Error handling outgoing client {}: {}", peer_addr, e);
-                        } else {
-                            info!("Outgoing client session completed successfully");
                         }
                     });
                 }
