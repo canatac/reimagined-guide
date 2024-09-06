@@ -139,7 +139,7 @@ fn send_reply_email(to: &str, subject: &str, body: &str) -> Result<(), Box<dyn s
         .body(body.to_string())?;
 
         let mailer = SmtpTransport::builder_dangerous("0.0.0.0")
-        .port(25)
+        .port(2525)
         .build();
 
     mailer.send(&email)?;
