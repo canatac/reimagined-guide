@@ -16,6 +16,7 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use tokio_rustls::server::TlsStream;
 use rustls_pemfile::{certs, private_key};
 use std::env;
+use mailparse::{parse_mail, MailHeaderMap};
 
 
 #[derive(Debug)]
@@ -59,6 +60,24 @@ struct Email {
     body: String,
 }
 
+fn extract_email_content(email_content: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let parsed = parse_mail(email_content.as_bytes())?;
+    
+    // Try to get the plain text part first
+    if let Some(plain_text) = parsed.subparts.iter().find(|part| part.ctype.mimetype == "text/plain") {
+        return Ok(plain_text.get_body()?.trim().to_string());
+    }
+    
+    // If no plain text, try to get the HTML part and strip HTML tags
+    if let Some(html) = parsed.subparts.iter().find(|part| part.ctype.mimetype == "text/html") {
+        let html_content = html.get_body()?;
+        // This is a very basic HTML stripping, you might want to use a proper HTML parser
+        return Ok(html_content.replace(|c: char| c == '<' || c == '>', "").trim().to_string());
+    }
+    
+    // If no multipart, just return the body
+    Ok(parsed.get_body()?.trim().to_string())
+}
 struct MailServer {
     mail_dir: String,
 }
@@ -82,7 +101,11 @@ impl MailServer {
         writeln!(file, "Subject: {}", email.subject)?;
         writeln!(file)?;
         write!(file, "{}", email.body)?;
-        
+        // Extract and log the actual content
+        match extract_email_content(&email.body) {
+            Ok(content) => println!("Extracted email content: {}", content),
+            Err(e) => eprintln!("Error extracting email content: {}", e),
+        }
         Ok(())
     }
 
