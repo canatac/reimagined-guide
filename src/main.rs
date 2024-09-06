@@ -164,8 +164,8 @@ async fn handle_client(tls_stream: TlsStream<TcpStream>) -> std::io::Result<()> 
     Ok(())
 }
 
-async fn handle_plain_client(stream: TlsStream<TcpStream>) -> std::io::Result<()> {
-    let mut stream = StreamType::Tls(tokio::io::BufReader::new(stream));
+async fn handle_plain_client(stream: TcpStream) -> std::io::Result<()> {
+    let mut stream = StreamType::Plain(tokio::io::BufReader::new(stream));
     
     // Send initial greeting
     let greeting = "220 SMTP Server Ready\r\n";
