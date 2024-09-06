@@ -20,6 +20,7 @@ use mailparse::{parse_mail, MailHeaderMap};
 use lettre::message::{header::ContentType, Mailbox, MessageBuilder};
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{SmtpTransport, Transport};
+use lettre::Address;
 
 #[derive(Debug)]
 enum StreamType {
@@ -126,20 +127,19 @@ impl MailServer {
 
 fn send_reply_email(to: &str, subject: &str, body: &str) -> Result<(), Box<dyn std::error::Error>> {
     let smtp_username = env::var("SMTP_USERNAME").expect("SMTP_USERNAME must be set");
-    let smtp_password = env::var("SMTP_PASSWORD").expect("SMTP_PASSWORD must be set");
-    let smtp_server = env::var("SMTP_SERVER").expect("SMTP_SERVER must be set");
+    let address = Address::new(smtp_username, "misfits.ai")?;
+
+    println!("Sending email from: {} to: {}", address.to_string(), to);
 
     let email = MessageBuilder::new()
-        .from(Mailbox::new(Some("AI Assistant".to_string()), smtp_username.parse()?))
+        .from(Mailbox::new(Some("AI Assistant".to_string()), address))
         .to(to.parse()?)
         .subject(subject)
         .header(ContentType::TEXT_PLAIN)
         .body(body.to_string())?;
 
-    let creds = Credentials::new(smtp_username, smtp_password);
-
-    let mailer = SmtpTransport::relay(&smtp_server)?
-        .credentials(creds)
+        let mailer = SmtpTransport::builder_dangerous("0.0.0.0")
+        .port(25)
         .build();
 
     mailer.send(&email)?;
