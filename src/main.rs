@@ -110,21 +110,7 @@ impl MailServer {
         writeln!(file)?;
         write!(file, "{}", email.body)?;
         // Extract and log the actual content
-        match extract_email_content(&email.body) {
-            Ok(content) => {
-                println!("Extracted email content: {}", content);
-                
-                // Send a reply email
-                let reply_subject = "Re: ".to_string() + &email.subject;
-                let reply_body = "Thank you for joining me! Please subscribe first before talking with me!";
-                
-                match send_reply_email(&email.from, &reply_subject, reply_body) {
-                    Ok(_) => println!("Reply sent successfully"),
-                    Err(e) => eprintln!("Error sending reply: {}", e),
-                }
-            },
-            Err(e) => eprintln!("Error extracting email content: {}", e),
-        }
+        
         Ok(())
     }
 
@@ -260,14 +246,9 @@ async fn handle_client(tls_stream: TlsStream<TcpStream>) -> std::io::Result<()> 
                     if buffer.trim() == "." {
                         in_data_mode = false;
                         mail_server.store_email(&current_email)?;
-                        current_email = Email {
-                            from: String::new(),
-                            to: String::new(),
-                            subject: String::new(),
-                            body: String::new(),
-                            headers: Vec::new(),
-                        };
+                        
                         write_response(&mut stream, "250 OK\r\n").await?;
+                        
                     } else {
                             current_email.body.push_str(&buffer);                 
                     }
@@ -279,6 +260,29 @@ async fn handle_client(tls_stream: TlsStream<TcpStream>) -> std::io::Result<()> 
                     if buffer.trim() == "DATA" {
                         in_data_mode = true;
                     } else if buffer.trim() == "QUIT" {
+                        match extract_email_content(&current_email.body) {
+            
+                            Ok(content) => {
+                                println!("Extracted email content: {}", content);
+                                
+                                // Send a reply email
+                                let reply_subject = "Re: ".to_string() + &current_email.subject;
+                                let reply_body = "Thank you for joining me! Please subscribe first before talking with me!";
+                                
+                                match send_reply_email(&current_email.from, &reply_subject, reply_body) {
+                                    Ok(_) => println!("Reply sent successfully"),
+                                    Err(e) => eprintln!("Error sending reply: {}", e),
+                                }
+                            },
+                            Err(e) => eprintln!("Error extracting email content: {}", e),
+                        }
+                        current_email = Email {
+                            from: String::new(),
+                            to: String::new(),
+                            subject: String::new(),
+                            body: String::new(),
+                            headers: Vec::new(),
+                        };
                         break;
                     }
                 }
