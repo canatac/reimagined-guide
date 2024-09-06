@@ -164,7 +164,7 @@ async fn handle_client(tls_stream: TlsStream<TcpStream>) -> std::io::Result<()> 
     Ok(())
 }
 
-async fn handle_plain_client(stream: TcpStream) -> std::io::Result<()> {
+async fn handle_plain_client(stream: TcpStream, tls_acceptor: Arc<TlsAcceptor>) -> std::io::Result<()> {
     let mut stream = StreamType::Plain(tokio::io::BufReader::new(stream));
     
     // Send initial greeting
@@ -181,6 +181,7 @@ async fn handle_plain_client(stream: TcpStream) -> std::io::Result<()> {
     };
 
     let mail_server = Arc::new(MailServer::new("./emails"));
+
     loop {
         let mut buffer = String::new();
         match stream.read_line(&mut buffer).await {
@@ -190,7 +191,22 @@ async fn handle_plain_client(stream: TcpStream) -> std::io::Result<()> {
             }
             Ok(_n) => {                
                 println!("Calling process_command with: {}", buffer.trim());
-
+                if buffer.trim().eq_ignore_ascii_case("STARTTLS") {
+                    write_response(&mut stream, "220 Ready to start TLS\r\n").await?;
+                    // Upgrade to TLS
+                    match stream {
+                        StreamType::Plain(plain_stream) => {
+                            let tls_stream = tls_acceptor.accept(plain_stream.into_inner()).await?;
+                            stream = StreamType::Tls(tokio::io::BufReader::new(tls_stream));
+                            println!("Upgraded to TLS connection");
+                        }
+                        StreamType::Tls(_) => {
+                            // Already TLS, shouldn't happen but handle it anyway
+                            write_response(&mut stream, "454 TLS not available due to temporary reason\r\n").await?;
+                        }
+                    }
+                    continue;
+                }
                 if in_data_mode {
                     if buffer.trim() == "." {
                         in_data_mode = false;
@@ -383,12 +399,12 @@ let subscriber = tracing_subscriber::fmt()
 
     let certs = load_certs(&cert_path)?;
     let key = load_key(&key_path)?;
-    let config = ServerConfig::builder()
+    let tls_config = ServerConfig::builder()
         .with_no_client_auth()
         .with_single_cert(certs, key.into())
         .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidInput, err))?;
     
-    let acceptor = TlsAcceptor::from(Arc::new(config));
+    let tls_acceptor = TlsAcceptor::from(Arc::new(tls_config));
 
     let tls_listener = TcpListener::bind(tls_addr.clone()).await?;
     let plain_listener = TcpListener::bind(plain_addr.clone()).await?;
@@ -402,7 +418,7 @@ let subscriber = tracing_subscriber::fmt()
                 if let Ok((stream, peer_addr)) = result {
                     info!("New TLS client connected from {}", peer_addr);
         
-                    let acceptor = acceptor.clone();
+                    let acceptor = tls_acceptor.clone();
             
                     tokio::spawn(async move {
                                 match acceptor.accept(stream).await {
@@ -425,8 +441,9 @@ let subscriber = tracing_subscriber::fmt()
             result = plain_listener.accept() => {
                 if let Ok((stream, peer_addr)) = result {
                     info!("New plain client connected from {}", peer_addr);
+                    let acceptor = tls_acceptor.clone();
                     tokio::spawn(async move {
-                        if let Err(e) = handle_plain_client(stream).await {
+                        if let Err(e) = handle_plain_client(stream, acceptor.into()).await {
                             error!("Error handling plain client {}: {}", peer_addr, e);
                         } else {
                             info!("Plain client session completed successfully");
