@@ -275,14 +275,14 @@ async fn handle_client(tls_stream: TlsStream<TcpStream>) -> std::io::Result<()> 
                                 }
                             },
                             Err(e) => eprintln!("Error extracting email content: {}", e),
-                        }
+                        }/*
                         current_email = Email {
                             from: String::new(),
                             to: String::new(),
                             subject: String::new(),
                             body: String::new(),
                             headers: Vec::new(),
-                        };
+                        }; */
                         break;
                     }
                 }
@@ -422,6 +422,7 @@ async fn handle_plain_client(stream: TcpStream, tls_acceptor: Arc<TlsAcceptor>) 
 async fn process_command(command: &str, email: &mut Email, stream: &mut StreamType) -> std::io::Result<String> {
     // Implement your SMTP command processing logic here
     // This is a basic example and should be expanded based on your needs
+    let mut temp_email = email.clone();
 
     println!("In process_command with: {}", command.trim().to_uppercase().as_str());
 
@@ -455,15 +456,15 @@ async fn process_command(command: &str, email: &mut Email, stream: &mut StreamTy
             Ok("250 OK\r\n".to_string())
         } 
         "QUIT" => {
-            if !email.from.is_empty() && !email.to.is_empty() {
-                match extract_email_content(&email.body) {
+            if !temp_email.from.is_empty() && !temp_email.to.is_empty() {
+                match extract_email_content(&temp_email.body) {
                     Ok(content) => {
                         println!("Extracted email content: {}", content);
                         
-                        let reply_subject = "Re: ".to_string() + &email.subject;
+                        let reply_subject = "Re: ".to_string() + &temp_email.subject;
                         let reply_body = "Thank you for your email. This is an automated response.";
                         
-                        match send_reply_email(&email.from, &reply_subject, reply_body) {
+                        match send_reply_email(&temp_email.from, &reply_subject, reply_body) {
                             Ok(_) => println!("Reply sent successfully"),
                             Err(e) => eprintln!("Error sending reply: {}", e),
                         }
