@@ -13,11 +13,13 @@ use tokio::time::timeout;
 use std::time::Duration;
 use rustls::{ClientConfig, RootCertStore};
 use std::sync::Arc;
-use rustls::pki_types::ServerName;
-use webpki_roots::TLS_SERVER_ROOTS;
+use rustls::pki_types::{ServerName,CertificateDer};
+
 use std::convert::TryFrom;
 use std::fs::File;
 use std::io::BufReader;
+use rustls_native_certs::load_native_certs;
+use webpki_roots::TLS_SERVER_ROOTS;
 
 #[derive(Clone)]
 pub struct Email {
@@ -97,6 +99,23 @@ async fn send_outgoing_email(email: &Email) -> std::io::Result<()> {
 
         let mut root_store = RootCertStore::empty();
         
+        // Load native root certificates
+        for cert in load_native_certs().map_err(|e| IoError::new(ErrorKind::Other, e))? {
+            root_store.add_parsable_certificates([CertificateDer::from(cert.0)]);
+        }
+
+        // Add your misfits.ai certificate
+        let mut fullchain_file = BufReader::new(File::open("fullchain.pem")?);
+        let certs = rustls_pemfile::certs(&mut fullchain_file);
+
+        for cert in certs {
+            root_store.add_parsable_certificates(cert);
+        }
+        
+        // Optionally add webpki roots as well
+        root_store.add_parsable_certificates(TLS_SERVER_ROOTS.iter().map(|ta| ta.subject.to_vec().into()));
+        
+            /*
         // Read the fullchain.pem file
         let mut fullchain_file = BufReader::new(File::open("fullchain.pem")?);
         let certs = rustls_pemfile::certs(&mut fullchain_file);
@@ -107,6 +126,8 @@ async fn send_outgoing_email(email: &Email) -> std::io::Result<()> {
         }
 
         //root_store.add_parsable_certificates(TLS_SERVER_ROOTS.iter().map(|ta| ta.subject.to_vec().into()));
+
+*/
 
         let config = ClientConfig::builder()
         .with_root_certificates(root_store)
