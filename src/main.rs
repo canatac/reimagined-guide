@@ -110,18 +110,16 @@ impl MailServer {
         }
     }
 
-    fn store_email(&self, email: &Email) -> std::io::Result<()> {
+    async fn store_email(&self, email: &Email) -> std::io::Result<()> {
         let timestamp = Utc::now().format("%Y%m%d%H%M%S");
         let filename = format!("{}-{}.eml", timestamp, email.to.replace("@", "_at_"));
         let path = Path::new(&self.mail_dir).join(filename);
         
-        let mut file = File::create(path)?;
-        writeln!(file, "From: {}", email.from)?;
-        writeln!(file, "To: {}", email.to)?;
-        writeln!(file, "Subject: {}", email.subject)?;
-        writeln!(file)?;
-        write!(file, "{}", email.body)?;
-        // Extract and log the actual content
+        let mut file = tokio::fs::File::create(path).await?;
+        file.write_all(format!("From: {}\r\n", email.from).as_bytes()).await?;
+        file.write_all(format!("To: {}\r\n", email.to).as_bytes()).await?;
+        file.write_all(format!("Subject: {}\r\n\r\n", email.subject).as_bytes()).await?;
+        file.write_all(email.body.as_bytes()).await?;
         
         Ok(())
     }
@@ -159,7 +157,7 @@ async fn handle_client(tls_stream: TlsStream<TcpStream>) -> std::io::Result<()> 
                 if in_data_mode {
                     if buffer.trim() == "." {
                         in_data_mode = false;
-                        mail_server.store_email(&current_email)?;
+                        mail_server.store_email(&current_email).await?;
                         
                         write_response(&mut stream, "250 OK\r\n").await?;
                         
@@ -201,7 +199,6 @@ async fn handle_plain_client(stream: TcpStream, tls_acceptor: Arc<TlsAcceptor>) 
     write_response(&mut stream, &greeting).await?;
 
     let mut in_data_mode = false;
-    let mut is_outgoing = false;
 
     let mut current_email = Email {
         from: String::new(),
