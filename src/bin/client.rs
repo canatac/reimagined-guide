@@ -16,6 +16,8 @@ use std::sync::Arc;
 use rustls::pki_types::ServerName;
 use webpki_roots::TLS_SERVER_ROOTS;
 use std::convert::TryFrom;
+use std::fs::File;
+use std::io::BufReader;
 
 #[derive(Clone)]
 pub struct Email {
@@ -94,7 +96,17 @@ async fn send_outgoing_email(email: &Email) -> std::io::Result<()> {
         expect_code(&mut stream, "220").await?;
 
         let mut root_store = RootCertStore::empty();
-        root_store.add_parsable_certificates(TLS_SERVER_ROOTS.iter().map(|ta| ta.subject.to_vec().into()));
+        
+        // Read the fullchain.pem file
+        let mut fullchain_file = BufReader::new(File::open("fullchain.pem")?);
+        let certs = rustls_pemfile::certs(&mut fullchain_file);
+            
+        // Add the certificates to the root store
+        for cert in certs {
+            root_store.add_parsable_certificates(cert);
+        }
+
+        //root_store.add_parsable_certificates(TLS_SERVER_ROOTS.iter().map(|ta| ta.subject.to_vec().into()));
 
         let config = ClientConfig::builder()
         .with_root_certificates(root_store)
