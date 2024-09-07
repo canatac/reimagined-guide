@@ -3,15 +3,23 @@ name = "simple-smtp-server"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "client"
+path = "src/bin/client.rs"
+
 [dependencies]
+tokio = { version = "1", features = ["full", "tracing"] }
+tokio-rustls = "0.26.0"
+rustls = { version = "0.23.5", default-features = false, features = ["std"] }
+webpki-roots = "0.25.2"
+trust-dns-resolver = "0.23.2"
+clap = "3.0"
+
 log = "0.4.22"
 env_logger = "0.11.5"
 chrono = "0.4"
-rustls = { version = "0.23.5", default-features = false, features = ["std"] }
-tokio = { version = "1", features = ["full", "tracing"] }
-tokio-rustls = "0.26.0"
+
 rustls-pemfile = "2.0"
-webpki-roots = "0.25.2"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 console-subscriber = "0.1.5"
@@ -19,7 +27,6 @@ dotenv = "0.15.0"
 base64 = "0.22.1"
 mailparse = "0.15.0"
 lettre = "0.11.8"
-trust-dns-resolver = "0.23.2"
 
 [dev-dependencies]
 tempfile = "3.2"
