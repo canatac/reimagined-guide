@@ -238,7 +238,8 @@ async fn handle_plain_client(stream: TcpStream, tls_acceptor: Arc<TlsAcceptor>) 
                 if in_data_mode {
                     if buffer.trim() == "." {
                         in_data_mode = false;
-                          
+                        mail_server.store_email(&current_email).await?;
+ 
                         write_response(&mut stream, "250 OK\r\n").await?;
                     } else {
                             current_email.body.push_str(&buffer);                 
@@ -251,7 +252,6 @@ async fn handle_plain_client(stream: TcpStream, tls_acceptor: Arc<TlsAcceptor>) 
                     if buffer.trim() == "DATA" {
                         in_data_mode = true;
                     } else if buffer.trim() == "QUIT" {
-                        // Send reply email before closing the connection
                     
                     write_response(&mut stream, "221 Bye\r\n").await?;
                         break;
