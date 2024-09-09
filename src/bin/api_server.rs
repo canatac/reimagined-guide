@@ -5,12 +5,58 @@ use serde::{Deserialize, Serialize};
 mod client;
 use client::{Email, send_outgoing_email};
 
+use std::fs::{File, create_dir_all};
+use std::io::Write;
+use std::path::Path;
+
 #[derive(Deserialize, Serialize)]
 struct EmailRequest {
     from: String,
     to: String,
     subject: String,
     body: String,
+}
+
+
+#[derive(Deserialize)]
+struct MailingListRequest {
+    label: String,
+    emails: Vec<String>,
+}
+
+async fn create_mailing_list(mailing_list: web::Json<MailingListRequest>) -> impl Responder {
+    let mailing_list_dir = Path::new("mailing-lists");
+    if !mailing_list_dir.exists() {
+        if let Err(e) = create_dir_all(mailing_list_dir) {
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "status": "error",
+                "message": format!("Failed to create mailing list directory: {}", e)
+            }));
+        }
+    }
+
+    let file_path = mailing_list_dir.join(format!("{}.csv", mailing_list.label));
+    let mut file = match File::create(&file_path) {
+        Ok(file) => file,
+        Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({
+            "status": "error",
+            "message": format!("Failed to create file: {}", e)
+        })),
+    };
+
+    for email in &mailing_list.emails {
+        if let Err(e) = writeln!(file, "{}", email) {
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "status": "error",
+                "message": format!("Failed to write to file: {}", e)
+            }));
+        }
+    }
+
+    HttpResponse::Ok().json(serde_json::json!({
+        "status": "success",
+        "message": format!("Mailing list '{}' created successfully", mailing_list.label)
+    }))
 }
 
 async fn send_email_handler(email_req: web::Json<EmailRequest>) -> impl Responder {
@@ -40,6 +86,7 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(|| {
         App::new()
             .route("/send-email", web::post().to(send_email_handler))
+            .route("/create-mailing-list", web::post().to(create_mailing_list))
     })
     .bind_openssl("0.0.0.0:8443", builder)?
     .run()
