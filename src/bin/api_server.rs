@@ -8,6 +8,8 @@ use client::{Email, send_outgoing_email};
 use std::fs::{File, create_dir_all};
 use std::io::{Write,BufRead, BufReader};
 use std::path::Path;
+use simple_smtp_server::auth::email_auth::EmailAuthenticator;
+
 
 #[derive(Deserialize, Serialize)]
 struct EmailRequest {
@@ -68,6 +70,10 @@ async fn create_mailing_list(mailing_list: web::Json<MailingListRequest>) -> imp
 }
 
 async fn send_to_mailing_list(email_req: web::Json<MailingListEmailRequest>) -> impl Responder {
+    // TODO: Implement authentication to ensure only authorized users can send to mailing lists
+
+    // TODO: Implement rate limiting to prevent API abuse and comply with email sending limits
+
     let mailing_list_path = Path::new("mailing-lists").join(format!("{}.csv", email_req.mailing_list));
     
     if !mailing_list_path.exists() {
@@ -89,6 +95,10 @@ async fn send_to_mailing_list(email_req: web::Json<MailingListEmailRequest>) -> 
     let mut success_count = 0;
     let mut failure_count = 0;
 
+    // TODO: Implement this as a background job or use a task queue for large mailing lists
+
+    // TODO: Implement batch sending for very large lists to avoid overloading the email server
+
     for line in reader.lines() {
         let to_email = match line {
             Ok(email) => email.trim().to_string(),
@@ -97,6 +107,7 @@ async fn send_to_mailing_list(email_req: web::Json<MailingListEmailRequest>) -> 
                 continue;
             }
         };
+       // TODO: Add an unsubscribe link to the email body
 
         let email = Email {
             from: email_req.from.clone(),
@@ -105,12 +116,17 @@ async fn send_to_mailing_list(email_req: web::Json<MailingListEmailRequest>) -> 
             body: email_req.body.clone(),
             headers: vec![],
         };
+        // TODO: Implement more detailed logging for auditing and troubleshooting
 
         match send_outgoing_email(&email).await {
             Ok(_) => success_count += 1,
-            Err(_) => failure_count += 1,
-        }
+            Err(_) => {
+                // TODO: Decide on the appropriate error handling strategy
+                // (e.g., stop sending after a certain number of failures)
+                failure_count += 1;
+            }        }
     }
+    // TODO: For very large lists, consider returning a job ID and implementing a status check endpoint
 
     HttpResponse::Ok().json(serde_json::json!({
         "status": "success",
@@ -120,6 +136,12 @@ async fn send_to_mailing_list(email_req: web::Json<MailingListEmailRequest>) -> 
 }
 
 async fn send_email_handler(email_req: web::Json<EmailRequest>) -> impl Responder {
+    let authenticator = EmailAuthenticator::new(
+        include_str!("dkim_private_key.pem"),
+        "haydi",
+        "misfits.ai"
+    ).expect("Failed to create EmailAuthenticator");
+
     let email = Email {
         from: email_req.from.clone(),
         to: email_req.to.clone(),
@@ -134,6 +156,37 @@ async fn send_email_handler(email_req: web::Json<EmailRequest>) -> impl Responde
     }
 }
 
+// TODO: Implement proper error handling throughout the application
+// TODO: Add comprehensive logging for debugging and monitoring
+// TODO: Implement input validation for all API endpoints
+// TODO: Consider implementing CORS if the API will be accessed from web browsers
+// TODO: Implement API versioning for future-proofing
+
+
+// Advanced Security and Native Encryption
+// TODO: Implement end-to-end encryption for complete email privacy
+// TODO: Add native support for DKIM, SPF, and DMARC to reduce spam and identity spoofing
+// TODO: Integrate machine learning tools for real-time fraud and phishing prevention
+
+// Performance and Scalability
+// TODO: Optimize multithreading for high-load environments
+// TODO: Design architecture to support containers and microservices (e.g., Kubernetes, Docker)
+
+// Email Analytics and Insights
+// TODO: Develop real-time statistics and dashboards for email performance
+// TODO: Implement email campaign optimization tools with automatic recommendations
+
+// Privacy and Compliance
+// TODO: Ensure native GDPR compliance and support for other international privacy regulations
+// TODO: Add feature for automatic email deletion based on time or specific rules
+
+// Integration with Other Tools and Services
+// TODO: Develop a flexible RESTful API for integration with third-party platforms
+// TODO: Create plugins for instant messaging systems (e.g., Slack, Microsoft Teams)
+
+// User-focused Features
+// TODO: Implement smart filters and automatic inbox management
+// TODO: Design an intuitive UI for managing email flows
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     // Load SSL keys
@@ -142,13 +195,19 @@ async fn main() -> std::io::Result<()> {
         .set_private_key_file("privkey.pem", SslFiletype::PEM)
         .unwrap();
     builder.set_certificate_chain_file("fullchain.pem").unwrap();
+    
+    // TODO: Load configuration from environment variables or a config file
+    // TODO: Set up a connection pool for any databases used
+    // TODO: Initialize any required external services or APIs
 
     HttpServer::new(|| {
         App::new()
+            // TODO: Add middleware for logging, error handling, etc.
             .route("/send-email", web::post().to(send_email_handler))
             .route("/create-mailing-list", web::post().to(create_mailing_list))
             .route("/send-to-mailing-list", web::post().to(send_to_mailing_list))
-    })
+            // TODO: Group routes under a common path (e.g., /api/v1)
+        })
     .bind_openssl("0.0.0.0:8443", builder)?
     .run()
     .await
