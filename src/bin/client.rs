@@ -21,6 +21,10 @@ use std::io::BufReader;
 use rustls_native_certs::load_native_certs;
 use webpki_roots::TLS_SERVER_ROOTS;
 
+const SMTP_PORTS: [u16; 3] = [587, 465, 25];
+const CONNECTION_TIMEOUT: Duration = Duration::from_secs(5);
+
+
 #[derive(Clone)]
 pub struct Email {
     pub from: String,
@@ -30,16 +34,20 @@ pub struct Email {
     pub headers: Vec<(String, String)>,
 }
 
+enum StreamType {
+    Plain(TcpStream),
+    Tls(TlsStream<TcpStream>),
+}
+
 async fn test_smtp_port(host: &str, port: u16) -> bool {
-    match timeout(Duration::from_secs(5), TcpStream::connect((host, port))).await {
+    match timeout(CONNECTION_TIMEOUT, TcpStream::connect((host, port))).await {
         Ok(Ok(_)) => true,
         _ => false,
     }
 }
 
 async fn find_smtp_port(host: &str) -> Option<u16> {
-    let ports = vec![587, 465, 25];
-    for &port in &ports {
+    for &port in &SMTP_PORTS {
         if test_smtp_port(host, port).await {
             return Some(port);
         }
@@ -57,12 +65,7 @@ async fn expect_code<T: AsyncReadExt + Unpin>(stream: &mut T, expected: &str) ->
     Ok(())
 }
 
-enum StreamType {
-    Plain(TcpStream),
-    Tls(TlsStream<TcpStream>),
-}
-
-async fn send_outgoing_email(email: &Email) -> std::io::Result<()> {
+pub async fn send_outgoing_email(email: &Email) -> std::io::Result<()> {
     let recipient_domain = email.to.split('@').nth(1)
         .ok_or_else(|| IoError::new(ErrorKind::InvalidInput, "Invalid recipient email"))?;
     
@@ -114,20 +117,7 @@ async fn send_outgoing_email(email: &Email) -> std::io::Result<()> {
         
         // Optionally add webpki roots as well
         root_store.add_parsable_certificates(TLS_SERVER_ROOTS.iter().map(|ta| ta.subject.to_vec().into()));
-        
-            /*
-        // Read the fullchain.pem file
-        let mut fullchain_file = BufReader::new(File::open("fullchain.pem")?);
-        let certs = rustls_pemfile::certs(&mut fullchain_file);
-            
-        // Add the certificates to the root store
-        for cert in certs {
-            root_store.add_parsable_certificates(cert);
-        }
-
-        //root_store.add_parsable_certificates(TLS_SERVER_ROOTS.iter().map(|ta| ta.subject.to_vec().into()));
-
-*/
+    
 
         let config = ClientConfig::builder()
         .with_root_certificates(root_store)
@@ -157,34 +147,7 @@ async fn send_outgoing_email(email: &Email) -> std::io::Result<()> {
     send_email_content(&mut stream_type, email).await?;
 
     Ok(())
-    /*
-    stream.write_all(format!("MAIL FROM:<{}>\r\n", email.from).as_bytes()).await?;
-    expect_code(&mut stream, "250").await?;
 
-    stream.write_all(format!("RCPT TO:<{}>\r\n", email.to).as_bytes()).await?;
-    expect_code(&mut stream, "250").await?;
-
-    stream.write_all(b"DATA\r\n").await?;
-    expect_code(&mut stream, "354").await?;
-
-    for (key, value) in &email.headers {
-        stream.write_all(format!("{}: {}\r\n", key, value).as_bytes()).await?;
-    }
-    stream.write_all(format!("Subject: {}\r\n", email.subject).as_bytes()).await?;
-    stream.write_all(format!("From: {}\r\n", email.from).as_bytes()).await?;
-    stream.write_all(format!("To: {}\r\n", email.to).as_bytes()).await?;
-    stream.write_all(b"\r\n").await?;
-
-    stream.write_all(email.body.as_bytes()).await?;
-
-    stream.write_all(b"\r\n.\r\n").await?;
-    expect_code(&mut stream, "250").await?;
-
-    stream.write_all(b"QUIT\r\n").await?;
-    expect_code(&mut stream, "221").await?;
-
-    Ok(())
-     */
     
 }
 async fn send_email_content(stream: &mut StreamType, email: &Email) -> std::io::Result<()> {
@@ -222,38 +185,6 @@ async fn send_email_content_inner<T: AsyncWriteExt + AsyncReadExt + Unpin>(strea
 
     Ok(())
 }
-/*
-async fn send_email_content<T: AsyncWriteExt + AsyncReadExt + Unpin>(stream: &mut T, email: &Email) -> std::io::Result<()> {
-    stream.write_all(format!("MAIL FROM:<{}>\r\n", email.from).as_bytes()).await?;
-    expect_code(stream, "250").await?;
-
-    stream.write_all(format!("RCPT TO:<{}>\r\n", email.to).as_bytes()).await?;
-    expect_code(stream, "250").await?;
-
-    stream.write_all(b"DATA\r\n").await?;
-    expect_code(stream, "354").await?;
-
-    for (key, value) in &email.headers {
-        stream.write_all(format!("{}: {}\r\n", key, value).as_bytes()).await?;
-    }
-    stream.write_all(format!("Subject: {}\r\n", email.subject).as_bytes()).await?;
-    stream.write_all(format!("From: {}\r\n", email.from).as_bytes()).await?;
-    stream.write_all(format!("To: {}\r\n", email.to).as_bytes()).await?;
-    stream.write_all(b"\r\n").await?;
-
-    stream.write_all(email.body.as_bytes()).await?;
-
-    stream.write_all(b"\r\n.\r\n").await?;
-    expect_code(stream, "250").await?;
-
-    stream.write_all(b"QUIT\r\n").await?;
-    expect_code(stream, "221").await?;
-
-    Ok(())
-}
-
-*/
-
 
 pub fn is_outgoing_email(mail_from: &str) -> bool {
     mail_from.contains("@misfits.ai")
