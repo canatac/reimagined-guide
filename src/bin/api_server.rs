@@ -1,4 +1,5 @@
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
+use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 use serde::{Deserialize, Serialize};
 
 mod client;
@@ -29,11 +30,18 @@ async fn send_email_handler(email_req: web::Json<EmailRequest>) -> impl Responde
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    // Load SSL keys
+    let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
+    builder
+        .set_private_key_file("privkey.pem", SslFiletype::PEM)
+        .unwrap();
+    builder.set_certificate_chain_file("fullchain.pem").unwrap();
+
     HttpServer::new(|| {
         App::new()
             .route("/send-email", web::post().to(send_email_handler))
     })
-    .bind("127.0.0.1:8080")?
+    .bind_openssl("0.0.0.0:8443", builder)?
     .run()
     .await
 }
