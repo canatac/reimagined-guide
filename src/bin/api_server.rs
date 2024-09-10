@@ -252,9 +252,9 @@ async fn main() -> std::io::Result<()> {
     // Load SSL keys
     let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
     builder
-        .set_private_key_file("privkey.pem", SslFiletype::PEM)
+        .set_private_key_file(env::var("PRIVKEY_PATH").expect("PRIVKEY_PATH must be set"), SslFiletype::PEM)
         .unwrap();
-    builder.set_certificate_chain_file("fullchain.pem").unwrap();
+    builder.set_certificate_chain_file(env::var("FULLCHAIN_PATH").expect("FULLCHAIN_PATH must be set")).unwrap();
     
     // TODO: Load configuration from environment variables or a config file
     // TODO: Set up a connection pool for any databases used

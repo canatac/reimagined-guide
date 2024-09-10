@@ -21,7 +21,7 @@ use std::io::BufReader;
 use rustls_native_certs::load_native_certs;
 use webpki_roots::TLS_SERVER_ROOTS;
 use std::env;
-
+use dotenv::dotenv;
 const SMTP_PORTS: [u16; 3] = [587, 465, 25];
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -109,9 +109,9 @@ pub async fn send_outgoing_email(email: &Email) -> std::io::Result<()> {
         }
 
         // Add your misfits.ai certificate
-        let mut fullchain_file = BufReader::new(File::open("fullchain.pem")?);
+        let fullchain_path = env::var("FULLCHAIN_PATH").expect("FULLCHAIN_PATH must be set");
+        let mut fullchain_file = BufReader::new(File::open(fullchain_path)?);
         let certs = rustls_pemfile::certs(&mut fullchain_file);
-
         for cert in certs {
             root_store.add_parsable_certificates(cert);
         }
