@@ -38,7 +38,7 @@ impl EmailAuthenticator {
 
         Ok(format!("{}; b={}", dkim_header, signature))
     }
-//relaxed canonicalization method as specified in the DKIM standard (RFC 6376)
+//
     fn canonicalize_headers(&self, email_content: &str) -> String {
         email_content
             .lines()
