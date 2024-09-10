@@ -9,7 +9,8 @@ use std::fs::{File, create_dir_all};
 use std::io::{Write,BufRead, BufReader};
 use std::path::Path;
 use simple_smtp_server::auth::email_auth::EmailAuthenticator;
-
+use dotenv::dotenv;
+use std::env;
 
 #[derive(Deserialize, Serialize)]
 struct EmailRequest {
@@ -137,19 +138,43 @@ async fn send_to_mailing_list(email_req: web::Json<MailingListEmailRequest>) -> 
 
 async fn send_email_handler(email_req: web::Json<EmailRequest>) -> impl Responder {
     let authenticator = EmailAuthenticator::new(
-        include_str!("dkim_private_key.pem"),
-        "haydi",
-        "misfits.ai"
+        env::var("DKIM_PRIVATE_KEY").expect("DKIM_PRIVATE_KEY not set").as_str(),
+        env::var("DKIM_SELECTOR").expect("DKIM_SELECTOR not set").as_str(),
+        env::var("DKIM_DOMAIN").expect("DKIM_DOMAIN not set").as_str()
     ).expect("Failed to create EmailAuthenticator");
+
+    let email_content = format!(
+        "From: {}\r\nTo: {}\r\nSubject: {}\r\nDate: {}\r\n\r\n{}",
+        email_req.from, email_req.to, email_req.subject,
+        chrono::Utc::now().to_rfc2822(),
+        email_req.body
+    );
+
+    let dkim_signature = match authenticator.sign_with_dkim(&email_content) {
+        Ok(signature) => {
+            println!("DKIM Signature generated: {}", signature);
+            signature
+        },
+        Err(e) => {
+            println!("Failed to sign email with DKIM: {}", e);
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "status": "error",
+                "message": format!("Failed to sign email with DKIM: {}", e)
+            }));
+        },
+    };
+
+    let email_with_dkim = format!("{}\r\n{}", dkim_signature, email_content);
+    println!("Final email content: {}", email_with_dkim);
 
     let email = Email {
         from: email_req.from.clone(),
         to: email_req.to.clone(),
         subject: email_req.subject.clone(),
-        body: email_req.body.clone(),
-        headers: vec![],
+        body: email_with_dkim,  // This includes the DKIM signature and original content
+        headers: vec![],  // Add any additional headers if needed
     };
-
+    
     match send_outgoing_email(&email).await {
         Ok(_) => HttpResponse::Ok().json(serde_json::json!({"status": "success", "message": "Email sent successfully"})),
         Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({"status": "error", "message": e.to_string()})),
@@ -189,6 +214,7 @@ async fn send_email_handler(email_req: web::Json<EmailRequest>) -> impl Responde
 // TODO: Design an intuitive UI for managing email flows
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    dotenv().ok();
     // Load SSL keys
     let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
     builder
