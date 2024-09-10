@@ -171,11 +171,15 @@ async fn send_email_handler(email_req: web::Json<EmailRequest>) -> impl Responde
     };
 
     let date = Utc::now().to_rfc2822();
-
+    let body = if email_req.body.ends_with("\r\n") {
+        email_req.body.clone()
+    } else {
+        format!("{}\r\n", email_req.body)
+    };
     // Create the email content for DKIM signing
     let email_content = format!(
         "From: {}\r\nTo: {}\r\nSubject: {}\r\nDate: {}\r\n\r\n{}",
-        email_req.from, email_req.to, email_req.subject, date, email_req.body
+        email_req.from, email_req.to, email_req.subject, date, body
     );
 
         let dkim_signature = match authenticator.sign_with_dkim(&email_content) {

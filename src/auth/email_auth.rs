@@ -51,7 +51,7 @@ impl EmailAuthenticator {
     fn compute_body_hash(&self, email_content: &str) -> String {
         let body = email_content.split("\r\n\r\n").nth(1).unwrap_or("");
         let digest = openssl::hash::hash(MessageDigest::sha256(), body.as_bytes()).unwrap();
-        encode(digest)
+        base64::encode(digest)
     }
 
     fn sign_rsa(&self, data: &str) -> Result<String, Box<dyn std::error::Error>> {
