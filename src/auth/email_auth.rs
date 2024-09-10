@@ -36,7 +36,7 @@ impl EmailAuthenticator {
         let signature_base = format!("{}{}", dkim_header, canonicalized_headers);
         let signature = self.sign_rsa(&signature_base)?;
 
-        Ok(format!("{}b={}", dkim_header, signature))
+        Ok(format!("{}; b={}", dkim_header, signature))
     }
 
     fn canonicalize_headers(&self, email_content: &str) -> String {
