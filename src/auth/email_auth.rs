@@ -22,7 +22,7 @@ impl EmailAuthenticator {
     }
 
     pub fn sign_with_dkim(&self, email_content: &str) -> Result<String, Box<dyn std::error::Error>> {
-        let headers_to_sign = "from:subject:to:date";
+        let headers_to_sign = "from:to:subject:date";
         let canonicalized_headers = self.canonicalize_headers(email_content);
         let body_hash = self.compute_body_hash(email_content);
 
@@ -38,13 +38,24 @@ impl EmailAuthenticator {
 
         Ok(format!("{}; b={}", dkim_header, signature))
     }
-
+//relaxed canonicalization method as specified in the DKIM standard (RFC 6376)
     fn canonicalize_headers(&self, email_content: &str) -> String {
-        // Implement header canonicalization (relaxed algorithm)
-        // This is a simplified version and might need to be expanded
-        email_content.lines()
+        email_content
+            .lines()
             .take_while(|line| !line.is_empty())
-            .map(|line| line.trim().to_lowercase() + "\r\n")
+            .map(|line| {
+                let parts: Vec<&str> = line.splitn(2, ':').collect();
+                if parts.len() == 2 {
+                    // Convert header name to lowercase and remove leading/trailing whitespace
+                    let header_name = parts[0].trim().to_lowercase();
+                    // Remove leading/trailing whitespace from header value and collapse internal whitespace
+                    let header_value = parts[1].trim().split_whitespace().collect::<Vec<&str>>().join(" ");
+                    format!("{}:{}\r\n", header_name, header_value)
+                } else {
+                    // If the line doesn't contain a colon, just trim it
+                    format!("{}\r\n", line.trim())
+                }
+            })
             .collect()
     }
 
