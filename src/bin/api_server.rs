@@ -172,19 +172,11 @@ async fn send_email_handler(email_req: web::Json<EmailRequest>) -> impl Responde
 
     let date = Utc::now().to_rfc2822();
 
-    let headers = vec![
-        ("From".to_string(), email_req.from.clone()),
-        ("To".to_string(), email_req.to.clone()),
-        ("Subject".to_string(), email_req.subject.clone()),
-        ("Date".to_string(), date.clone()),
-    ];
-    // Construct the email content with headers in the correct order
-    let email_content = headers.iter()
-        .map(|(name, value)| format!("{}: {}", name, value))
-        .collect::<Vec<String>>()
-        .join("\r\n")
-        + "\r\n\r\n"
-        + &email_req.body;
+    // Create the email content for DKIM signing
+    let email_content = format!(
+        "From: {}\r\nTo: {}\r\nSubject: {}\r\nDate: {}\r\n\r\n{}",
+        email_req.from, email_req.to, email_req.subject, date, email_req.body
+    );
 
         let dkim_signature = match authenticator.sign_with_dkim(&email_content) {
             Ok(signature) => signature,
@@ -197,18 +189,25 @@ async fn send_email_handler(email_req: web::Json<EmailRequest>) -> impl Responde
             }
         };
 
-        let mut final_headers = vec![("DKIM-Signature".to_string(), dkim_signature)];
-        final_headers.extend(headers.into_iter().map(|(name, value)| (name.to_string(), value)));
-
-        let email = Email {
-            from: email_req.from.clone(),
-            to: email_req.to.clone(),
-            subject: email_req.subject.clone(),
-            body: email_req.body.clone(),
-            headers: final_headers,
-        };
+            // Create the headers including the DKIM signature
+    let headers = vec![
+        ("DKIM-Signature".to_string(), dkim_signature),
+        ("From".to_string(), email_req.from.clone()),
+        ("To".to_string(), email_req.to.clone()),
+        ("Subject".to_string(), email_req.subject.clone()),
+        ("Date".to_string(), date),
+    ];
+    let email = Email {
+        from: email_req.from.clone(),
+        to: email_req.to.clone(),
+        subject: email_req.subject.clone(),
+        body: email_req.body.clone(),
+        headers,
+    };
 
     println!("Email content: {}", email_content);
+    println!("DKIM-Signature: {}", email.headers[0].1);
+
 
     match send_outgoing_email(&email).await {
         Ok(_) => HttpResponse::Ok().json(serde_json::json!({"status": "success", "message": "Email sent successfully"})),

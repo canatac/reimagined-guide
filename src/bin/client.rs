@@ -20,6 +20,7 @@ use std::fs::File;
 use std::io::BufReader;
 use rustls_native_certs::load_native_certs;
 use webpki_roots::TLS_SERVER_ROOTS;
+use std::env;
 
 const SMTP_PORTS: [u16; 3] = [587, 465, 25];
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(5);
@@ -170,11 +171,14 @@ async fn send_email_content_inner<T: AsyncWriteExt + AsyncReadExt + Unpin>(strea
     for (key, value) in &email.headers {
         stream.write_all(format!("{}: {}\r\n", key, value).as_bytes()).await?;
     }
+    /* 
     stream.write_all(format!("Subject: {}\r\n", email.subject).as_bytes()).await?;
     stream.write_all(format!("From: {}\r\n", email.from).as_bytes()).await?;
     stream.write_all(format!("To: {}\r\n", email.to).as_bytes()).await?;
     stream.write_all(b"\r\n").await?;
 
+    */
+    
     stream.write_all(email.body.as_bytes()).await?;
 
     stream.write_all(b"\r\n.\r\n").await?;
@@ -192,6 +196,9 @@ pub fn is_outgoing_email(mail_from: &str) -> bool {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+
+    dotenv().ok();
+
     let matches = App::new("Email Sender")
         .version("1.0")
         .author("Your Name")
