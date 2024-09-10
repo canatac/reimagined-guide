@@ -23,7 +23,6 @@ impl EmailAuthenticator {
 
     pub fn sign_with_dkim(&self, email_content: &str) -> Result<String, Box<dyn std::error::Error>> {
         let headers_to_sign = "from:subject:to:date";
-        let signed_headers = format!("h={}\r\n", headers_to_sign);
         let canonicalized_headers = self.canonicalize_headers(email_content);
         let body_hash = self.compute_body_hash(email_content);
 
@@ -37,7 +36,7 @@ impl EmailAuthenticator {
         let signature_base = format!("{}{}", dkim_header, canonicalized_headers);
         let signature = self.sign_rsa(&signature_base)?;
 
-        Ok(format!("DKIM-Signature: {}b={}", dkim_header, signature))
+        Ok(format!("{}b={}", dkim_header, signature))
     }
 
     fn canonicalize_headers(&self, email_content: &str) -> String {

@@ -190,10 +190,6 @@ async fn send_email_content_inner<T: AsyncWriteExt + AsyncReadExt + Unpin>(strea
     Ok(())
 }
 
-pub fn is_outgoing_email(mail_from: &str) -> bool {
-    mail_from.contains("@misfits.ai")
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
