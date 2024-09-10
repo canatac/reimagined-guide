@@ -172,7 +172,7 @@ async fn send_email_handler(email_req: web::Json<EmailRequest>) -> impl Responde
 
     let date = Utc::now().to_rfc2822();
 
-    let mut headers = vec![
+    let headers = vec![
         ("From".to_string(), email_req.from.clone()),
         ("To".to_string(), email_req.to.clone()),
         ("Subject".to_string(), email_req.subject.clone()),
@@ -186,23 +186,26 @@ async fn send_email_handler(email_req: web::Json<EmailRequest>) -> impl Responde
         + "\r\n\r\n"
         + &email_req.body;
 
-    let dkim_signature = authenticator.sign_with_dkim(&email_content)
-        .map_err(|e| {
-            eprintln!("Failed to sign email with DKIM: {}", e);
-            HttpResponse::InternalServerError().json(serde_json::json!({
-                "status": "error",
-                "message": format!("Failed to sign email with DKIM: {}", e)
-            }))
-        });
+        let dkim_signature = match authenticator.sign_with_dkim(&email_content) {
+            Ok(signature) => signature,
+            Err(e) => {
+                eprintln!("Failed to sign email with DKIM: {}", e);
+                return HttpResponse::InternalServerError().json(serde_json::json!({
+                    "status": "error",
+                    "message": format!("Failed to sign email with DKIM: {}", e)
+                }));
+            }
+        };
 
-        headers.insert(0, ("DKIM-Signature".to_string(), dkim_signature.unwrap()));
+        let mut final_headers = vec![("DKIM-Signature".to_string(), dkim_signature)];
+        final_headers.extend(headers.into_iter().map(|(name, value)| (name.to_string(), value)));
 
         let email = Email {
             from: email_req.from.clone(),
             to: email_req.to.clone(),
             subject: email_req.subject.clone(),
             body: email_req.body.clone(),
-            headers,
+            headers: final_headers,
         };
 
     println!("Email content: {}", email_content);
