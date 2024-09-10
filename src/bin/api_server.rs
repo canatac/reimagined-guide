@@ -13,7 +13,7 @@ use dotenv::dotenv;
 use std::env;
 
 fn read_private_key(path: &str) -> std::io::Result<String> {
-    fs::read_to_string(path)
+    std::fs::read_to_string(path)
 }
 
 
