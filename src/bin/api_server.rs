@@ -12,6 +12,11 @@ use simple_smtp_server::auth::email_auth::EmailAuthenticator;
 use dotenv::dotenv;
 use std::env;
 
+fn read_private_key(path: &str) -> std::io::Result<String> {
+    fs::read_to_string(path)
+}
+
+
 #[derive(Deserialize, Serialize)]
 struct EmailRequest {
     from: String,
@@ -137,11 +142,32 @@ async fn send_to_mailing_list(email_req: web::Json<MailingListEmailRequest>) -> 
 }
 
 async fn send_email_handler(email_req: web::Json<EmailRequest>) -> impl Responder {
-    let authenticator = EmailAuthenticator::new(
-        env::var("DKIM_PRIVATE_KEY").expect("DKIM_PRIVATE_KEY not set").as_str(),
+    let private_key_path = env::var("DKIM_PRIVATE_KEY_PATH").expect("DKIM_PRIVATE_KEY_PATH not set");
+    let private_key = match read_private_key(&private_key_path) {
+        Ok(key) => key,
+        Err(e) => {
+            eprintln!("Failed to read DKIM private key: {}", e);
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "status": "error",
+                "message": "Failed to read DKIM private key"
+            }));
+        }
+    };
+
+    let authenticator = match EmailAuthenticator::new(
+        &private_key,
         env::var("DKIM_SELECTOR").expect("DKIM_SELECTOR not set").as_str(),
         env::var("DKIM_DOMAIN").expect("DKIM_DOMAIN not set").as_str()
-    ).expect("Failed to create EmailAuthenticator");
+    ) {
+        Ok(auth) => auth,
+        Err(e) => {
+            eprintln!("Failed to create EmailAuthenticator: {}", e);
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "status": "error",
+                "message": format!("Failed to create EmailAuthenticator: {}", e)
+            }));
+        }
+    };
 
     let email_content = format!(
         "From: {}\r\nTo: {}\r\nSubject: {}\r\nDate: {}\r\n\r\n{}",
