@@ -39,7 +39,25 @@ impl EmailAuthenticator {
         Ok(format!("{}; b={}", dkim_header, signature))
     }
 //
-    fn canonicalize_headers(&self, email_content: &str) -> String {
+fn canonicalize_headers(&self, email_content: &str) -> String {
+    let headers = email_content.split("\r\n\r\n").next().unwrap_or("");
+    headers
+        .lines()
+        .map(|line| {
+            let parts: Vec<&str> = line.splitn(2, ':').collect();
+            if parts.len() == 2 {
+                let header_name = parts[0].trim().to_lowercase();
+                let header_value = parts[1].trim().split_whitespace().collect::<Vec<&str>>().join(" ");
+                format!("{}:{}\r\n", header_name, header_value)
+            } else {
+                format!("{}\r\n", line.trim())
+            }
+        })
+        .collect()
+}
+    
+/*
+fn canonicalize_headers(&self, email_content: &str) -> String {
         email_content
             .lines()
             .take_while(|line| !line.is_empty())
@@ -60,7 +78,19 @@ impl EmailAuthenticator {
     }
 
     fn compute_body_hash(&self, email_content: &str) -> String {
+        println!("email_content: {}", email_content);
         let body = email_content.split("\r\n\r\n").nth(1).unwrap_or("");
+        println!("body: {}", body);
+        let digest = openssl::hash::hash(MessageDigest::sha256(), body.as_bytes()).unwrap();
+        base64::encode(digest)
+    }
+
+*/
+
+    fn compute_body_hash(&self, email_content: &str) -> String {
+        let parts: Vec<&str> = email_content.split("\r\n\r\n").collect();
+        let body = if parts.len() > 1 { parts[1] } else { "" };
+        let body = if body.is_empty() { "\r\n" } else { body };
         let digest = openssl::hash::hash(MessageDigest::sha256(), body.as_bytes()).unwrap();
         base64::encode(digest)
     }
