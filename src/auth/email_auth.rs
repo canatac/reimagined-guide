@@ -22,24 +22,55 @@ impl EmailAuthenticator {
     }
 
     pub fn sign_with_dkim(&self, email_content: &str) -> Result<String, Box<dyn std::error::Error>> {
-        let headers_to_sign = "from:to:subject:date";
-        let canonicalized_headers = self.canonicalize_headers(email_content);
+        //let headers_to_sign = "from:to:subject:date";
+        let headers_to_sign = self.determine_headers_to_sign(email_content);
+//        let canonicalized_headers = self.canonicalize_headers(email_content);
+        let canonicalized_headers = self.canonicalize_headers(email_content, &headers_to_sign);
+
         let body_hash = self.compute_body_hash(email_content);
 
         let dkim_header = format!(
             "v=1; a=rsa-sha256; c=relaxed/simple; d={}; s={};\r\n\tt={}; bh={};\r\n\th={}",
-            self.dkim_domain, self.dkim_selector, 
+            self.dkim_domain, 
+            self.dkim_selector, 
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs(),
-            body_hash, headers_to_sign
+            body_hash, 
+            headers_to_sign.join(":")
         );
 
         let signature_base = format!("{}{}", dkim_header, canonicalized_headers);
         let signature = self.sign_rsa(&signature_base)?;
 
-        Ok(format!("{}; b={}", dkim_header, signature))
+       // Ok(format!("{}; b={}", dkim_header, signature))
+
+        Ok(format!("DKIM-Signature: {}; b={}", dkim_header, signature))
+    
     }
 //
-fn canonicalize_headers(&self, email_content: &str) -> String {
+fn determine_headers_to_sign(&self, email_content: &str) -> Vec<String> {
+    let headers = email_content.split("\r\n\r\n").next().unwrap_or("").lines();
+    let mut headers_to_sign = vec![];
+    let required_headers = ["from", "to", "subject", "date"];
+    
+    for header in headers {
+        let header_name = header.split(':').next().unwrap_or("").trim().to_lowercase();
+        if required_headers.contains(&header_name.as_str()) && !headers_to_sign.contains(&header_name) {
+            headers_to_sign.push(header_name);
+        }
+    }
+
+    // Ensure all required headers are included, even if they're not in the email
+    for &required in required_headers.iter() {
+        if !headers_to_sign.contains(&required.to_string()) {
+            headers_to_sign.push(required.to_string());
+        }
+    }
+
+    headers_to_sign}
+//fn canonicalize_headers(&self, email_content: &str) -> String {
+    fn canonicalize_headers(&self, email_content: &str, headers_to_sign: &[String]) -> String {
+
+    /*
     let headers = email_content.split("\r\n\r\n").next().unwrap_or("");
     headers
         .lines()
@@ -54,43 +85,34 @@ fn canonicalize_headers(&self, email_content: &str) -> String {
             }
         })
         .collect()
+*/
+    let headers = email_content.split("\r\n\r\n").next().unwrap_or("");
+    let mut canonicalized = String::new();
+    let mut seen_headers = std::collections::HashSet::new();
+
+    for line in headers.lines() {
+        if line.is_empty() {
+            break;
+        }
+        let (header_name, header_value) = match line.split_once(':') {
+            Some((name, value)) => (name.trim().to_lowercase(), value.trim()),
+            None => continue,
+        };
+        if headers_to_sign.contains(&header_name) && !seen_headers.contains(&header_name) {
+            seen_headers.insert(header_name.clone());
+            let canonical_value = header_value.split_whitespace().collect::<Vec<&str>>().join(" ");
+            canonicalized.push_str(&format!("{}:{}\r\n", header_name, canonical_value));
+        }
+    }
+
+canonicalized
+
 }
     
-/*
-fn canonicalize_headers(&self, email_content: &str) -> String {
-        email_content
-            .lines()
-            .take_while(|line| !line.is_empty())
-            .map(|line| {
-                let parts: Vec<&str> = line.splitn(2, ':').collect();
-                if parts.len() == 2 {
-                    // Convert header name to lowercase and remove leading/trailing whitespace
-                    let header_name = parts[0].trim().to_lowercase();
-                    // Remove leading/trailing whitespace from header value and collapse internal whitespace
-                    let header_value = parts[1].trim().split_whitespace().collect::<Vec<&str>>().join(" ");
-                    format!("{}:{}\r\n", header_name, header_value)
-                } else {
-                    // If the line doesn't contain a colon, just trim it
-                    format!("{}\r\n", line.trim())
-                }
-            })
-            .collect()
-    }
-
-    fn compute_body_hash(&self, email_content: &str) -> String {
-        println!("email_content: {}", email_content);
-        let body = email_content.split("\r\n\r\n").nth(1).unwrap_or("");
-        println!("body: {}", body);
-        let digest = openssl::hash::hash(MessageDigest::sha256(), body.as_bytes()).unwrap();
-        base64::encode(digest)
-    }
-
-*/
 
     fn compute_body_hash(&self, email_content: &str) -> String {
         let parts: Vec<&str> = email_content.split("\r\n\r\n").collect();
         let body = if parts.len() > 1 { parts[1] } else { "" };
-        let body = if body.is_empty() { "\r\n" } else { body };
         let digest = openssl::hash::hash(MessageDigest::sha256(), body.as_bytes()).unwrap();
         base64::encode(digest)
     }
