@@ -177,11 +177,11 @@ async fn send_email_handler(email_req: web::Json<EmailRequest>) -> impl Responde
         format!("{}\r\n", email_req.body)
     };
     // Create the email content for DKIM signing
+    /* */
     let email_content = format!(
         "From: {}\r\nTo: {}\r\nSubject: {}\r\nDate: {}\r\n\r\n{}",
         email_req.from, email_req.to, email_req.subject, date, body
     );
-
     
         let dkim_signature = match authenticator.sign_with_dkim(&email_content) {
             Ok(signature) => signature,
@@ -193,42 +193,29 @@ async fn send_email_handler(email_req: web::Json<EmailRequest>) -> impl Responde
                 }));
             }
         };
-/*
 
-        let full_email = format!(
-            "{}\r\nFrom: {}\r\nTo: {}\r\nSubject: {}\r\nDate: {}\r\n\r\n{}",
-            dkim_signature, email_req.from, email_req.to, email_req.subject, date, body
-        );
- */
-        let email_with_dkim = format!("{}\r\n{}", dkim_signature, email_content);
-            // Create the headers including the DKIM signature
-        let headers = vec![
+    // Create the headers including the DKIM signature
+    let headers = vec![
         ("DKIM-Signature".to_string(), dkim_signature),
         ("From".to_string(), email_req.from.clone()),
         ("To".to_string(), email_req.to.clone()),
         ("Subject".to_string(), email_req.subject.clone()),
         ("Date".to_string(), date),
     ];
-            /*
+            
       
     let email = Email {
         from: email_req.from.clone(),
         to: email_req.to.clone(),
         subject: email_req.subject.clone(),
-        body: email_req.body.clone(),
+        body: body,
         headers,
     };
-*/
 
-println!("Email content (escaped):\n{:?}", email_with_dkim);
 
-let email = Email {
-    from: email_req.from.clone(),
-    to: email_req.to.clone(),
-    subject: email_req.subject.clone(),
-    body: email_with_dkim,  // Use the full email content including DKIM signature
-    headers: headers,  // Headers are now included in the body
-};
+    println!("Email content: {}", email_content);
+    println!("DKIM-Signature: {}", email.headers[0].1);
+
 
 
 
