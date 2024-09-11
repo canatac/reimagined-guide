@@ -193,7 +193,13 @@ async fn send_email_handler(email_req: web::Json<EmailRequest>) -> impl Responde
                 }));
             }
         };
-        let email_with_dkim = format!("{}\r\n{}", dkim_signature, email_content);
+
+        let full_email = format!(
+            "{}\r\nFrom: {}\r\nTo: {}\r\nSubject: {}\r\nDate: {}\r\n\r\n{}",
+            dkim_signature, email_req.from, email_req.to, email_req.subject, date, body
+        );
+
+        //let email_with_dkim = format!("{}\r\n{}", dkim_signature, email_content);
             // Create the headers including the DKIM signature
 /*
             let headers = vec![
@@ -219,7 +225,7 @@ let email = Email {
     from: email_req.from.clone(),
     to: email_req.to.clone(),
     subject: email_req.subject.clone(),
-    body: email_with_dkim,  // Use the full email content including DKIM signature
+    body: full_email,  // Use the full email content including DKIM signature
     headers: vec![],  // Headers are now included in the body
 };
 
