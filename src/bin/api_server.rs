@@ -218,8 +218,7 @@ async fn send_email_handler(email_req: web::Json<EmailRequest>) -> impl Responde
     };
 
 */
-println!("Email content (escaped):\n{:?}", email_with_dkim);
-println!("DKIM-Signature:\n{}", dkim_signature);
+println!("Email content (escaped):\n{:?}", full_email);
 
 let email = Email {
     from: email_req.from.clone(),
