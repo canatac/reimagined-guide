@@ -260,6 +260,8 @@ impl DKIMValidator {
     }
 
     fn validate(&self, email_content: &str) -> Result<bool, DKIMError> {
+        println!("++++++++++++++++++++++++++++++++++++++++++++++++++++++");
+
         let (headers, body) = email_content.split_once("\r\n\r\n").ok_or(DKIMError::InvalidEmailFormat)?;
         println!("Headers: {}", headers);
 
