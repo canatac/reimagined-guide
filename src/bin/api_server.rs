@@ -262,11 +262,18 @@ impl DKIMValidator {
     fn validate(&self, email_content: &str) -> Result<bool, DKIMError> {
         let (headers, body) = email_content.split_once("\r\n\r\n").ok_or(DKIMError::InvalidEmailFormat)?;
         let dkim_signature = self.extract_dkim_signature(headers)?;
+        println!("Extracted DKIM signature: {}", dkim_signature);
+        
         let (signed_headers, signature, dkim_params) = self.parse_dkim_signature(&dkim_signature)?;
-    
+        println!("Parsed DKIM signature: {:?}", (&signed_headers, &signature, &dkim_params));
+
         let canonicalized_headers = self.canonicalize_headers(headers, &signed_headers);
+        println!("Canonicalized headers: {}", canonicalized_headers);
+
         let computed_body_hash = self.compute_body_hash(body);
     
+        println!("Computed body hash: {}", computed_body_hash);
+
         // Check if the computed body hash matches the one in the DKIM signature
         let bh_param = dkim_params.get("bh")
             .ok_or_else(|| DKIMError::InvalidSignatureFormat("Missing bh parameter".to_string()))?;
@@ -276,20 +283,28 @@ impl DKIMValidator {
         }
     
         let signature_base = self.construct_signature_base(&dkim_params, &canonicalized_headers, &computed_body_hash);
-    
+        println!("Signature base: {}", signature_base);
+        
         let signature_bytes = base64::decode(&signature)
             .map_err(|e| DKIMError::Base64DecodeError(e.to_string()))?;
-        
+        println!("Signature bytes: {:?}", signature_bytes);
+
         let mut verifier = Verifier::new(MessageDigest::sha256(), &self.public_key)
             .map_err(|e| DKIMError::OpenSSLError(e.to_string()))?;
+        
         verifier.update(signature_base.as_bytes())
             .map_err(|e| DKIMError::OpenSSLError(e.to_string()))?;
-    
+        println!("Verifier updated");
         verifier.verify(&signature_bytes)
             .map_err(|e| DKIMError::OpenSSLError(e.to_string()))
+            .map(|result| {
+                println!("Signature verification result: {}", result);
+                result
+            })
     }
 
     fn extract_dkim_signature(&self, headers: &str) -> Result<String, DKIMError> {
+        println!("Extracting DKIM signature from headers: {}", headers);
         headers
             .lines()
             .find(|line| line.starts_with("DKIM-Signature:"))
@@ -350,21 +365,6 @@ impl DKIMValidator {
     fn compute_body_hash(&self, body: &str) -> String {
         let hash = hash(MessageDigest::sha256(), body.as_bytes()).unwrap();
         base64::encode(hash)
-    }
-
-    fn extract_dkim_params(&self, dkim_signature: &str) -> Vec<(String, String)> {
-        dkim_signature
-            .split(';')
-            .filter_map(|part| {
-                let part = part.trim();
-                let mut iter = part.splitn(2, '=');
-                if let (Some(key), Some(value)) = (iter.next(), iter.next()) {
-                    Some((key.trim().to_string(), value.trim().to_string()))
-                } else {
-                    None
-                }
-            })
-            .collect()
     }
 
     fn construct_signature_base(&self, dkim_params: &std::collections::HashMap<String, String>, canonicalized_headers: &str, body_hash: &str) -> String {
