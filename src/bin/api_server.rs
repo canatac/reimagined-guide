@@ -291,14 +291,33 @@ impl DKIMValidator {
 
         let signature_base = self.construct_signature_base(&dkim_params, &canonicalized_headers, &computed_body_hash);
         println!("Signature base: {}", signature_base);
-        
+        println!("Validator Signature base as bytes: {:?}", signature_base.as_bytes());
+
         let signature_bytes = base64::decode(&signature)
             .map_err(|e| DKIMError::Base64DecodeError(e.to_string()))?;
-        println!("Signature bytes: {:?}", signature_bytes);
+        println!("Sent Signature bytes: {:?}", signature_bytes);
 
         let mut verifier = Verifier::new(MessageDigest::sha256(), &self.public_key)
             .map_err(|e| DKIMError::OpenSSLError(e.to_string()))?;
         
+/*
+    fn sign_rsa(&self, data: &str) -> Result<String, Box<dyn std::error::Error>> {
+        let pkey = openssl::pkey::PKey::from_rsa(self.dkim_private_key.clone())?;
+
+        let mut signer = Signer::new(MessageDigest::sha256(), &pkey)?;
+
+        signer.update(data.as_bytes())?;
+        let signature = signer.sign_to_vec()?;
+
+        // Debug print
+        println!("Raw signature bytes: {:?}", signature);
+
+        Ok(encode(signature))
+    }
+
+*/
+
+
         verifier.update(signature_base.as_bytes())
             .map_err(|e| DKIMError::OpenSSLError(e.to_string()))?;
         println!("Verifier updated");
@@ -375,6 +394,7 @@ impl DKIMValidator {
     }
 
     fn construct_signature_base(&self, dkim_params: &std::collections::HashMap<String, String>, canonicalized_headers: &str, body_hash: &str) -> String {
+        println!("Constructing signature base");
         let mut base = String::new();
         for (key, value) in dkim_params {
             if key != "b" {

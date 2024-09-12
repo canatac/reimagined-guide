@@ -110,7 +110,9 @@ fn relaxed_canonicalization(&self, value: &str) -> String {
 
     fn sign_rsa(&self, data: &str) -> Result<String, Box<dyn std::error::Error>> {
         let pkey = openssl::pkey::PKey::from_rsa(self.dkim_private_key.clone())?;
+
         let mut signer = Signer::new(MessageDigest::sha256(), &pkey)?;
+
         signer.update(data.as_bytes())?;
         let signature = signer.sign_to_vec()?;
 
