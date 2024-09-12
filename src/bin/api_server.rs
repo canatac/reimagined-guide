@@ -183,17 +183,16 @@ async fn send_email_handler(email_req: web::Json<EmailRequest>) -> impl Responde
         email_req.from, email_req.to, email_req.subject, date, body
     );
     
-        let dkim_signature = match authenticator.sign_with_dkim(&email_content) {
-            Ok(signature) => signature,
-            Err(e) => {
-                eprintln!("Failed to sign email with DKIM: {}", e);
-                return HttpResponse::InternalServerError().json(serde_json::json!({
-                    "status": "error",
-                    "message": format!("Failed to sign email with DKIM: {}", e)
-                }));
-            }
-        };
-
+    let dkim_signature = match authenticator.sign_with_dkim(&email_content) {
+        Ok(signature) => signature,
+        Err(e) => {
+            eprintln!("Failed to sign email with DKIM: {}", e);
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "status": "error",
+                "message": format!("Failed to sign email with DKIM: {}", e)
+            }));
+        }
+    };
     
     let email_content_with_dkim = format!("DKIM-Signature: {}\r\n{}", dkim_signature, email_content);
 
