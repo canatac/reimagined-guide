@@ -22,9 +22,7 @@ impl EmailAuthenticator {
     }
 
     pub fn sign_with_dkim(&self, email_content: &str) -> Result<String, Box<dyn std::error::Error>> {
-        //let headers_to_sign = "from:to:subject:date";
         let headers_to_sign = self.determine_headers_to_sign(email_content);
-//        let canonicalized_headers = self.canonicalize_headers(email_content);
         let canonicalized_headers = self.canonicalize_headers(email_content, &headers_to_sign);
 
         let body_hash = self.compute_body_hash(email_content);
@@ -39,11 +37,14 @@ impl EmailAuthenticator {
         );
 
         let signature_base = format!("{}{}", dkim_header, canonicalized_headers);
+        // Debug print
+        println!("String to be signed:\n{}", signature_base);
+
         let signature = self.sign_rsa(&signature_base)?;
+        // Debug print
+        println!("Raw signature (base64):\n{}", signature);
 
-       // Ok(format!("{}; b={}", dkim_header, signature))
-
-        Ok(format!("DKIM-Signature: {}; b={}", dkim_header, signature))
+        Ok(format!("{}; b={}", dkim_header, signature))
     
     }
 //
@@ -122,6 +123,10 @@ canonicalized
         let mut signer = Signer::new(MessageDigest::sha256(), &pkey)?;
         signer.update(data.as_bytes())?;
         let signature = signer.sign_to_vec()?;
+
+        // Debug print
+        println!("Raw signature bytes: {:?}", signature);
+
         Ok(encode(signature))
     }
 
