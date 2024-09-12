@@ -283,11 +283,12 @@ impl DKIMValidator {
         // Check if the computed body hash matches the one in the DKIM signature
         let bh_param = dkim_params.get("bh")
             .ok_or_else(|| DKIMError::InvalidSignatureFormat("Missing bh parameter".to_string()))?;
-        
+
         if computed_body_hash != *bh_param {
             return Err(DKIMError::BodyHashMismatch);
         }
-    
+        println!("Computed body hash matches the one in the DKIM signature");
+
         let signature_base = self.construct_signature_base(&dkim_params, &canonicalized_headers, &computed_body_hash);
         println!("Signature base: {}", signature_base);
         
