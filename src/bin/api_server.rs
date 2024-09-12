@@ -396,26 +396,32 @@ fn parse_dkim_signature(&self, dkim_signature: &str) -> Result<(Vec<String>, Str
         base64::encode(hash)
     }
 
-fn construct_signature_base(&self, dkim_params: &LinkedList<(String, String)>, canonicalized_headers: &str, body_hash: &str) -> String {
-    println!("Constructing signature base");
-    let mut base = String::new();
-    
-    // Add all parameters except 'b' and 'bh'
-    for (key, value) in dkim_params {
-        if key != "b" && key != "bh" {
-            base.push_str(&format!("{}={}; ", key, value));
+    fn construct_signature_base(&self, dkim_params: &LinkedList<(String, String)>, canonicalized_headers: &str, body_hash: &str) -> String {
+        println!("Constructing signature base");
+        let mut base = String::new();
+        
+        // Add all parameters, including 'b' but without its value
+        for (key, value) in dkim_params {
+            if key == "b" {
+                base.push_str(&format!("{}=; ", key));
+            } else  {
+                base.push_str(&format!("{}={}; ", key, value));
+            }
         }
+        
+        // Remove the trailing space and semicolon
+        base.pop();
+        base.pop();
+        
+        // Add newline
+        base.push_str("\r\n");
+        
+        // Add canonicalized headers
+        base.push_str(canonicalized_headers);
+        
+        println!("Signature base:\n{}", base);
+        base
     }
-    
-    // Add 'bh' parameter
-    base.push_str(&format!("bh={};\r\n", body_hash));
-    
-    // Add canonicalized headers
-    base.push_str(canonicalized_headers);
-    
-    println!("Signature base:\n{}", base);
-    base
-}
 }
 #[derive(Debug)]
 pub enum DKIMError {
