@@ -215,9 +215,150 @@ async fn send_email_handler(email_req: web::Json<EmailRequest>) -> impl Responde
     println!("Email content: {}", email_content_with_dkim);
     println!("DKIM-Signature: {}", email.headers[0].1);
 
+// Validate DKIM signature before sending
+let public_key_pem = std::fs::read_to_string("public_key.pem").expect("Failed to read public key");
+let validator = DKIMValidator::new(&public_key_pem).expect("Failed to create DKIM validator");
+match validator.validate(&email_content_with_dkim) {
+    Ok(true) => println!("DKIM validation passed"),
+    Ok(false) => {
+        eprintln!("DKIM validation failed");
+        return HttpResponse::InternalServerError().json(serde_json::json!({
+            "status": "error",
+            "message": "DKIM validation failed"
+        }));
+    },
+    Err(e) => {
+        eprintln!("DKIM validation error: {}", e);
+        return HttpResponse::InternalServerError().json(serde_json::json!({
+            "status": "error",
+            "message": format!("DKIM validation error: {}", e)
+        }));
+    }
+}
+
     match send_outgoing_email(&email).await {
         Ok(_) => HttpResponse::Ok().json(serde_json::json!({"status": "success", "message": "Email sent successfully"})),
         Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({"status": "error", "message": e.to_string()})),
+    }
+}
+
+use base64;
+use openssl::hash::{hash, MessageDigest};
+use openssl::pkey::{PKey, Public};
+use openssl::sign::Verifier;
+use std::error::Error;
+
+pub struct DKIMValidator {
+    public_key: PKey<Public>,
+}
+
+impl DKIMValidator {
+    pub fn new(public_key_pem: &str) -> Result<Self, Box<dyn Error>> {
+        let public_key = PKey::public_key_from_pem(public_key_pem.as_bytes())?;
+        Ok(Self { public_key })
+    }
+
+    pub fn validate(&self, email_content: &str) -> Result<bool, Box<dyn Error>> {
+        let (headers, body) = email_content.split_once("\r\n\r\n").ok_or("Invalid email format")?;
+        let dkim_signature = self.extract_dkim_signature(headers)?;
+        let (signed_headers, signature) = self.parse_dkim_signature(&dkim_signature)?;
+
+        let canonicalized_headers = self.canonicalize_headers(headers, &signed_headers);
+        let body_hash = self.compute_body_hash(body);
+
+        let dkim_params = self.extract_dkim_params(&dkim_signature);
+        let signature_base = self.construct_signature_base(&dkim_params, &canonicalized_headers, &body_hash);
+
+        let signature_bytes = base64::decode(&signature)?;
+        let mut verifier = Verifier::new(MessageDigest::sha256(), &self.public_key)?;
+        verifier.update(signature_base.as_bytes())?;
+
+        Ok(verifier.verify(&signature_bytes)?)
+    }
+
+    fn extract_dkim_signature(&self, headers: &str) -> Result<String, Box<dyn Error>> {
+        headers
+            .lines()
+            .find(|line| line.starts_with("DKIM-Signature:"))
+            .ok_or_else(|| Box::new(std::io::Error::new(std::io::ErrorKind::NotFound, "DKIM-Signature not found")) as Box<dyn Error>)
+            .map(|line| line.trim_start_matches("DKIM-Signature:").trim().to_string())
+    }
+
+    fn parse_dkim_signature(&self, dkim_signature: &str) -> Result<(Vec<String>, String), Box<dyn Error>> {
+        let mut signed_headers = Vec::new();
+        let mut signature = String::new();
+
+        for part in dkim_signature.split(';') {
+            let part = part.trim();
+            if part.starts_with("h=") {
+                signed_headers = part[2..].split(':').map(|s| s.to_string()).collect();
+            } else if part.starts_with("b=") {
+                signature = part[2..].to_string();
+            }
+        }
+
+        if signed_headers.is_empty() || signature.is_empty() {
+            return Err("Invalid DKIM signature format".into());
+        }
+
+        Ok((signed_headers, signature))
+    }
+
+    fn canonicalize_headers(&self, headers: &str, signed_headers: &[String]) -> String {
+        let mut canonicalized = String::new();
+        for header_name in signed_headers {
+            if let Some(header_value) = self.get_header_value(headers, header_name) {
+                let canonical_header = self.relaxed_canonicalization(header_name, header_value);
+                canonicalized.push_str(&canonical_header);
+                canonicalized.push_str("\r\n");
+            }
+        }
+        canonicalized
+    }
+
+    fn relaxed_canonicalization(&self, name: &str, value: &str) -> String {
+        let name = name.to_lowercase();
+        let value = value.split_whitespace().collect::<Vec<&str>>().join(" ");
+        format!("{}:{}", name, value.trim())
+    }
+
+    fn get_header_value<'a>(&self, headers: &'a str, header_name: &str) -> Option<&'a str> {
+        headers.lines()
+            .find(|line| line.to_lowercase().starts_with(&format!("{}:", header_name.to_lowercase())))
+            .and_then(|line| line.splitn(2, ':').nth(1))
+            .map(|value| value.trim())
+    }
+
+    fn compute_body_hash(&self, body: &str) -> String {
+        let hash = hash(MessageDigest::sha256(), body.as_bytes()).unwrap();
+        base64::encode(hash)
+    }
+
+    fn extract_dkim_params(&self, dkim_signature: &str) -> Vec<(String, String)> {
+        dkim_signature
+            .split(';')
+            .filter_map(|part| {
+                let part = part.trim();
+                let mut iter = part.splitn(2, '=');
+                if let (Some(key), Some(value)) = (iter.next(), iter.next()) {
+                    Some((key.trim().to_string(), value.trim().to_string()))
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    fn construct_signature_base(&self, dkim_params: &[(String, String)], canonicalized_headers: &str, body_hash: &str) -> String {
+        let mut base = String::new();
+        for (key, value) in dkim_params {
+            if key != "b" {
+                base.push_str(&format!("{}={}; ", key, value));
+            }
+        }
+        base.push_str(&format!("bh={}\r\n", body_hash));
+        base.push_str(canonicalized_headers);
+        base
     }
 }
 
