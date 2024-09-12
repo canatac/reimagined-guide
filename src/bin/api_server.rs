@@ -352,8 +352,12 @@ fn parse_dkim_signature(&self, dkim_signature: &str) -> Result<(Vec<String>, Str
             let key = key.trim().to_lowercase();
             let value = value.trim().to_string();
             match key.as_str() {
-                "h" => signed_headers = value.split(':').map(|s| s.trim().to_lowercase()).collect(),
-                "b" => signature = value,
+                "h" => {
+                    signed_headers = value.split(':').map(|s| s.trim().to_lowercase()).collect();
+                    dkim_params.push_back((key, value)); },
+                "b" => {
+                    signature = value.clone();
+                    dkim_params.push_back((key, value)); },
                 _ => { dkim_params.push_back((key, value)); }
             }
         }
@@ -419,7 +423,7 @@ fn parse_dkim_signature(&self, dkim_signature: &str) -> Result<(Vec<String>, Str
         // Add canonicalized headers
         base.push_str(canonicalized_headers);
         
-        println!("Signature base:\n{}", base);
+        println!("Signature base 1 :\n{}", base);
         base
     }
 }
