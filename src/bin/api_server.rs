@@ -302,16 +302,18 @@ impl DKIMValidator {
             .map_err(|e| DKIMError::OpenSSLError(e.to_string()))?;
 
 
-        verifier.update(&signature_bytes)
-            .map_err(|e| DKIMError::OpenSSLError(e.to_string()))?;
-        println!("Verifier updated with sent signature");
+        // Met à jour le vérificateur avec la base de signature (chaîne à vérifier)
+        verifier.update(signature_base.as_bytes())
+        .map_err(|e| DKIMError::OpenSSLError(e.to_string()))?;
+        println!("Verifier updated with base signature string");
 
-        verifier.verify(signature_base.as_bytes())
-            .map_err(|e| DKIMError::OpenSSLError(e.to_string()))
-            .map(|result| {
-                println!("Signature verification result: {}", result);
-                result
-            })
+        // Vérifie la signature avec les bytes décodés de la signature
+        verifier.verify(&signature_bytes)
+        .map_err(|e| DKIMError::OpenSSLError(e.to_string()))
+        .map(|result| {
+            println!("Signature verification result: {}", result);
+            result
+        })
     }
 
     fn extract_dkim_signature(&self, headers: &str) -> Result<String, DKIMError> {
