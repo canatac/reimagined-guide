@@ -12,6 +12,7 @@ use simple_smtp_server::auth::email_auth::EmailAuthenticator;
 use dotenv::dotenv;
 use std::env;
 use chrono::Utc;
+use std::collections::LinkedList;
 
 fn read_private_key(path: &str) -> std::io::Result<String> {
     std::fs::read_to_string(path)
@@ -281,7 +282,8 @@ impl DKIMValidator {
         println!("Computed body hash: {}", computed_body_hash);
 
         // Check if the computed body hash matches the one in the DKIM signature
-        let bh_param = dkim_params.get("bh")
+        let bh_param = dkim_params.iter()
+            .find_map(|(k, v)| if k == "bh" { Some(v) } else { None })
             .ok_or_else(|| DKIMError::InvalidSignatureFormat("Missing bh parameter".to_string()))?;
 
         if computed_body_hash != *bh_param {
@@ -338,30 +340,31 @@ impl DKIMValidator {
             .map(|line| line.trim_start_matches("DKIM-Signature:").trim().to_string())
     }
 
-    fn parse_dkim_signature(&self, dkim_signature: &str) -> Result<(Vec<String>, String, std::collections::HashMap<String, String>), DKIMError> {
-        let mut signed_headers = Vec::new();
-        let mut signature = String::new();
-        let mut dkim_params = std::collections::HashMap::new();
 
-        for part in dkim_signature.split(';') {
-            let part = part.trim();
-            if let Some((key, value)) = part.split_once('=') {
-                let key = key.trim();
-                let value = value.trim();
-                match key {
-                    "h" => signed_headers = value.split(':').map(|s| s.to_string()).collect(),
-                    "b" => signature = value.to_string(),
-                    _ => { dkim_params.insert(key.to_string(), value.to_string()); }
-                }
+fn parse_dkim_signature(&self, dkim_signature: &str) -> Result<(Vec<String>, String, LinkedList<(String, String)>), DKIMError> {
+    let mut signed_headers = Vec::new();
+    let mut signature = String::new();
+    let mut dkim_params = LinkedList::new();
+
+    for part in dkim_signature.split(';') {
+        let part = part.trim();
+        if let Some((key, value)) = part.split_once('=') {
+            let key = key.trim().to_lowercase();
+            let value = value.trim().to_string();
+            match key.as_str() {
+                "h" => signed_headers = value.split(':').map(|s| s.trim().to_lowercase()).collect(),
+                "b" => signature = value,
+                _ => { dkim_params.push_back((key, value)); }
             }
         }
-
-        if signed_headers.is_empty() || signature.is_empty() {
-            return Err(DKIMError::InvalidSignatureFormat("Missing required parameters".to_string()));
-        }
-
-        Ok((signed_headers, signature, dkim_params))
     }
+
+    if signed_headers.is_empty() || signature.is_empty() {
+        return Err(DKIMError::InvalidSignatureFormat("Missing required parameters".to_string()));
+    }
+
+    Ok((signed_headers, signature, dkim_params))
+}
 
     fn canonicalize_headers(&self, headers: &str, signed_headers: &[String]) -> String {
         let mut canonicalized = String::new();
@@ -393,18 +396,26 @@ impl DKIMValidator {
         base64::encode(hash)
     }
 
-    fn construct_signature_base(&self, dkim_params: &std::collections::HashMap<String, String>, canonicalized_headers: &str, body_hash: &str) -> String {
-        println!("Constructing signature base");
-        let mut base = String::new();
-        for (key, value) in dkim_params {
-            if key != "b" {
-                base.push_str(&format!("{}={}; ", key, value));
-            }
+fn construct_signature_base(&self, dkim_params: &LinkedList<(String, String)>, canonicalized_headers: &str, body_hash: &str) -> String {
+    println!("Constructing signature base");
+    let mut base = String::new();
+    
+    // Add all parameters except 'b' and 'bh'
+    for (key, value) in dkim_params {
+        if key != "b" && key != "bh" {
+            base.push_str(&format!("{}={}; ", key, value));
         }
-        base.push_str(&format!("bh={}\r\n", body_hash));
-        base.push_str(canonicalized_headers);
-        base
     }
+    
+    // Add 'bh' parameter
+    base.push_str(&format!("bh={};\r\n", body_hash));
+    
+    // Add canonicalized headers
+    base.push_str(canonicalized_headers);
+    
+    println!("Signature base:\n{}", base);
+    base
+}
 }
 #[derive(Debug)]
 pub enum DKIMError {

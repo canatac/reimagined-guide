@@ -28,7 +28,7 @@ impl EmailAuthenticator {
         let body_hash = self.compute_body_hash(email_content);
 
         let dkim_header = format!(
-            "DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/simple; d={}; s={}; t={}; bh={}; h={}; b=",
+            "v=1; a=rsa-sha256; c=relaxed/simple; d={}; s={}; t={}; bh={}; h={}; b=",
             self.dkim_domain, 
             self.dkim_selector, 
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs(),
@@ -38,7 +38,7 @@ impl EmailAuthenticator {
 
         let signature_base = format!("{}\r\n{}", dkim_header, canonicalized_headers.trim_end());
         // Debug print
-        println!("String to be signed:\n{}", signature_base);
+        println!("String to be signed :\n{}", signature_base);
 
         let signature = self.sign_rsa(&signature_base)?;
         // Debug print
