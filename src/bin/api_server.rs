@@ -253,55 +253,73 @@ pub struct DKIMValidator {
 }
 
 impl DKIMValidator {
-    pub fn new(public_key_pem: &str) -> Result<Self, Box<dyn Error>> {
-        let public_key = PKey::public_key_from_pem(public_key_pem.as_bytes())?;
+    pub fn new(public_key_pem: &str) -> Result<Self, DKIMError> {
+        let public_key = PKey::public_key_from_pem(public_key_pem.as_bytes())
+            .map_err(|e| DKIMError::PublicKeyError(e.to_string()))?;
         Ok(Self { public_key })
     }
 
-    pub fn validate(&self, email_content: &str) -> Result<bool, Box<dyn Error>> {
-        let (headers, body) = email_content.split_once("\r\n\r\n").ok_or("Invalid email format")?;
+    fn validate(&self, email_content: &str) -> Result<bool, DKIMError> {
+        let (headers, body) = email_content.split_once("\r\n\r\n").ok_or(DKIMError::InvalidEmailFormat)?;
         let dkim_signature = self.extract_dkim_signature(headers)?;
-        let (signed_headers, signature) = self.parse_dkim_signature(&dkim_signature)?;
-
+        let (signed_headers, signature, dkim_params) = self.parse_dkim_signature(&dkim_signature)?;
+    
         let canonicalized_headers = self.canonicalize_headers(headers, &signed_headers);
-        let body_hash = self.compute_body_hash(body);
-
-        let dkim_params = self.extract_dkim_params(&dkim_signature);
-        let signature_base = self.construct_signature_base(&dkim_params, &canonicalized_headers, &body_hash);
-
-        let signature_bytes = base64::decode(&signature)?;
-        let mut verifier = Verifier::new(MessageDigest::sha256(), &self.public_key)?;
-        verifier.update(signature_base.as_bytes())?;
-
-        Ok(verifier.verify(&signature_bytes)?)
+        let computed_body_hash = self.compute_body_hash(body);
+    
+        // Check if the computed body hash matches the one in the DKIM signature
+        let bh_param = dkim_params.get("bh")
+            .ok_or_else(|| DKIMError::InvalidSignatureFormat("Missing bh parameter".to_string()))?;
+        
+        if computed_body_hash != *bh_param {
+            return Err(DKIMError::BodyHashMismatch);
+        }
+    
+        let signature_base = self.construct_signature_base(&dkim_params, &canonicalized_headers, &computed_body_hash);
+    
+        let signature_bytes = base64::decode(&signature)
+            .map_err(|e| DKIMError::Base64DecodeError(e.to_string()))?;
+        
+        let mut verifier = Verifier::new(MessageDigest::sha256(), &self.public_key)
+            .map_err(|e| DKIMError::OpenSSLError(e.to_string()))?;
+        verifier.update(signature_base.as_bytes())
+            .map_err(|e| DKIMError::OpenSSLError(e.to_string()))?;
+    
+        verifier.verify(&signature_bytes)
+            .map_err(|e| DKIMError::OpenSSLError(e.to_string()))
     }
 
-    fn extract_dkim_signature(&self, headers: &str) -> Result<String, Box<dyn Error>> {
+    fn extract_dkim_signature(&self, headers: &str) -> Result<String, DKIMError> {
         headers
             .lines()
             .find(|line| line.starts_with("DKIM-Signature:"))
-            .ok_or_else(|| Box::new(std::io::Error::new(std::io::ErrorKind::NotFound, "DKIM-Signature not found")) as Box<dyn Error>)
+            .ok_or(DKIMError::SignatureNotFound)
             .map(|line| line.trim_start_matches("DKIM-Signature:").trim().to_string())
     }
 
-    fn parse_dkim_signature(&self, dkim_signature: &str) -> Result<(Vec<String>, String), Box<dyn Error>> {
+    fn parse_dkim_signature(&self, dkim_signature: &str) -> Result<(Vec<String>, String, std::collections::HashMap<String, String>), DKIMError> {
         let mut signed_headers = Vec::new();
         let mut signature = String::new();
+        let mut dkim_params = std::collections::HashMap::new();
 
         for part in dkim_signature.split(';') {
             let part = part.trim();
-            if part.starts_with("h=") {
-                signed_headers = part[2..].split(':').map(|s| s.to_string()).collect();
-            } else if part.starts_with("b=") {
-                signature = part[2..].to_string();
+            if let Some((key, value)) = part.split_once('=') {
+                let key = key.trim();
+                let value = value.trim();
+                match key {
+                    "h" => signed_headers = value.split(':').map(|s| s.to_string()).collect(),
+                    "b" => signature = value.to_string(),
+                    _ => { dkim_params.insert(key.to_string(), value.to_string()); }
+                }
             }
         }
 
         if signed_headers.is_empty() || signature.is_empty() {
-            return Err("Invalid DKIM signature format".into());
+            return Err(DKIMError::InvalidSignatureFormat("Missing required parameters".to_string()));
         }
 
-        Ok((signed_headers, signature))
+        Ok((signed_headers, signature, dkim_params))
     }
 
     fn canonicalize_headers(&self, headers: &str, signed_headers: &[String]) -> String {
@@ -349,7 +367,7 @@ impl DKIMValidator {
             .collect()
     }
 
-    fn construct_signature_base(&self, dkim_params: &[(String, String)], canonicalized_headers: &str, body_hash: &str) -> String {
+    fn construct_signature_base(&self, dkim_params: &std::collections::HashMap<String, String>, canonicalized_headers: &str, body_hash: &str) -> String {
         let mut base = String::new();
         for (key, value) in dkim_params {
             if key != "b" {
@@ -361,7 +379,36 @@ impl DKIMValidator {
         base
     }
 }
+#[derive(Debug)]
+pub enum DKIMError {
+    SignatureNotFound,
+    InvalidSignatureFormat(String),
+    BodyHashMismatch,
+    SignatureVerificationFailed,
+    InvalidEmailFormat,
+    PublicKeyError(String),
+    Base64DecodeError(String),
+    OpenSSLError(String),
+    IOError(std::io::Error),
+}
 
+impl std::fmt::Display for DKIMError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            DKIMError::SignatureNotFound => write!(f, "DKIM-Signature not found in headers"),
+            DKIMError::InvalidSignatureFormat(msg) => write!(f, "Invalid DKIM signature format: {}", msg),
+            DKIMError::BodyHashMismatch => write!(f, "Body hash in DKIM signature does not match computed body hash"),
+            DKIMError::SignatureVerificationFailed => write!(f, "DKIM signature verification failed"),
+            DKIMError::InvalidEmailFormat => write!(f, "Invalid email format"),
+            DKIMError::PublicKeyError(msg) => write!(f, "Public key error: {}", msg),
+            DKIMError::Base64DecodeError(msg) => write!(f, "Base64 decode error: {}", msg),
+            DKIMError::OpenSSLError(msg) => write!(f, "OpenSSL error: {}", msg),
+            DKIMError::IOError(e) => write!(f, "IO error: {}", e),
+        }
+    }
+}
+
+impl std::error::Error for DKIMError {}
 // TODO: Implement proper error handling throughout the application
 // TODO: Add comprehensive logging for debugging and monitoring
 // TODO: Implement input validation for all API endpoints
