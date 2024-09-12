@@ -196,11 +196,11 @@ async fn send_email_handler(email_req: web::Json<EmailRequest>) -> impl Responde
 
     // Create the headers including the DKIM signature
     let headers = vec![
-        ("DKIM-Signature".to_string(), dkim_signature),
         ("From".to_string(), email_req.from.clone()),
         ("To".to_string(), email_req.to.clone()),
         ("Subject".to_string(), email_req.subject.clone()),
-        ("Date".to_string(), date),
+        ("Date".to_string(), date.clone()),
+        ("DKIM-Signature".to_string(), dkim_signature),
     ];
             
       

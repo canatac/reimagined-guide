@@ -67,46 +67,30 @@ fn determine_headers_to_sign(&self, email_content: &str) -> Vec<String> {
         }
     }
 
-    headers_to_sign}
-//fn canonicalize_headers(&self, email_content: &str) -> String {
+    headers_to_sign
+}
     fn canonicalize_headers(&self, email_content: &str, headers_to_sign: &[String]) -> String {
-
-    /*
-    let headers = email_content.split("\r\n\r\n").next().unwrap_or("");
-    headers
-        .lines()
-        .map(|line| {
-            let parts: Vec<&str> = line.splitn(2, ':').collect();
-            if parts.len() == 2 {
-                let header_name = parts[0].trim().to_lowercase();
-                let header_value = parts[1].trim().split_whitespace().collect::<Vec<&str>>().join(" ");
-                format!("{}:{}\r\n", header_name, header_value)
-            } else {
-                format!("{}\r\n", line.trim())
+        let headers = email_content.split("\r\n\r\n").next().unwrap_or("");
+        let mut canonicalized = String::new();
+        let mut seen_headers = std::collections::HashSet::new();
+    
+        for line in headers.lines() {
+            if line.is_empty() {
+                break;
             }
-        })
-        .collect()
-*/
-    let headers = email_content.split("\r\n\r\n").next().unwrap_or("");
-    let mut canonicalized = String::new();
-    let mut seen_headers = std::collections::HashSet::new();
-
-    for line in headers.lines() {
-        if line.is_empty() {
-            break;
+            let (header_name, header_value) = match line.split_once(':') {
+                Some((name, value)) => (name.trim(), value.trim()),
+                None => continue,
+            };
+            let lowercase_name = header_name.to_lowercase();
+            if headers_to_sign.contains(&lowercase_name) && !seen_headers.contains(&lowercase_name) {
+                seen_headers.insert(lowercase_name);
+                let canonical_value = header_value.split_whitespace().collect::<Vec<&str>>().join(" ");
+                canonicalized.push_str(&format!("{}:{}\r\n", header_name, canonical_value));
+            }
         }
-        let (header_name, header_value) = match line.split_once(':') {
-            Some((name, value)) => (name.trim().to_lowercase(), value.trim()),
-            None => continue,
-        };
-        if headers_to_sign.contains(&header_name) && !seen_headers.contains(&header_name) {
-            seen_headers.insert(header_name.clone());
-            let canonical_value = header_value.split_whitespace().collect::<Vec<&str>>().join(" ");
-            canonicalized.push_str(&format!("{}:{}\r\n", header_name, canonical_value));
-        }
-    }
-
-canonicalized
+    
+        canonicalized
 
 }
     
