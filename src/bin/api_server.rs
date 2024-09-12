@@ -356,8 +356,8 @@ fn parse_dkim_signature(&self, dkim_signature: &str) -> Result<(Vec<String>, Str
                     signed_headers = value.split(':').map(|s| s.trim().to_lowercase()).collect();
                     dkim_params.push_back((key, value)); },
                 "b" => {
-                    signature = value.clone();
-                    dkim_params.push_back((key, value)); },
+                    signature = value;
+                 },
                 _ => { dkim_params.push_back((key, value)); }
             }
         }
