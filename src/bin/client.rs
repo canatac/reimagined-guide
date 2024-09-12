@@ -65,7 +65,195 @@ async fn expect_code<T: AsyncReadExt + Unpin>(stream: &mut T, expected: &str) ->
     }
     Ok(())
 }
+pub async fn send_outgoing_email(email_content: &str) -> std::io::Result<()> {
+    let recipient_email = extract_email_address(email_content, "To:")
+        .ok_or_else(|| IoError::new(ErrorKind::InvalidInput, "Invalid recipient email"))?;
+    let recipient_domain = recipient_email.split('@').nth(1)
+        .ok_or_else(|| IoError::new(ErrorKind::InvalidInput, "Invalid recipient email"))?;
+    
+    println!("Resolving MX records for domain: {}", recipient_domain);
 
+    let resolver = TokioAsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default());
+
+    let mx_lookup = resolver.mx_lookup(recipient_domain).await
+        .map_err(|e| IoError::new(ErrorKind::Other, format!("MX lookup failed: {}", e)))?;
+    let mx_records: Vec<_> = mx_lookup.iter().collect();
+
+    if mx_records.is_empty() {
+        return Err(IoError::new(ErrorKind::Other, "No MX records found"))
+    }
+    println!("Found {} MX records. Using: {}", mx_records.len(), mx_records[0].exchange());
+
+    let smtp_server = mx_records[0].exchange().to_ascii().trim_end_matches('.').to_string();
+    let smtp_port = find_smtp_port(&smtp_server).await
+        .ok_or_else(|| IoError::new(ErrorKind::Other, "No open SMTP ports found"))?;
+
+    println!("Connecting to {}:{}", smtp_server, smtp_port);
+    let mut stream = TcpStream::connect((smtp_server.as_str(), smtp_port)).await?;
+
+    println!("Connected successfully");
+
+    expect_code(&mut stream, "220").await?;
+    stream.write_all(b"EHLO misfits.ai\r\n").await?;
+    expect_code(&mut stream, "250").await?;
+
+    let mut stream_type =  if smtp_port != 465 {  // 465 is already SSL/TLS
+        let smtp_server_clone = smtp_server.clone();
+        stream.write_all(b"STARTTLS\r\n").await?;
+        expect_code(&mut stream, "220").await?;
+
+        let mut root_store = RootCertStore::empty();
+        
+        // Load native root certificates
+        for cert in load_native_certs().map_err(|e| IoError::new(ErrorKind::Other, e))? {
+            root_store.add_parsable_certificates([CertificateDer::from(cert.0)]);
+        }
+
+        // Add your misfits.ai certificate
+        let fullchain_path = env::var("FULLCHAIN_PATH").expect("FULLCHAIN_PATH must be set");
+        let mut fullchain_file = BufReader::new(File::open(fullchain_path)?);
+        let certs = rustls_pemfile::certs(&mut fullchain_file);
+        for cert in certs {
+            root_store.add_parsable_certificates(cert);
+        }
+        
+        // Optionally add webpki roots as well
+        root_store.add_parsable_certificates(TLS_SERVER_ROOTS.iter().map(|ta| ta.subject.to_vec().into()));
+
+        let config = ClientConfig::builder()
+        .with_root_certificates(root_store)
+        .with_no_client_auth();
+
+        let connector = TlsConnector::from(Arc::new(config));
+        let server_name = ServerName::try_from(smtp_server_clone)
+            .map_err(|_| IoError::new(ErrorKind::InvalidInput, "Invalid server name"))?;
+        
+        let tls_stream = connector.connect(server_name, stream).await?;
+
+        StreamType::Tls(tls_stream)
+    } else {
+        StreamType::Plain(stream)
+    };
+    match &mut stream_type {
+        StreamType::Plain(ref mut s) => {
+            s.write_all(b"EHLO misfits.ai\r\n").await?;
+            expect_code(s, "250").await?;
+        }
+        StreamType::Tls(ref mut s) => {
+            s.write_all(b"EHLO misfits.ai\r\n").await?;
+            expect_code(s, "250").await?;
+        }
+    }
+    // Use the appropriate stream for the rest of the communication
+    send_email_content(&mut stream_type, email_content).await?;
+
+    Ok(())
+}
+/*
+// Helper function to extract email address from headers
+fn extract_email_address(content: &str, header: &str) -> Option<String> {
+    content.lines()
+        .find(|line| line.starts_with(header))
+        .and_then(|line| line.split(':').nth(1))
+        .map(|addr| addr.trim().to_string())
+}
+ */
+// Update this function to accept a string instead of an Email struct
+async fn send_email_content(stream: &mut StreamType, email_content: &str) -> std::io::Result<()> {
+    let from_address = extract_email_address(email_content, "From:")
+        .ok_or_else(|| IoError::new(ErrorKind::InvalidInput, "Invalid From address"))?;
+    let to_address = extract_email_address(email_content, "To:")
+        .ok_or_else(|| IoError::new(ErrorKind::InvalidInput, "Invalid To address"))?;
+
+    match stream {
+        StreamType::Plain(ref mut s) => send_email_content_inner(s, &from_address, &to_address, email_content).await,
+        StreamType::Tls(ref mut s) => send_email_content_inner(s, &from_address, &to_address, email_content).await,
+    }
+}
+/*
+async fn send_email_content_inner<T: AsyncWriteExt + AsyncReadExt + Unpin>(
+    stream: &mut T, 
+    from: &str, 
+    to: &str, 
+    email_content: &str
+) -> std::io::Result<()> {
+    stream.write_all(format!("MAIL FROM:<{}>\r\n", from).as_bytes()).await?;
+    expect_code(stream, "250").await?;
+
+    stream.write_all(format!("RCPT TO:<{}>\r\n", to).as_bytes()).await?;
+    expect_code(stream, "250").await?;
+
+    stream.write_all(b"DATA\r\n").await?;
+    expect_code(stream, "354").await?;
+
+    // Send the entire email content
+    stream.write_all(email_content.as_bytes()).await?;
+
+    // Ensure the email content ends with \r\n.\r\n
+    if !email_content.ends_with("\r\n.\r\n") {
+        stream.write_all(b"\r\n.\r\n").await?;
+    }
+
+    expect_code(stream, "250").await?;
+
+    stream.write_all(b"QUIT\r\n").await?;
+    expect_code(stream, "221").await?;
+
+    Ok(())
+}
+ */
+// Helper function to extract email address from headers
+fn extract_email_address(content: &str, header: &str) -> Option<String> {
+    content.lines()
+        .find(|line| line.starts_with(header))
+        .and_then(|line| line.split(':').nth(1))
+        .map(|addr| addr.trim().to_string())
+}
+/*
+// Update this function to accept a string instead of an Email struct
+async fn send_email_content(stream: &mut StreamType, email_content: &str) -> std::io::Result<()> {
+    let from_address = extract_email_address(email_content, "From:")
+        .ok_or_else(|| IoError::new(ErrorKind::InvalidInput, "Invalid From address"))?;
+    let to_address = extract_email_address(email_content, "To:")
+        .ok_or_else(|| IoError::new(ErrorKind::InvalidInput, "Invalid To address"))?;
+
+    match stream {
+        StreamType::Plain(ref mut s) => send_email_content_inner(s, &from_address, &to_address, email_content).await,
+        StreamType::Tls(ref mut s) => send_email_content_inner(s, &from_address, &to_address, email_content).await,
+    }
+}
+ */
+async fn send_email_content_inner<T: AsyncWriteExt + AsyncReadExt + Unpin>(
+    stream: &mut T, 
+    from: &str, 
+    to: &str, 
+    email_content: &str
+) -> std::io::Result<()> {
+    stream.write_all(format!("MAIL FROM:<{}>\r\n", from).as_bytes()).await?;
+    expect_code(stream, "250").await?;
+
+    stream.write_all(format!("RCPT TO:<{}>\r\n", to).as_bytes()).await?;
+    expect_code(stream, "250").await?;
+
+    stream.write_all(b"DATA\r\n").await?;
+    expect_code(stream, "354").await?;
+
+    // Send the entire email content
+    stream.write_all(email_content.as_bytes()).await?;
+
+    // Ensure the email content ends with \r\n.\r\n
+    if !email_content.ends_with("\r\n.\r\n") {
+        stream.write_all(b"\r\n.\r\n").await?;
+    }
+
+    expect_code(stream, "250").await?;
+
+    stream.write_all(b"QUIT\r\n").await?;
+    expect_code(stream, "221").await?;
+
+    Ok(())
+}
+/*
 pub async fn send_outgoing_email(email: &Email) -> std::io::Result<()> {
     let recipient_domain = email.to.split('@').nth(1)
         .ok_or_else(|| IoError::new(ErrorKind::InvalidInput, "Invalid recipient email"))?;
@@ -151,6 +339,8 @@ pub async fn send_outgoing_email(email: &Email) -> std::io::Result<()> {
 
     
 }
+
+
 async fn send_email_content(stream: &mut StreamType, email: &Email) -> std::io::Result<()> {
     match stream {
         StreamType::Plain(ref mut s) => send_email_content_inner(s, email).await,
@@ -189,7 +379,7 @@ async fn send_email_content_inner<T: AsyncWriteExt + AsyncReadExt + Unpin>(strea
 
     Ok(())
 }
-
+*/
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
@@ -229,15 +419,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .takes_value(true))
         .get_matches();
 
-    let email = Email {
-        from: matches.value_of("from").unwrap().to_string(),
-        to: matches.value_of("to").unwrap().to_string(),
-        subject: matches.value_of("subject").unwrap().to_string(),
-        body: matches.value_of("body").unwrap().to_string(),
-        headers: vec![],
-    };
+    let from = matches.value_of("from").unwrap();
+    let to = matches.value_of("to").unwrap();
+    let subject = matches.value_of("subject").unwrap();
+    let body = matches.value_of("body").unwrap();
 
-    match send_outgoing_email(&email).await {
+    // Create the email content
+    let email_content = format!(
+        "From: {}\r\nTo: {}\r\nSubject: {}\r\n\r\n{}",
+        from, to, subject, body
+    );
+
+
+    match send_outgoing_email(&email_content).await {
         Ok(_) => println!("Email sent successfully"),
         Err(e) => eprintln!("Error sending email: {}", e),
     }

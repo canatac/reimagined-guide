@@ -116,7 +116,7 @@ async fn send_to_mailing_list(email_req: web::Json<MailingListEmailRequest>) -> 
             }
         };
        // TODO: Add an unsubscribe link to the email body
-
+/*
         let email = Email {
             from: email_req.from.clone(),
             to: to_email,
@@ -124,9 +124,21 @@ async fn send_to_mailing_list(email_req: web::Json<MailingListEmailRequest>) -> 
             body: email_req.body.clone(),
             headers: vec![],
         };
+   */
+        let from = email_req.from.clone();
+        let to = to_email;
+        let subject = email_req.subject.clone();
+        let body = email_req.body.clone();
+    
+        // Create the email content
+        let email_content = format!(
+            "From: {}\r\nTo: {}\r\nSubject: {}\r\n\r\n{}",
+            from, to, subject, body
+        );
+
         // TODO: Implement more detailed logging for auditing and troubleshooting
 
-        match send_outgoing_email(&email).await {
+        match send_outgoing_email(&email_content).await {
             Ok(_) => success_count += 1,
             Err(_) => {
                 // TODO: Decide on the appropriate error handling strategy
@@ -217,7 +229,7 @@ async fn send_email_handler(email_req: web::Json<EmailRequest>) -> impl Responde
     println!("DKIM-Signature: {}", email.headers[0].1);
 
 // Validate DKIM signature before sending
-/* 
+
 let public_key_pem = std::fs::read_to_string("public_key.pem").expect("Failed to read public key");
 let validator = DKIMValidator::new(&public_key_pem).expect("Failed to create DKIM validator");
 match validator.validate(&email_content_with_dkim) {
@@ -237,8 +249,13 @@ match validator.validate(&email_content_with_dkim) {
         }));
     }
 }
-*/
+/*
     match send_outgoing_email(&email).await {
+        Ok(_) => HttpResponse::Ok().json(serde_json::json!({"status": "success", "message": "Email sent successfully"})),
+        Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({"status": "error", "message": e.to_string()})),
+    }
+ */
+    match send_outgoing_email(&email_content_with_dkim).await {
         Ok(_) => HttpResponse::Ok().json(serde_json::json!({"status": "success", "message": "Email sent successfully"})),
         Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({"status": "error", "message": e.to_string()})),
     }
