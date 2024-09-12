@@ -69,31 +69,37 @@ fn determine_headers_to_sign(&self, email_content: &str) -> Vec<String> {
 
     headers_to_sign
 }
-    fn canonicalize_headers(&self, email_content: &str, headers_to_sign: &[String]) -> String {
-        let headers = email_content.split("\r\n\r\n").next().unwrap_or("");
-        let mut canonicalized = String::new();
-        let mut seen_headers = std::collections::HashSet::new();
-    
-        for line in headers.lines() {
-            if line.is_empty() {
-                break;
-            }
-            let (header_name, header_value) = match line.split_once(':') {
-                Some((name, value)) => (name.trim(), value.trim()),
-                None => continue,
-            };
-            let lowercase_name = header_name.to_lowercase();
-            if headers_to_sign.contains(&lowercase_name) && !seen_headers.contains(&lowercase_name) {
-                seen_headers.insert(lowercase_name);
-                let canonical_value = header_value.split_whitespace().collect::<Vec<&str>>().join(" ");
-                canonicalized.push_str(&format!("{}:{}\r\n", header_name, canonical_value));
+fn canonicalize_headers(&self, email_content: &str, headers_to_sign: &[String]) -> String {
+    let headers = email_content.split("\r\n\r\n").next().unwrap_or("");
+    let mut canonicalized = String::new();
+    let mut seen_headers = std::collections::HashSet::new();
+
+    for header_name in headers_to_sign {
+        let lowercase_name = header_name.to_lowercase();
+        if !seen_headers.contains(&lowercase_name) {
+            if let Some(header_value) = self.get_header_value(headers, header_name) {
+                seen_headers.insert(lowercase_name.clone());
+                let canonical_value = self.relaxed_canonicalization(header_value);
+                canonicalized.push_str(&format!("{}: {}\r\n", lowercase_name, canonical_value));
             }
         }
-    
-        canonicalized
+    }
 
+    canonicalized
 }
-    
+fn get_header_value<'a>(&self, headers: &'a str, header_name: &str) -> Option<&'a str> {
+    headers.lines()
+        .find(|line| line.to_lowercase().starts_with(&format!("{}:", header_name.to_lowercase())))
+        .and_then(|line| line.splitn(2, ':').nth(1))
+        .map(|value| value.trim())
+}
+
+fn relaxed_canonicalization(&self, value: &str) -> String {
+    // Convert all sequences of one or more WSP characters to a single SP character
+    let value = value.split_whitespace().collect::<Vec<&str>>().join(" ");
+    // Remove all WSP characters at the end of lines
+    value.trim_end().to_string()
+}
 
     fn compute_body_hash(&self, email_content: &str) -> String {
         let parts: Vec<&str> = email_content.split("\r\n\r\n").collect();
