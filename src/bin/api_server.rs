@@ -292,7 +292,6 @@ impl DKIMValidator {
         println!("Computed body hash matches the one in the DKIM signature");
 
         let signature_base = self.construct_signature_base(&dkim_params, &canonicalized_headers, &computed_body_hash);
-        println!("Signature base: {}", signature_base);
         println!("Validator Signature base as bytes: {:?}", signature_base.as_bytes());
 
         let signature_bytes = base64::decode(&signature)
@@ -301,29 +300,13 @@ impl DKIMValidator {
 
         let mut verifier = Verifier::new(MessageDigest::sha256(), &self.public_key)
             .map_err(|e| DKIMError::OpenSSLError(e.to_string()))?;
-        
-/*
-    fn sign_rsa(&self, data: &str) -> Result<String, Box<dyn std::error::Error>> {
-        let pkey = openssl::pkey::PKey::from_rsa(self.dkim_private_key.clone())?;
-
-        let mut signer = Signer::new(MessageDigest::sha256(), &pkey)?;
-
-        signer.update(data.as_bytes())?;
-        let signature = signer.sign_to_vec()?;
-
-        // Debug print
-        println!("Raw signature bytes: {:?}", signature);
-
-        Ok(encode(signature))
-    }
-
-*/
 
 
-        verifier.update(signature_base.as_bytes())
+        verifier.update(&signature_bytes)
             .map_err(|e| DKIMError::OpenSSLError(e.to_string()))?;
-        println!("Verifier updated");
-        verifier.verify(&signature_bytes)
+        println!("Verifier updated with sent signature");
+
+        verifier.verify(signature_base.as_bytes())
             .map_err(|e| DKIMError::OpenSSLError(e.to_string()))
             .map(|result| {
                 println!("Signature verification result: {}", result);
