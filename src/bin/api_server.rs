@@ -194,30 +194,27 @@ async fn send_email_handler(email_req: web::Json<EmailRequest>) -> impl Responde
             }
         };
 
-    // Create the headers including the DKIM signature
-    let headers = vec![
-        ("From".to_string(), email_req.from.clone()),
-        ("To".to_string(), email_req.to.clone()),
-        ("Subject".to_string(), email_req.subject.clone()),
-        ("Date".to_string(), date.clone()),
-        ("DKIM-Signature".to_string(), dkim_signature),
-    ];
-            
-      
+    
+    let email_content_with_dkim = format!("DKIM-Signature: {}\r\n{}", dkim_signature, email_content);
+
+    println!("Email content with DKIM:\n{}", email_content_with_dkim);
+
     let email = Email {
         from: email_req.from.clone(),
         to: email_req.to.clone(),
         subject: email_req.subject.clone(),
         body: body,
-        headers,
+        headers: vec![
+            ("DKIM-Signature".to_string(), dkim_signature),
+            ("From".to_string(), email_req.from.clone()),
+            ("To".to_string(), email_req.to.clone()),
+            ("Subject".to_string(), email_req.subject.clone()),
+            ("Date".to_string(), date),
+        ],
     };
 
-
-    println!("Email content: {}", email_content);
+    println!("Email content: {}", email_content_with_dkim);
     println!("DKIM-Signature: {}", email.headers[0].1);
-
-
-
 
     match send_outgoing_email(&email).await {
         Ok(_) => HttpResponse::Ok().json(serde_json::json!({"status": "success", "message": "Email sent successfully"})),

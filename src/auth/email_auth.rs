@@ -36,7 +36,7 @@ impl EmailAuthenticator {
             headers_to_sign.join(":")
         );
 
-        let signature_base = format!("{}{}", dkim_header, canonicalized_headers);
+        let signature_base = format!("{}{}", dkim_header, canonicalized_headers.trim_end());
         // Debug print
         println!("String to be signed:\n{}", signature_base);
 
