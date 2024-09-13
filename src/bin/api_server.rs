@@ -330,12 +330,17 @@ impl DKIMValidator {
         println!("Verifier updated with base signature string");
 
         // Vérifie la signature avec les bytes décodés de la signature
-        verifier.verify(&signature_bytes)
-        .map_err(|e| DKIMError::OpenSSLError(e.to_string()))
-        .map(|result| {
-            println!("Signature verification result: {}", result);
-            result
-        })
+        match verifier.verify(&signature_bytes) {
+            Ok(true) => {
+                println!("Signature verification succeeded");
+                Ok(true)
+            },
+            Ok(false) => {
+                println!("Signature verification failed");
+                Err(DKIMError::SignatureVerificationFailed)
+            },
+            Err(e) => Err(DKIMError::OpenSSLError(format!("Verification error: {}", e)))
+        }
     }
 
     fn extract_dkim_signature(&self, headers: &str) -> Result<String, DKIMError> {
@@ -392,7 +397,7 @@ fn parse_dkim_signature(&self, dkim_signature: &str) -> Result<(Vec<String>, Str
     fn relaxed_canonicalization(&self, name: &str, value: &str) -> String {
         let name = name.to_lowercase();
         let value = value.split_whitespace().collect::<Vec<&str>>().join(" ");
-        format!("{}: {}", name, value.trim())
+        format!("{}:{}", name, value.trim())
     }
 
     fn get_header_value<'a>(&self, headers: &'a str, header_name: &str) -> Option<&'a str> {
@@ -403,6 +408,7 @@ fn parse_dkim_signature(&self, dkim_signature: &str) -> Result<(Vec<String>, Str
     }
 
     fn compute_body_hash(&self, body: &str) -> String {
+        let body = if body.is_empty() { "\r\n" } else { body };
         let hash = hash(MessageDigest::sha256(), body.as_bytes()).unwrap();
         base64::encode(hash)
     }
@@ -426,20 +432,16 @@ fn parse_dkim_signature(&self, dkim_signature: &str) -> Result<(Vec<String>, Str
 
         // Add all parameters, including 'b' but without its value
         for (key, value) in dkim_params {
-            
-                base.push_str(&format!("{}={}; ", key, value));
-            
+            if key != "b" {
+                base.push_str(&format!("{}={};", key, value));
+            } else {
+                base.push_str("b=;");
+            }
         }
         
-        // Remove the trailing space and semicolon
-        base.pop();
-        base.pop();
-        
-        // Add newline
         base.push_str("\r\n");
-        
-        // Add canonicalized headers
         base.push_str(canonicalized_headers);
+
         
         println!("Signature base 1 :\n{}", base);
         base
@@ -456,6 +458,8 @@ pub enum DKIMError {
     Base64DecodeError(String),
     OpenSSLError(String),
     IOError(std::io::Error),
+    KeyRetrievalError(String),
+    DNSError(String),
 }
 
 impl std::fmt::Display for DKIMError {
@@ -470,6 +474,8 @@ impl std::fmt::Display for DKIMError {
             DKIMError::Base64DecodeError(msg) => write!(f, "Base64 decode error: {}", msg),
             DKIMError::OpenSSLError(msg) => write!(f, "OpenSSL error: {}", msg),
             DKIMError::IOError(e) => write!(f, "IO error: {}", e),
+            DKIMError::KeyRetrievalError(msg) => write!(f, "Key retrieval error: {}", msg),
+            DKIMError::DNSError(msg) => write!(f, "DNS error: {}", msg),
         }
     }
 }
