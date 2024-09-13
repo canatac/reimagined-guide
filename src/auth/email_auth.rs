@@ -44,7 +44,8 @@ impl EmailAuthenticator {
         let signature_base = format!("{}\r\n{}", dkim_header, canonicalized_headers.trim_end());
         // Debug print
         println!("sign_with_dkim - OUTPUT - signature_base to be signed :\n{}", signature_base);
-                
+        println!("sign_with_dkim - OUTPUT - signature_base as bytes: {:?}", signature_base.as_bytes());
+               
         let signature = self.sign_rsa(&signature_base)?;
         // Debug print
         println!("sign_rsa - OUTPUT - Raw signature_base (base64):\n{}", signature);

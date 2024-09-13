@@ -1,5 +1,6 @@
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
+use openssl::rsa::Padding;
 use serde::{Deserialize, Serialize};
 
 mod client;
@@ -312,14 +313,16 @@ impl DKIMValidator {
 
         let signature_base = self.construct_signature_base(&dkim_params, &canonicalized_headers, &computed_body_hash);
         println!("validate - OUTPUT - Validator signature_base as bytes: {:?}", signature_base.as_bytes());
+        println!("validate - OUTPUT - Validator signature_base as string: {}", signature_base);
 
-        let signature_bytes = base64::decode(&signature)
+        let signature_bytes = base64::decode(signature)
             .map_err(|e| DKIMError::Base64DecodeError(e.to_string()))?;
         println!("validate - OUTPUT - Sent Signature bytes: {:?}", signature_bytes);
 
         let mut verifier = Verifier::new(MessageDigest::sha256(), &self.public_key)
             .map_err(|e| DKIMError::OpenSSLError(e.to_string()))?;
-
+        //        let mut verifier = Verifier::new(MessageDigest::sha256(), &self.public_key)?;
+        verifier.set_rsa_padding(Padding::PKCS1).unwrap();
 
         // Met à jour le vérificateur avec la base de signature (chaîne à vérifier)
         verifier.update(signature_base.as_bytes())
