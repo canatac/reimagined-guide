@@ -234,7 +234,7 @@ async fn send_email_handler(email_req: web::Json<EmailRequest>) -> impl Responde
 // Validate DKIM signature before sending
 
     let public_key_pem = authenticator.get_dkim_public_key().await.expect("Failed to get DKIM public key");
-let validator = DKIMValidator::new(&public_key_pem).expect("Failed to create DKIM validator");
+let validator = DKIMValidator::new(public_key_pem).expect("Failed to create DKIM validator");
 match validator.validate(&email_content_with_dkim) {
     Ok(true) => println!("DKIM validation passed"),
     Ok(false) => {
@@ -275,9 +275,7 @@ pub struct DKIMValidator {
 }
 
 impl DKIMValidator {
-    pub fn new(public_key_pem: &str) -> Result<Self, DKIMError> {
-        let public_key = PKey::public_key_from_pem(public_key_pem.as_bytes())
-            .map_err(|e| DKIMError::PublicKeyError(e.to_string()))?;
+    pub fn new(public_key: PKey<Public>) -> Result<Self, DKIMError> {
         Ok(Self { public_key })
     }
 

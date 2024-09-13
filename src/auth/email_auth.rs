@@ -1,6 +1,8 @@
 use openssl::rsa::Rsa;
 use openssl::sign::Signer;
 use openssl::hash::MessageDigest;
+use openssl::pkey::PKey;
+use openssl::pkey::Public;
 use base64::{encode, decode};
 use trust_dns_resolver::{AsyncResolver, Resolver};
 use trust_dns_resolver::config::*;
@@ -175,7 +177,7 @@ fn relaxed_canonicalization(&self, name: &str, value: &str) -> String {
         Ok(false)
     }
 
-    pub async fn get_dkim_public_key(&self) -> Result<String, Box<dyn std::error::Error>> {
+    pub async fn get_dkim_public_key(&self) -> Result<PKey<Public>, Box<dyn std::error::Error>> {
         let resolver = AsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default());
 
         let dkim_record_name = format!("{}._domainkey.{}", self.dkim_selector, self.dkim_domain);
@@ -213,7 +215,7 @@ fn relaxed_canonicalization(&self, name: &str, value: &str) -> String {
                     }
                 }
             }
-
+        }
         Err("DKIM public key not found in DNS records".into())
     }
 }
