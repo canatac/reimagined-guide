@@ -189,7 +189,7 @@ fn relaxed_canonicalization(&self, name: &str, value: &str) -> String {
             for txt in record.iter() {
                 let dkim_record = std::str::from_utf8(txt)?;
                 println!("Found DKIM record: {}", dkim_record);
-
+    
                 if dkim_record.starts_with("v=DKIM1;") {
                     // Parse the DKIM record
                     for part in dkim_record.split(';') {
@@ -197,21 +197,22 @@ fn relaxed_canonicalization(&self, name: &str, value: &str) -> String {
                         if part.starts_with("p=") {
                             let public_key_base64 = part.trim_start_matches("p=");
                             println!("Extracted base64 public key: {}", public_key_base64);
-
+    
                             // Decode the base64 public key
                             let public_key_der = base64::decode(public_key_base64)?;
-
-                            // Convert DER to PEM format
-                            let pem = Pem::new("PUBLIC KEY", public_key_der);
-                            let pem_string = pem::encode(&pem);
-
-                            println!("Converted public key to PEM format");
-                            return Ok(pem_string);
+    
+                            // Convert DER to RSA public key
+                            let rsa = Rsa::public_key_from_der(&public_key_der)?;
+                            
+                            // Convert RSA to PKey
+                            let pkey = PKey::from_rsa(rsa)?;
+    
+                            println!("Converted public key to PKey format");
+                            return Ok(pkey);
                         }
                     }
                 }
             }
-        }
 
         Err("DKIM public key not found in DNS records".into())
     }
