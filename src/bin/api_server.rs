@@ -432,13 +432,9 @@ fn parse_dkim_signature(&self, dkim_signature: &str) -> Result<(Vec<String>, Str
 
         // Add all parameters, including 'b' but without its value
         for (key, value) in dkim_params {
-            if key != "b" {
-                base.push_str(&format!("{}={};", key, value));
-            } else {
-                base.push_str("b=;");
-            }
+            base.push_str(&format!("{}={};", key, value));
         }
-        
+        base.push_str("b=;");
         base.push_str("\r\n");
         base.push_str(canonicalized_headers);
 
