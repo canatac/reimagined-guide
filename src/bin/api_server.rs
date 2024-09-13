@@ -197,7 +197,10 @@ async fn send_email_handler(email_req: web::Json<EmailRequest>) -> impl Responde
     );
     
     let dkim_signature = match authenticator.sign_with_dkim(&email_content) {
-        Ok(signature) => signature,
+        Ok(signature) => {
+            println!("DKIM signature: {}", signature);
+            signature
+        },
         Err(e) => {
             eprintln!("Failed to sign email with DKIM: {}", e);
             return HttpResponse::InternalServerError().json(serde_json::json!({
@@ -230,7 +233,7 @@ async fn send_email_handler(email_req: web::Json<EmailRequest>) -> impl Responde
  */
 // Validate DKIM signature before sending
 
-let public_key_pem = std::fs::read_to_string("public_key.pem").expect("Failed to read public key");
+let public_key_pem = authenticator.get_dkim_public_key().expect("Failed to get DKIM public key");
 let validator = DKIMValidator::new(&public_key_pem).expect("Failed to create DKIM validator");
 match validator.validate(&email_content_with_dkim) {
     Ok(true) => println!("DKIM validation passed"),

@@ -4,6 +4,8 @@ use openssl::hash::MessageDigest;
 use base64::{encode, decode};
 use trust_dns_resolver::Resolver;
 use trust_dns_resolver::config::*;
+use base64;
+use pem::Pem;
 
 pub struct EmailAuthenticator {
     dkim_private_key: Rsa<openssl::pkey::Private>,
@@ -171,5 +173,44 @@ fn relaxed_canonicalization(&self, name: &str, value: &str) -> String {
         }
 
         Ok(false)
+    }
+
+    pub fn get_dkim_public_key(&self) -> Result<String, Box<dyn std::error::Error>> {
+        let resolver = Resolver::new(ResolverConfig::default(), ResolverOpts::default())?;
+        let dkim_record_name = format!("{}._domainkey.{}", self.dkim_selector, self.dkim_domain);
+        
+        println!("Querying DNS for DKIM record: {}", dkim_record_name);
+
+        let txt_records = resolver.txt_lookup(dkim_record_name)?;
+
+        for record in txt_records {
+            for txt in record.iter() {
+                let dkim_record = std::str::from_utf8(txt)?;
+                println!("Found DKIM record: {}", dkim_record);
+
+                if dkim_record.starts_with("v=DKIM1;") {
+                    // Parse the DKIM record
+                    for part in dkim_record.split(';') {
+                        let part = part.trim();
+                        if part.starts_with("p=") {
+                            let public_key_base64 = part.trim_start_matches("p=");
+                            println!("Extracted base64 public key: {}", public_key_base64);
+
+                            // Decode the base64 public key
+                            let public_key_der = base64::decode(public_key_base64)?;
+
+                            // Convert DER to PEM format
+                            let pem = Pem::new("PUBLIC KEY", public_key_der);
+                            let pem_string = pem::encode(&pem);
+
+                            println!("Converted public key to PEM format");
+                            return Ok(pem_string);
+                        }
+                    }
+                }
+            }
+        }
+
+        Err("DKIM public key not found in DNS records".into())
     }
 }
