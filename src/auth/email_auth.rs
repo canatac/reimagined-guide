@@ -85,8 +85,9 @@ fn canonicalize_headers(&self, email_content: &str, headers_to_sign: &[String]) 
         if !seen_headers.contains(&lowercase_name) {
             if let Some(header_value) = self.get_header_value(headers, header_name) {
                 seen_headers.insert(lowercase_name.clone());
-                let canonical_value = self.relaxed_canonicalization(header_value);
-                canonicalized.push_str(&format!("{}: {}\r\n", lowercase_name, canonical_value));
+                let canonical_header = self.relaxed_canonicalization(header_name, header_value);
+                canonicalized.push_str(&canonical_header);
+                canonicalized.push_str("\r\n");
             }
         }
     }
@@ -100,11 +101,10 @@ fn get_header_value<'a>(&self, headers: &'a str, header_name: &str) -> Option<&'
         .map(|value| value.trim())
 }
 
-fn relaxed_canonicalization(&self, value: &str) -> String {
-    // Convert all sequences of one or more WSP characters to a single SP character
+fn relaxed_canonicalization(&self, name: &str, value: &str) -> String {
+    let name = name.to_lowercase();
     let value = value.split_whitespace().collect::<Vec<&str>>().join(" ");
-    // Remove all WSP characters at the end of lines
-    value.trim_end().to_string()
+    format!("{}: {}", name, value.trim())
 }
 
     fn compute_body_hash(&self, email_content: &str) -> String {
