@@ -22,6 +22,7 @@ impl EmailAuthenticator {
     }
 
     pub fn sign_with_dkim(&self, email_content: &str) -> Result<String, Box<dyn std::error::Error>> {
+        println!("sign_with_dkim - INPUT - email_content: {}", email_content);
         let headers_to_sign = self.determine_headers_to_sign(email_content);
         let canonicalized_headers = self.canonicalize_headers(email_content, &headers_to_sign);
 
@@ -38,13 +39,18 @@ impl EmailAuthenticator {
 
         let signature_base = format!("{}\r\n{}", dkim_header, canonicalized_headers.trim_end());
         // Debug print
-        println!("String to be signed :\n{}", signature_base);
-
+        println!("sign_with_dkim - OUTPUT - signature_base to be signed :\n{}", signature_base);
+                
         let signature = self.sign_rsa(&signature_base)?;
         // Debug print
-        println!("Raw signature (base64):\n{}", signature);
+        println!("sign_rsa - OUTPUT - Raw signature_base (base64):\n{}", signature);
 
-        Ok(format!("{}; b={}", dkim_header, signature))
+        let result = format!("{}; b={}", dkim_header, signature);
+        
+        // Print the result before returning
+        println!("sign_with_dkim - OUTPUT - DKIM Signature:\n{}", result);
+
+        Ok(result)
     
     }
 //
@@ -109,6 +115,7 @@ fn relaxed_canonicalization(&self, value: &str) -> String {
     }
 
     fn sign_rsa(&self, data: &str) -> Result<String, Box<dyn std::error::Error>> {
+        println!("sign_rsa - INPUT - data: {}", data);
         let pkey = openssl::pkey::PKey::from_rsa(self.dkim_private_key.clone())?;
 
         let mut signer = Signer::new(MessageDigest::sha256(), &pkey)?;
@@ -116,10 +123,15 @@ fn relaxed_canonicalization(&self, value: &str) -> String {
         signer.update(data.as_bytes())?;
         let signature = signer.sign_to_vec()?;
 
-        // Debug print
-        println!("Raw signature bytes: {:?}", signature);
+        // Debug print raw signature bytes
+        println!("sign_rsa - OUTPUT - Raw signature bytes: {:?}", signature);
 
-        Ok(encode(signature))
+        let encoded_signature = encode(signature);
+        
+        // Debug print encoded signature
+        println!("sign_rsa - OUTPUT - Encoded signature: {}", encoded_signature);
+
+        Ok(encoded_signature)
     }
 
     pub fn verify_spf(&self, sender_ip: &str, sender_domain: &str) -> Result<bool, Box<dyn std::error::Error>> {

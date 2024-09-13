@@ -210,7 +210,7 @@ async fn send_email_handler(email_req: web::Json<EmailRequest>) -> impl Responde
     let email_content_with_dkim = format!("DKIM-Signature: {}\r\n{}", dkim_signature, email_content);
 
     println!("Email content with DKIM:\n{}", email_content_with_dkim);
-
+/*
     let email = Email {
         from: email_req.from.clone(),
         to: email_req.to.clone(),
@@ -227,7 +227,7 @@ async fn send_email_handler(email_req: web::Json<EmailRequest>) -> impl Responde
 
     println!("Email content: {}", email_content_with_dkim);
     println!("DKIM-Signature: {}", email.headers[0].1);
-
+ */
 // Validate DKIM signature before sending
 
 let public_key_pem = std::fs::read_to_string("public_key.pem").expect("Failed to read public key");
@@ -279,25 +279,25 @@ impl DKIMValidator {
     }
 
     fn validate(&self, email_content: &str) -> Result<bool, DKIMError> {
-        println!("++++++++++++++++++++++++++++++++++++++++++++++++++++++");
+        println!("+++++++++++++++++++++++++V A L I D A T E+++++++++++++++++++++++++++++");
 
         let (headers, body) = email_content.split_once("\r\n\r\n").ok_or(DKIMError::InvalidEmailFormat)?;
-        println!("Headers: {}", headers);
+        println!("validate - OUTPUT - Headers: {}", headers);
 
-        println!("Body: {}", body);
+        println!("validate - OUTPUT - Body: {}", body);
 
         let dkim_signature = self.extract_dkim_signature(headers)?;
-        println!("Extracted DKIM signature: {}", dkim_signature);
+        println!("validate - OUTPUT - Extracted DKIM signature: {}", dkim_signature);
         
         let (signed_headers, signature, dkim_params) = self.parse_dkim_signature(&dkim_signature)?;
-        println!("Parsed DKIM signature: {:?}", (&signed_headers, &signature, &dkim_params));
+        println!("validate - OUTPUT - Parsed DKIM signature: {:?}", (&signed_headers, &signature, &dkim_params));
 
         let canonicalized_headers = self.canonicalize_headers(headers, &signed_headers);
-        println!("Canonicalized headers: {}", canonicalized_headers);
+        println!("validate - OUTPUT - Canonicalized headers: {}", canonicalized_headers);
 
         let computed_body_hash = self.compute_body_hash(body);
     
-        println!("Computed body hash: {}", computed_body_hash);
+        println!("validate - OUTPUT - Computed body hash: {}", computed_body_hash);
 
         // Check if the computed body hash matches the one in the DKIM signature
         let bh_param = dkim_params.iter()
@@ -307,14 +307,14 @@ impl DKIMValidator {
         if computed_body_hash != *bh_param {
             return Err(DKIMError::BodyHashMismatch);
         }
-        println!("Computed body hash matches the one in the DKIM signature");
+        println!("validate - OUTPUT - Computed body hash matches the one in the DKIM signature");
 
         let signature_base = self.construct_signature_base(&dkim_params, &canonicalized_headers, &computed_body_hash);
-        println!("Validator Signature base as bytes: {:?}", signature_base.as_bytes());
+        println!("validate - OUTPUT - Validator signature_base as bytes: {:?}", signature_base.as_bytes());
 
         let signature_bytes = base64::decode(&signature)
             .map_err(|e| DKIMError::Base64DecodeError(e.to_string()))?;
-        println!("Sent Signature bytes: {:?}", signature_bytes);
+        println!("validate - OUTPUT - Sent Signature bytes: {:?}", signature_bytes);
 
         let mut verifier = Verifier::new(MessageDigest::sha256(), &self.public_key)
             .map_err(|e| DKIMError::OpenSSLError(e.to_string()))?;
