@@ -2,7 +2,7 @@ use openssl::rsa::Rsa;
 use openssl::sign::Signer;
 use openssl::hash::MessageDigest;
 use base64::{encode, decode};
-use trust_dns_resolver::Resolver;
+use trust_dns_resolver::{AsyncResolver, Resolver};
 use trust_dns_resolver::config::*;
 use base64;
 use pem::Pem;
@@ -175,15 +175,17 @@ fn relaxed_canonicalization(&self, name: &str, value: &str) -> String {
         Ok(false)
     }
 
-    pub fn get_dkim_public_key(&self) -> Result<String, Box<dyn std::error::Error>> {
-        let resolver = Resolver::new(ResolverConfig::default(), ResolverOpts::default())?;
+    pub async fn get_dkim_public_key(&self) -> Result<String, Box<dyn std::error::Error>> {
+        let resolver = AsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default());
+
         let dkim_record_name = format!("{}._domainkey.{}", self.dkim_selector, self.dkim_domain);
         
         println!("Querying DNS for DKIM record: {}", dkim_record_name);
 
-        let txt_records = resolver.txt_lookup(dkim_record_name)?;
+        let txt_records = resolver.txt_lookup(dkim_record_name);
 
-        for record in txt_records {
+        let txt_records = txt_records.await?;
+        for record in txt_records.iter() {
             for txt in record.iter() {
                 let dkim_record = std::str::from_utf8(txt)?;
                 println!("Found DKIM record: {}", dkim_record);
