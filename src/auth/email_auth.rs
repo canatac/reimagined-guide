@@ -108,8 +108,8 @@ fn get_header_value<'a>(&self, headers: &'a str, header_name: &str) -> Option<&'
 
 fn relaxed_canonicalization(&self, name: &str, value: &str) -> String {
     let name = name.to_lowercase();
-    let value = value.split_whitespace().collect::<Vec<&str>>().join(" ");
-    format!("{}: {}", name, value.trim())
+    let value = value.split_whitespace().collect::<Vec<&str>>().join("");
+    format!("{}:{}", name, value.trim())
 }
 
     fn compute_body_hash(&self, email_content: &str) -> String {
