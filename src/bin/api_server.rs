@@ -439,7 +439,7 @@ fn parse_dkim_signature(&self, dkim_signature: &str) -> Result<(Vec<String>, Str
         base.push_str("\r\n");
         
         // Add canonicalized headers
-        base.push_str(canonicalized_headers);
+        base.push_str(canonicalized_headers.trim_end());
         
         println!("Signature base 1 :\n{}", base);
         base
