@@ -14,7 +14,7 @@ use dotenv::dotenv;
 use std::env;
 use chrono::Utc;
 use std::collections::LinkedList;
-
+use base64::Engine;
 fn read_private_key(path: &str) -> std::io::Result<String> {
     std::fs::read_to_string(path)
 }
@@ -315,13 +315,12 @@ impl DKIMValidator {
         println!("validate - OUTPUT - Validator signature_base as bytes: {:?}", signature_base.as_bytes());
         println!("validate - OUTPUT - Validator signature_base as string: {}", signature_base);
 
-        let signature_bytes = base64::decode(signature)
+        let signature_bytes = base64::engine::general_purpose::STANDARD.decode(&signature)
             .map_err(|e| DKIMError::Base64DecodeError(e.to_string()))?;
         println!("validate - OUTPUT - Sent Signature bytes: {:?}", signature_bytes);
 
         let mut verifier = Verifier::new(MessageDigest::sha256(), &self.public_key)
             .map_err(|e| DKIMError::OpenSSLError(e.to_string()))?;
-        //        let mut verifier = Verifier::new(MessageDigest::sha256(), &self.public_key)?;
         verifier.set_rsa_padding(Padding::PKCS1).unwrap();
 
         // Met à jour le vérificateur avec la base de signature (chaîne à vérifier)

@@ -7,6 +7,7 @@ use base64::{encode, decode};
 use trust_dns_resolver::{AsyncResolver, Resolver};
 use trust_dns_resolver::config::*;
 use base64;
+use base64::Engine;
 use pem::Pem;
 
 pub struct EmailAuthenticator {
@@ -116,7 +117,7 @@ fn relaxed_canonicalization(&self, name: &str, value: &str) -> String {
         let parts: Vec<&str> = email_content.split("\r\n\r\n").collect();
         let body = if parts.len() > 1 { parts[1] } else { "" };
         let digest = openssl::hash::hash(MessageDigest::sha256(), body.as_bytes()).unwrap();
-        base64::encode(digest)
+        base64::engine::general_purpose::STANDARD.encode(digest)
     }
 
     fn sign_rsa(&self, data: &str) -> Result<String, Box<dyn std::error::Error>> {
@@ -131,7 +132,7 @@ fn relaxed_canonicalization(&self, name: &str, value: &str) -> String {
         // Debug print raw signature bytes
         println!("sign_rsa - OUTPUT - Raw signature bytes: {:?}", signature);
 
-        let encoded_signature = encode(signature);
+        let encoded_signature = base64::engine::general_purpose::STANDARD.encode(signature);
         
         // Debug print encoded signature
         println!("sign_rsa - OUTPUT - Encoded signature: {}", encoded_signature);
