@@ -179,43 +179,52 @@ fn relaxed_canonicalization(&self, name: &str, value: &str) -> String {
 
     pub async fn get_dkim_public_key(&self) -> Result<PKey<Public>, Box<dyn std::error::Error>> {
         let resolver = AsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default());
-
+    
         let dkim_record_name = format!("{}._domainkey.{}", self.dkim_selector, self.dkim_domain);
         
         println!("Querying DNS for DKIM record: {}", dkim_record_name);
-
-        let txt_records = resolver.txt_lookup(dkim_record_name);
-
-        let txt_records = txt_records.await?;
+    
+        let txt_records = resolver.txt_lookup(dkim_record_name).await?;
+        
+        let mut full_record = String::new();
         for record in txt_records.iter() {
             for txt in record.iter() {
-                let dkim_record = std::str::from_utf8(txt)?;
-                println!("Found DKIM record: {}", dkim_record);
-    
-                if dkim_record.starts_with("v=DKIM1;") {
-                    // Parse the DKIM record
-                    for part in dkim_record.split(';') {
-                        let part = part.trim();
-                        if part.starts_with("p=") {
-                            let public_key_base64 = part.trim_start_matches("p=");
-                            println!("Extracted base64 public key: {}", public_key_base64);
-    
-                            // Decode the base64 public key
-                            let public_key_der = base64::decode(public_key_base64)?;
-    
-                            // Convert DER to RSA public key
-                            let rsa = Rsa::public_key_from_der(&public_key_der)?;
-                            
-                            // Convert RSA to PKey
-                            let pkey = PKey::from_rsa(rsa)?;
-    
-                            println!("Converted public key to PKey format");
-                            return Ok(pkey);
-                        }
-                    }
-                }
+                full_record.push_str(std::str::from_utf8(txt)?);
             }
         }
-        Err("DKIM public key not found in DNS records".into())
+        
+        println!("Found DKIM record: {}", full_record);
+    
+        if full_record.starts_with("v=DKIM1;") {
+            // Parse the DKIM record
+            let mut public_key_base64 = String::new();
+            for part in full_record.split(';') {
+                let part = part.trim();
+                if part.starts_with("p=") {
+                    public_key_base64 = part.trim_start_matches("p=").to_string();
+                    break;
+                }
+            }
+            
+            if public_key_base64.is_empty() {
+                return Err("Public key not found in DKIM record".into());
+            }
+    
+            println!("Extracted base64 public key: {}", public_key_base64);
+    
+            // Decode the base64 public key
+            let public_key_der = base64::decode(public_key_base64)?;
+    
+            // Convert DER to RSA public key
+            let rsa = Rsa::public_key_from_der(&public_key_der)?;
+            
+            // Convert RSA to PKey
+            let pkey = PKey::from_rsa(rsa)?;
+    
+            println!("Converted public key to PKey format");
+            Ok(pkey)
+        } else {
+            Err("Invalid DKIM record format".into())
+        }
     }
 }
