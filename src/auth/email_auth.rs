@@ -50,7 +50,7 @@ impl EmailAuthenticator {
         // Debug print
         println!("sign_rsa - OUTPUT - Raw signature_base (base64):\n{}", signature);
 
-        let result = format!("{}; b={}", dkim_header, signature);
+        let result = format!("{}{}", dkim_header, signature);
         
         // Print the result before returning
         println!("sign_with_dkim - OUTPUT - DKIM Signature:\n{}", result);
