@@ -410,14 +410,25 @@ fn parse_dkim_signature(&self, dkim_signature: &str) -> Result<(Vec<String>, Str
     fn construct_signature_base(&self, dkim_params: &LinkedList<(String, String)>, canonicalized_headers: &str, body_hash: &str) -> String {
         println!("Constructing signature base");
         let mut base = String::new();
-        
+
+     /*
+     let dkim_header = format!(
+            "v=1; a=rsa-sha256; c=relaxed/simple; d={}; s={}; t={}; bh={}; h={}",
+            self.dkim_domain, 
+            self.dkim_selector, 
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs(),
+            body_hash, 
+            headers_to_sign.join(":")
+        );
+
+        let signature_base = format!("{}\r\n{}", dkim_header, canonicalized_headers.trim_end());
+      */
+
         // Add all parameters, including 'b' but without its value
         for (key, value) in dkim_params {
-            if key == "b" {
-                base.push_str(&format!("{}=; ", key));
-            } else  {
+            
                 base.push_str(&format!("{}={}; ", key, value));
-            }
+            
         }
         
         // Remove the trailing space and semicolon
