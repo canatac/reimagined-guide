@@ -15,8 +15,6 @@ path = "src/bin/client.rs"
 name = "api_server"
 path = "src/bin/api_server.rs"
 
-[lib]
-path = "src/lib.rs"
 
 [dependencies]
 actix-web = { version = "4.3", features = ["openssl"] }
