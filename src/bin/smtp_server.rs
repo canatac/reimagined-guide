@@ -177,7 +177,7 @@ impl MailServer {
 }
 
 // Handle TLS client connection
-async fn handle_client(tls_stream: TlsStream<TcpStream>) -> std::io::Result<()> {
+async fn handle_tls_client(tls_stream: TlsStream<TcpStream>, acceptor: Arc<TlsAcceptor>) -> std::io::Result<()> {
     let mut stream = StreamType::Tls(tokio::io::BufReader::new(tls_stream));
     
     // Send initial greeting
@@ -199,12 +199,16 @@ async fn handle_client(tls_stream: TlsStream<TcpStream>) -> std::io::Result<()> 
         let mut buffer = String::new();
         match stream.read_line(&mut buffer).await {
             Ok(0) => {
-                println!("Client disconnected  : {}", buffer.trim());
+                println!("TLS Client disconnected  : {}", buffer.trim());
                 break;
             }
             Ok(_n) => {                
                 println!("Calling process_command with: {}", buffer.trim());
-
+                if buffer.trim().eq_ignore_ascii_case("STARTTLS") {
+                    // Client requested STARTTLS on an already-TLS connection
+                    write_response(&mut stream, "454 TLS not available due to temporary reason\r\n").await?;
+                    continue;
+                }
                 if in_data_mode {
                     if buffer.trim() == "." {
                         in_data_mode = false;
@@ -390,7 +394,10 @@ async fn process_command(command: &str, email: &mut Email, stream: &mut StreamTy
             Ok("235 Authentication successful\r\n".to_string())
         } 
         s if s.starts_with("STARTTLS") => {
-            Ok("220 TLS ready\r\n".to_string())
+            match stream {
+                StreamType::Plain(_) => Ok("220 Ready to start TLS\r\n".to_string()),
+                StreamType::Tls(_) => Ok("454 TLS not available due to temporary reason\r\n".to_string()),
+            }
         } 
         _ => {
             Ok("500 Syntax error, command unrecognized\r\n".to_string())
@@ -495,8 +502,6 @@ fn check_credentials(username: &[u8], password: &[u8]) -> bool {
 async fn main() -> Result<(), MainError> {
     // Load environment variables from .env file
     dotenv().ok();
-    println!("SMTP_USERNAME: {}", env::var("SMTP_USERNAME").unwrap_or_else(|_| "Not set".to_string()));
-    println!("SMTP_PASSWORD: {}", env::var("SMTP_PASSWORD").unwrap_or_else(|_| "Not set".to_string()));
 
     // Initialize logger
     env_logger::Builder::new()
@@ -529,9 +534,49 @@ async fn main() -> Result<(), MainError> {
     // Log server start information
     info!("TLS Server listening on {}", tls_addr);
     info!("Plain Server listening on {}", plain_addr);
-
+/* 
     // Main server loop
     loop {
+        tokio::select! {
+            Ok((stream, peer_addr)) = tls_listener.accept() => {
+                let acceptor = tls_acceptor.clone();
+                tokio::spawn(async move {
+                    debug!("About to start TLS handshake for {}", peer_addr);
+                    match acceptor.accept(stream).await {
+                        Ok(tls_stream) => {
+                            info!("TLS handshake successful for {}", peer_addr);
+                            if let Err(e) = handle_tls_client(tls_stream, acceptor.clone()).await {
+                                error!("Error handling TLS client {}: {}", peer_addr, e);
+                            } else {
+                                info!("TLS client session completed successfully");
+                            }
+                        }
+                        Err(e) => {
+                            error!("TLS handshake failed for {}: {}", peer_addr, e);
+                            // Log more details about the error
+                            if let Some(io_err) = e.source().and_then(|s| s.downcast_ref::<std::io::Error>()) {
+                                error!("IO error kind: {:?}", io_err.kind());
+                            }
+                            if let Some(tls_err) = e.source().and_then(|s| s.downcast_ref::<rustls::Error>()) {
+                                error!("TLS error: {:?}", tls_err);
+                            }
+                        }
+                    }
+                });
+            }
+            Ok((stream, _)) = plain_listener.accept() => {
+                let acceptor = tls_acceptor.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = handle_plain_client(stream, acceptor).await {
+                        eprintln!("Error handling plain client: {}", e);
+                    }
+                });
+            }
+        }
+    }
+*/
+    loop {
+
         tokio::select! {
             // Handle incoming TLS connections
             result = tls_listener.accept() => {
@@ -544,7 +589,7 @@ async fn main() -> Result<(), MainError> {
                         match acceptor.accept(stream).await {
                             Ok(tls_stream) => {
                                 info!("TLS handshake successful for {}", peer_addr);
-                                if let Err(e) = handle_client(tls_stream).await {
+                                if let Err(e) = handle_tls_client(tls_stream, acceptor.clone()).await {
                                     error!("Error handling TLS client {}: {}", peer_addr, e);
                                 } else {
                                     info!("TLS client session completed successfully");
@@ -579,5 +624,7 @@ async fn main() -> Result<(), MainError> {
                 }
             }   
         }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
-}
+
+    }
