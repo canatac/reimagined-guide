@@ -178,8 +178,10 @@ impl MailServer {
 
 // Handle TLS client connection
 async fn handle_tls_client(tls_stream: TlsStream<TcpStream>, acceptor: Arc<TlsAcceptor>) -> std::io::Result<()> {
+    info!("TLS connection established");
+
     let mut stream = StreamType::Tls(tokio::io::BufReader::new(tls_stream));
-    
+
     // Send initial greeting
     let greeting = "220 SMTPS Server Ready\r\n";
     write_response(&mut stream, &greeting).await?;
