@@ -482,6 +482,8 @@ fn check_credentials(username: &[u8], password: &[u8]) -> bool {
 async fn main() -> Result<(), MainError> {
     // Load environment variables from .env file
     dotenv().ok();
+    println!("SMTP_USERNAME: {}", env::var("SMTP_USERNAME").unwrap_or_else(|_| "Not set".to_string()));
+    println!("SMTP_PASSWORD: {}", env::var("SMTP_PASSWORD").unwrap_or_else(|_| "Not set".to_string()));
 
     // Initialize logger
     env_logger::Builder::new()
