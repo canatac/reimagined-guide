@@ -1,1 +1,1 @@
-pub mod smtp_client;
+pub use crate::bin::smtp_client::send_outgoing_email;
