@@ -402,16 +402,20 @@ async fn process_command(command: &str, email: &mut Email, stream: &mut StreamTy
 // Handle AUTH LOGIN command
 async fn handle_auth_login(stream: &mut StreamType) -> std::io::Result<String> {
     write_response(stream, "334 VXNlcm5hbWU6\r\n").await?; // Base64 for "Username:"
-    let mut username = String::new();
-    stream.read_line(&mut username).await?;
-    let username = general_purpose::STANDARD.decode(username.trim_end()).unwrap();
-    debug!("Received username: {}", String::from_utf8_lossy(&username));
+    let mut username_base64 = String::new();
+    stream.read_line(&mut username_base64).await?;
+    debug!("Raw base64 username: {}", username_base64.trim_end());
+    let username = general_purpose::STANDARD.decode(username_base64.trim_end())
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    debug!("Decoded username: {}", String::from_utf8_lossy(&username));
 
     write_response(stream, "334 UGFzc3dvcmQ6\r\n").await?; // Base64 for "Password:"
-    let mut password = String::new();
-    stream.read_line(&mut password).await?;
-    let password = general_purpose::STANDARD.decode(password.trim_end()).unwrap();
-    debug!("Received password: {}", String::from_utf8_lossy(&password));
+    let mut password_base64 = String::new();
+    stream.read_line(&mut password_base64).await?;
+    debug!("Raw base64 password: {}", password_base64.trim_end());
+    let password = general_purpose::STANDARD.decode(password_base64.trim_end())
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    debug!("Decoded password: {}", String::from_utf8_lossy(&password));
 
     if check_credentials(&username, &password) {
         Ok("235 Authentication successful\r\n".to_string())
