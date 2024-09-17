@@ -40,7 +40,7 @@ use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 use serde::{Deserialize, Serialize};
 
 mod smtp_client;
-use smtp_client::send_outgoing_email;
+use simple_smtp_server::send_outgoing_email;
 
 use std::fs::{File, create_dir_all};
 use std::io::{Write, BufRead, BufReader};
