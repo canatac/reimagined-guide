@@ -41,7 +41,7 @@ use std::sync::Arc;
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use chrono::Utc;
-use log::{info, error};
+use log::{info, error, debug};
 use rustls::ServerConfig;
 
 use tokio_rustls::TlsAcceptor;
@@ -474,7 +474,8 @@ fn check_credentials(username: &[u8], password: &[u8]) -> bool {
     let expected_username = env::var("SMTP_USERNAME").expect("SMTP_USERNAME must be set");
     let expected_password = env::var("SMTP_PASSWORD").expect("SMTP_PASSWORD must be set");
     
-    username == expected_username.as_bytes() && password == expected_password.as_bytes()}
+    username == expected_username.as_bytes() && password == expected_password.as_bytes()
+}
 
 // Main function
 #[tokio::main]
@@ -524,15 +525,26 @@ async fn main() -> Result<(), MainError> {
                     let acceptor = tls_acceptor.clone();
                     
                     tokio::spawn(async move {
+                        debug!("About to start TLS handshake for {}", peer_addr);
                         match acceptor.accept(stream).await {
                             Ok(tls_stream) => {
+                                info!("TLS handshake successful for {}", peer_addr);
                                 if let Err(e) = handle_client(tls_stream).await {
                                     error!("Error handling TLS client {}: {}", peer_addr, e);
                                 } else {
                                     info!("TLS client session completed successfully");
                                 }
                             }
-                            Err(e) => error!("TLS handshake failed for {}: {}", peer_addr, e),
+                            Err(e) => {
+                                error!("TLS handshake failed for {}: {}", peer_addr, e);
+                                // Log more details about the error
+                                if let Some(io_err) = e.source().and_then(|s| s.downcast_ref::<std::io::Error>()) {
+                                    error!("IO error kind: {:?}", io_err.kind());
+                                }
+                                if let Some(tls_err) = e.source().and_then(|s| s.downcast_ref::<rustls::Error>()) {
+                                    error!("TLS error: {:?}", tls_err);
+                                }
+                            }
                         }
                     });
                 }
