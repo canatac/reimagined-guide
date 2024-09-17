@@ -56,7 +56,7 @@ use std::env;
 use mailparse::parse_mail;
 use std::error::Error;
 use std::fmt;
-
+use constant_time_eq::constant_time_eq;
 // Custom error type for the main function
 #[derive(Debug)]
 struct MainError(String);
@@ -473,8 +473,8 @@ fn check_credentials(username: &[u8], password: &[u8]) -> bool {
     // For example:
     let expected_username = env::var("SMTP_USERNAME").expect("SMTP_USERNAME must be set");
     let expected_password = env::var("SMTP_PASSWORD").expect("SMTP_PASSWORD must be set");
-    
-    username == expected_username.as_bytes() && password == expected_password.as_bytes()
+    constant_time_eq(username, expected_username.as_bytes()) &&
+    constant_time_eq(password, expected_password.as_bytes())
 }
 
 // Main function
