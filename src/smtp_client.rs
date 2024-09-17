@@ -190,13 +190,13 @@ async fn send_email_content(stream: &mut StreamType, email_content: &str) -> std
 }
 
 // Helper function to extract email address from headers
+
 fn extract_email_address(content: &str, header: &str) -> Option<String> {
     content.lines()
         .find(|line| line.starts_with(header))
         .and_then(|line| line.split(':').nth(1))
-        .map(|addr| addr.trim().to_string())
+        .map(|addr| addr.trim().trim_matches(|c| c == '<' || c == '>').to_string())
 }
-
 async fn send_email_content_inner<T: AsyncWriteExt + AsyncReadExt + Unpin>(
     stream: &mut T, 
     from: &str, 

@@ -180,8 +180,11 @@ impl MailServer {
     async fn forward_email(&self, email: &Email) -> std::io::Result<()> {
         println!("Forwarding email: {}", email.body);
         let email_content = format!(
-            "From: {}\r\nTo: {}\r\nSubject: {}\r\n\r\n{}",
-            email.from, email.to, email.subject, email.body
+            "From: <{}>\r\nTo: <{}>\r\nSubject: {}\r\n\r\n{}",
+            email.from.trim(),
+            email.to.trim(),
+            email.subject.trim(),
+            email.body.trim()
         );
 
         send_outgoing_email(&email_content).await
