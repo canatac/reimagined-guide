@@ -1,9 +1,46 @@
+/*
+This is an API server implementation for the SMTP service.
+
+To run this API server, use the following command from the project root:
+
+cargo run --bin api_server
+
+Make sure you have set the necessary environment variables in your .env file:
+    API_SERVER_ADDR: The address and port for the API server (e.g., "127.0.0.1:3000")
+    SMTP_USERNAME: Your SMTP username
+    SMTP_PASSWORD: Your SMTP password
+    FULLCHAIN_PATH: Path to your SSL certificate chain file
+
+The API server provides the following endpoint:
+
+POST /send_email
+    Accepts JSON payload with the following structure:
+    {
+        "from": "sender@example.com",
+        "to": "recipient@example.com",
+        "subject": "Test Email",
+        "body": "This is a test email sent via the API server."
+    }
+
+Example usage with curl:
+curl -X POST http://localhost:3000/send_email \
+     -H "Content-Type: application/json" \
+     -d '{
+         "from": "sender@example.com",
+         "to": "recipient@example.com",
+         "subject": "Test Email",
+         "body": "This is a test email sent via the API server."
+     }'
+
+The API server will attempt to send the email using the SMTP client and return the result.
+*/
+
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 use serde::{Deserialize, Serialize};
 
-mod client;
-use client::send_outgoing_email;
+mod smtp_client;
+use smtp_client::send_outgoing_email;
 
 use std::fs::{File, create_dir_all};
 use std::io::{Write, BufRead, BufReader};

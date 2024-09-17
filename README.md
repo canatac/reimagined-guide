@@ -46,21 +46,19 @@ The arrows indicate the flow of data and control between components. This diagra
 
 #### 2.2.1 Project Structure
 
-
 ## Directory and File Descriptions
 
 ### `src/`
 Contains all the Rust source code for the project.
 
 - **`bin/`**: Holds binary executable entry points.
-- **`email/`**: Contains all email-related functionality, including the SMTP client.
-- **`api/`**: Houses the RESTful API implementation, including routes and handlers.
-- **`config/`**: Manages application configuration and environment settings.
-- **`main.rs`**: The main entry point for the application, setting up the web server.
+  - **`email_api.rs`**: Implements the email API functionality.
+  - **`smtp_client.rs`**: Contains the SMTP client implementation.
+  - **`smtp_server.rs`**: Houses the main SMTP server implementation.
 - **`test-smtp.rs`**: Contains SMTP testing functionality.
 
 ### `emails/`
-A directory for storing email-related resources, such as templates or test emails.
+A directory for storing received emails.
 
 ### `img/`
 Stores image assets used in the project or documentation.
@@ -71,8 +69,8 @@ The output directory for compiled code and dependencies (automatically generated
 ### `test-smtp/`
 Additional resources or scripts related to SMTP testing.
 
-### `tests/`
-Contains integration tests and potentially unit tests for the application.
+### `mailing-lists/`
+Directory for managing mailing lists.
 
 ### `Cargo.toml`
 The manifest file for the Rust package, defining dependencies and project metadata.
@@ -95,7 +93,7 @@ Project documentation, including setup instructions, usage guidelines, and other
 - **`localhost.key`**: The private key for the local development certificate.
 - **`privkey.pem`**: The private key for the SSL/TLS certificate.
 
-This structure organizes the project into logical components, separating concerns between email functionality, API implementation, and configuration. It also includes necessary files for deployment, testing, and secure communication.
+This structure organizes the project into logical components, separating concerns between email functionality, API implementation, and server operations. It also includes necessary files for deployment, testing, and secure communication.
 
 ### 2.3 Data Flow
 1. Client connects to the server (plain text or TLS)
@@ -103,6 +101,12 @@ This structure organizes the project into logical components, separating concern
 3. Client sends email data
 4. Server processes and stores the email
 5. Server sends confirmation to the client
+
+
+### 2.4 Security Considerations
+- TLS encryption for secure connections
+- Authentication mechanisms to prevent unauthorized access
+- Proper handling of sensitive data (e.g., credentials, email content)
 
 ## 3. Implementation Details
 
@@ -138,6 +142,10 @@ The server loads TLS certificates and private keys from files specified in the e
 
 ### 3.5 Error Handling and Logging
 Errors are logged using the `log` crate, with different severity levels for various types of errors. The server attempts to gracefully handle errors and continue operation where possible.
+
+
+### 3.6 Concurrency and Performance
+The server utilizes Tokio's async runtime to handle multiple connections concurrently, improving overall performance and scalability.
 
 ## 4. Configuration
 
@@ -186,6 +194,9 @@ Execute the compiled binary, ensuring all environment variables are set correctl
 
 ### 6.3 Load Testing
 [Information about load testing procedures and results would be added here]
+
+### 6.4 Security Testing
+[Information about security testing procedures and results would be added here]
 
 ## 7. Security Considerations
 
