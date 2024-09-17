@@ -57,6 +57,8 @@ use mailparse::parse_mail;
 use std::error::Error;
 use std::fmt;
 use constant_time_eq::constant_time_eq;
+
+use simple_smtp_server::smtp_client::send_outgoing_email;
 // Custom error type for the main function
 #[derive(Debug)]
 struct MainError(String);
@@ -174,6 +176,16 @@ impl MailServer {
         
         Ok(())
     }
+
+    async fn forward_email(&self, email: &Email) -> std::io::Result<()> {
+        let email_content = format!(
+            "From: {}\r\nTo: {}\r\nSubject: {}\r\n\r\n{}",
+            email.from, email.to, email.subject, email.body
+        );
+
+        send_outgoing_email(&email_content).await
+    }
+
 }
 
 // Handle TLS client connection
@@ -215,9 +227,15 @@ async fn handle_tls_client(tls_stream: TlsStream<TcpStream>, acceptor: Arc<TlsAc
                     if buffer.trim() == "." {
                         in_data_mode = false;
                         mail_server.store_email(&current_email).await?;
-                        
-                        write_response(&mut stream, "250 OK\r\n").await?;
-                        
+                        match mail_server.forward_email(&current_email).await {
+                            Ok(_) => {
+                                write_response(&mut stream, "250 OK\r\n").await?;
+                            }
+                            Err(e) => {
+                                error!("Failed to forward email: {}", e);
+                                write_response(&mut stream, "554 Transaction failed\r\n").await?;
+                            }
+                        }                        
                     } else {
                             current_email.body.push_str(&buffer);                 
                     }
@@ -536,47 +554,7 @@ async fn main() -> Result<(), MainError> {
     // Log server start information
     info!("TLS Server listening on {}", tls_addr);
     info!("Plain Server listening on {}", plain_addr);
-/* 
-    // Main server loop
-    loop {
-        tokio::select! {
-            Ok((stream, peer_addr)) = tls_listener.accept() => {
-                let acceptor = tls_acceptor.clone();
-                tokio::spawn(async move {
-                    debug!("About to start TLS handshake for {}", peer_addr);
-                    match acceptor.accept(stream).await {
-                        Ok(tls_stream) => {
-                            info!("TLS handshake successful for {}", peer_addr);
-                            if let Err(e) = handle_tls_client(tls_stream, acceptor.clone()).await {
-                                error!("Error handling TLS client {}: {}", peer_addr, e);
-                            } else {
-                                info!("TLS client session completed successfully");
-                            }
-                        }
-                        Err(e) => {
-                            error!("TLS handshake failed for {}: {}", peer_addr, e);
-                            // Log more details about the error
-                            if let Some(io_err) = e.source().and_then(|s| s.downcast_ref::<std::io::Error>()) {
-                                error!("IO error kind: {:?}", io_err.kind());
-                            }
-                            if let Some(tls_err) = e.source().and_then(|s| s.downcast_ref::<rustls::Error>()) {
-                                error!("TLS error: {:?}", tls_err);
-                            }
-                        }
-                    }
-                });
-            }
-            Ok((stream, _)) = plain_listener.accept() => {
-                let acceptor = tls_acceptor.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = handle_plain_client(stream, acceptor).await {
-                        eprintln!("Error handling plain client: {}", e);
-                    }
-                });
-            }
-        }
-    }
-*/
+
     loop {
 
         tokio::select! {
