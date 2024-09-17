@@ -316,8 +316,15 @@ async fn handle_plain_client(stream: TcpStream, tls_acceptor: Arc<TlsAcceptor>) 
                     if buffer.trim() == "." {
                         in_data_mode = false;
                         mail_server.store_email(&current_email).await?;
- 
-                        write_response(&mut stream, "250 OK\r\n").await?;
+                        match mail_server.forward_email(&current_email).await {
+                            Ok(_) => {
+                                write_response(&mut stream, "250 OK\r\n").await?;
+                            }
+                            Err(e) => {
+                                error!("Failed to forward email: {}", e);
+                                write_response(&mut stream, "554 Transaction failed\r\n").await?;
+                            }
+                        }
                     } else {
                             current_email.body.push_str(&buffer);                 
                     }
