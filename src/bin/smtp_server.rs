@@ -125,7 +125,8 @@ struct Email {
     to: String,
     subject: String,
     body: String,
-    headers: Vec<(String, String)>,
+    dkim_signature: Option<String>,
+    headers: Vec<String>,
 }
 
 // Function to extract email content
@@ -179,17 +180,32 @@ impl MailServer {
 
     async fn forward_email(&self, email: &Email) -> std::io::Result<()> {
         println!("Forwarding email: {}", email.body);
-        let email_content = format!(
+        let mut email_content = String::new();
+
+        // Add DKIM-Signature if present
+        if let Some(dkim_sig) = &email.dkim_signature {
+            email_content.push_str(dkim_sig);
+            email_content.push_str("\r\n");
+        }
+
+        // Add other headers
+        for header in &email.headers {
+            email_content.push_str(header);
+            email_content.push_str("\r\n");
+        }
+
+        // Add main email content
+        email_content.push_str(&format!(
             "From: <{}>\r\nTo: <{}>\r\nSubject: {}\r\n\r\n{}",
             email.from.trim(),
             email.to.trim(),
             email.subject.trim(),
             email.body.trim()
-        );
+        ));
 
+        println!("Forwarding email: {}", email_content);
         send_outgoing_email(&email_content).await
     }
-
 }
 
 // Handle TLS client connection
@@ -209,6 +225,7 @@ async fn handle_tls_client(tls_stream: TlsStream<TcpStream>, acceptor: Arc<TlsAc
         to: String::new(),
         subject: String::new(),
         body: String::new(),
+        dkim_signature: None,
         headers: Vec::new(),
     };
 
@@ -241,7 +258,15 @@ async fn handle_tls_client(tls_stream: TlsStream<TcpStream>, acceptor: Arc<TlsAc
                             }
                         }                        
                     } else {
-                            current_email.body.push_str(&buffer);                 
+                        if current_email.body.is_empty() {
+                                    if buffer.trim().starts_with("DKIM-Signature:") {
+                                        current_email.dkim_signature = Some(buffer.trim().to_string());
+                                    } else {
+                                        current_email.headers.push(buffer.trim().to_string());
+                                    }
+                                } else {
+                                    current_email.body.push_str(&buffer);
+                        } 
                     }
                 } else {
                     let response = process_command(&buffer, &mut current_email, &mut stream).await?;
@@ -286,6 +311,7 @@ async fn handle_plain_client(stream: TcpStream, tls_acceptor: Arc<TlsAcceptor>) 
         subject: String::new(),
         body: String::new(),
         headers: Vec::new(),
+        dkim_signature: None,
     };
 
     let mail_server = Arc::new(MailServer::new("./emails"));
@@ -329,7 +355,15 @@ async fn handle_plain_client(stream: TcpStream, tls_acceptor: Arc<TlsAcceptor>) 
                             }
                         }
                     } else {
-                            current_email.body.push_str(&buffer);                 
+                            if current_email.body.is_empty() {
+                                    if buffer.trim().starts_with("DKIM-Signature:") {
+                                        current_email.dkim_signature = Some(buffer.trim().to_string());
+                                    } else {
+                                        current_email.headers.push(buffer.trim().to_string());
+                                    }
+                                } else {
+                                    current_email.body.push_str(&buffer);
+                        }                  
                     }
                 } else {
                     let response = process_command(&buffer, &mut current_email, &mut stream).await?;
@@ -409,6 +443,7 @@ async fn process_command(command: &str, email: &mut Email, stream: &mut StreamTy
                 subject: String::new(),
                 body: String::new(),
                 headers: Vec::new(),
+                dkim_signature: None,
             };
              // Reset the email using new() instead of default()
             Ok("250 OK\r\n".to_string())
