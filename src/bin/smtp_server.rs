@@ -405,11 +405,13 @@ async fn handle_auth_login(stream: &mut StreamType) -> std::io::Result<String> {
     let mut username = String::new();
     stream.read_line(&mut username).await?;
     let username = general_purpose::STANDARD.decode(username.trim_end()).unwrap();
+    debug!("Received username: {}", String::from_utf8_lossy(&username));
 
     write_response(stream, "334 UGFzc3dvcmQ6\r\n").await?; // Base64 for "Password:"
     let mut password = String::new();
     stream.read_line(&mut password).await?;
     let password = general_purpose::STANDARD.decode(password.trim_end()).unwrap();
+    debug!("Received password: {}", String::from_utf8_lossy(&password));
 
     if check_credentials(&username, &password) {
         Ok("235 Authentication successful\r\n".to_string())
@@ -473,8 +475,19 @@ fn check_credentials(username: &[u8], password: &[u8]) -> bool {
     // For example:
     let expected_username = env::var("SMTP_USERNAME").expect("SMTP_USERNAME must be set");
     let expected_password = env::var("SMTP_PASSWORD").expect("SMTP_PASSWORD must be set");
-    constant_time_eq(username, expected_username.as_bytes()) &&
-    constant_time_eq(password, expected_password.as_bytes())
+      
+    debug!("Expected username: {}", expected_username);
+    debug!("Expected password: {}", expected_password);
+    debug!("Received username: {}", String::from_utf8_lossy(username));
+    debug!("Received password: {}", String::from_utf8_lossy(password));
+
+    let username_match = constant_time_eq(username, expected_username.as_bytes());
+    let password_match = constant_time_eq(password, expected_password.as_bytes());
+
+    debug!("Username match: {}", username_match);
+    debug!("Password match: {}", password_match);
+
+    username_match && password_match
 }
 
 // Main function
