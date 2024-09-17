@@ -91,6 +91,7 @@ async fn expect_code<T: AsyncReadExt + Unpin>(stream: &mut T, expected: &str) ->
     Ok(())
 }
 pub async fn send_outgoing_email(email_content: &str) -> std::io::Result<()> {
+    println!("Sending email: {}", email_content);
     let recipient_email = extract_email_address(email_content, "To:")
         .ok_or_else(|| IoError::new(ErrorKind::InvalidInput, "Invalid recipient email"))?;
     let recipient_domain = recipient_email.split('@').nth(1)
