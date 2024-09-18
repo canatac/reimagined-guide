@@ -179,7 +179,6 @@ impl MailServer {
     }
 
     async fn forward_email(&self, email: &Email) -> std::io::Result<()> {
-        println!("Forwarding email: {}", email.body);
         let mut email_content = String::new();
 
         // Add DKIM-Signature if present
@@ -196,7 +195,7 @@ impl MailServer {
 
         // Add main email content
         email_content.push_str(&format!(
-            "From: <{}>\r\nTo: <{}>\r\nSubject: {}\r\n\r\n{}",
+            "From: {}\r\nTo: {}\r\nSubject: {}\r\n\r\n{}",
             email.from.trim(),
             email.to.trim(),
             email.subject.trim(),
@@ -407,7 +406,6 @@ async fn process_command(command: &str, email: &mut Email, stream: &mut StreamTy
             handle_auth_plain(command).await
         } 
         s if s.starts_with("MAIL FROM:") => {
-            //email.from = command[10..].trim().to_string();
             email.from = s.trim_start_matches("MAIL FROM:").trim().to_string();
             Ok("250 OK\r\n".to_string())
         } 
@@ -549,11 +547,6 @@ fn check_credentials(username: &[u8], password: &[u8]) -> bool {
     let expected_username = env::var("SMTP_USERNAME").expect("SMTP_USERNAME must be set");
     let expected_password = env::var("SMTP_PASSWORD").expect("SMTP_PASSWORD must be set");
     
-    debug!("Expected username: {}", expected_username);
-    debug!("Expected password: {}", expected_password);
-    debug!("Received username: {}", String::from_utf8_lossy(username));
-    debug!("Received password: {}", String::from_utf8_lossy(password));
-
     let username_match = constant_time_eq(username, expected_username.as_bytes());
     let password_match = constant_time_eq(password, expected_password.as_bytes());
 
