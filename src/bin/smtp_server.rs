@@ -58,7 +58,9 @@ use std::error::Error;
 use std::fmt;
 use constant_time_eq::constant_time_eq;
 
-use simple_smtp_server::smtp_client::send_outgoing_email;
+use simple_smtp_server::send_outgoing_email;
+use simple_smtp_server::extract_email_address;
+
 // Custom error type for the main function
 #[derive(Debug)]
 struct MainError(String);
@@ -192,18 +194,25 @@ impl MailServer {
             email_content.push_str(header);
             email_content.push_str("\r\n");
         }
+        // Add From, To, and Subject headers if not already present
+        if !email.headers.iter().any(|h| h.starts_with("From:")) {
+            email_content.push_str(&format!("From: {}\r\n", email.from.trim()));
+        }
+        if !email.headers.iter().any(|h| h.starts_with("To:")) {
+            email_content.push_str(&format!("To: {}\r\n", email.to.trim()));
+        }
+        if !email.headers.iter().any(|h| h.starts_with("Subject:")) {
+            email_content.push_str(&format!("Subject: {}\r\n", email.subject.trim()));
+        }
+         // Add an empty line to separate headers from body
+         email_content.push_str("\r\n");
 
-        // Add main email content
-        email_content.push_str(&format!(
-            "From: {}\r\nTo: {}\r\nSubject: {}\r\n\r\n{}",
-            email.from.trim(),
-            email.to.trim(),
-            email.subject.trim(),
-            email.body.trim()
-        ));
+         // Add the email body
+         email_content.push_str(&email.body);
+ 
+         println!("Forwarding email: {}", email_content);
+         send_outgoing_email(&email_content).await
 
-        println!("Forwarding email: {}", email_content);
-        send_outgoing_email(&email_content).await
     }
 }
 
@@ -257,15 +266,24 @@ async fn handle_tls_client(tls_stream: TlsStream<TcpStream>, acceptor: Arc<TlsAc
                             }
                         }                        
                     } else {
-                        if current_email.body.is_empty() {
-                                    if buffer.trim().starts_with("DKIM-Signature:") {
-                                        current_email.dkim_signature = Some(buffer.trim().to_string());
-                                    } else {
-                                        current_email.headers.push(buffer.trim().to_string());
-                                    }
-                                } else {
-                                    current_email.body.push_str(&buffer);
-                        } 
+                        if current_email.body.is_empty() && !buffer.trim().is_empty() {
+                            current_email.headers.push(buffer.trim().to_string());
+                                if buffer.trim().starts_with("DKIM-Signature:") {
+                                    current_email.dkim_signature = Some(buffer.trim().to_string());
+                                } 
+                                if buffer.starts_with("From:") {
+                                    current_email.from = extract_email_address(&buffer, "From:").unwrap_or_default();
+                                }
+                                if buffer.starts_with("To:") {
+                                    current_email.to = extract_email_address(&buffer, "To:").unwrap_or_default();
+                                } 
+                                if buffer.starts_with("Subject:") {
+                                    current_email.subject = buffer.trim_start_matches("Subject:").trim().to_string();
+                                }
+                            } else {
+                                current_email.body.push_str(&buffer);
+                                current_email.body.push_str("\r\n");
+                            } 
                     }
                 } else {
                     let response = process_command(&buffer, &mut current_email, &mut stream).await?;
@@ -354,15 +372,24 @@ async fn handle_plain_client(stream: TcpStream, tls_acceptor: Arc<TlsAcceptor>) 
                             }
                         }
                     } else {
-                            if current_email.body.is_empty() {
-                                    if buffer.trim().starts_with("DKIM-Signature:") {
-                                        current_email.dkim_signature = Some(buffer.trim().to_string());
-                                    } else {
-                                        current_email.headers.push(buffer.trim().to_string());
-                                    }
-                                } else {
-                                    current_email.body.push_str(&buffer);
-                        }                  
+                        if current_email.body.is_empty() && !buffer.trim().is_empty() {
+                            current_email.headers.push(buffer.trim().to_string());
+                                if buffer.trim().starts_with("DKIM-Signature:") {
+                                    current_email.dkim_signature = Some(buffer.trim().to_string());
+                                } 
+                                if buffer.starts_with("From:") {
+                                    current_email.from = extract_email_address(&buffer, "From:").unwrap_or_default();
+                                }
+                                if buffer.starts_with("To:") {
+                                    current_email.to = extract_email_address(&buffer, "To:").unwrap_or_default();
+                                } 
+                                if buffer.starts_with("Subject:") {
+                                    current_email.subject = buffer.trim_start_matches("Subject:").trim().to_string();
+                                }
+                            } else {
+                                current_email.body.push_str(&buffer);
+                                current_email.body.push_str("\r\n");
+                            } 
                     }
                 } else {
                     let response = process_command(&buffer, &mut current_email, &mut stream).await?;
