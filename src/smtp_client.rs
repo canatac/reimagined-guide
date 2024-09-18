@@ -84,9 +84,10 @@ async fn find_smtp_port(host: &str) -> Option<u16> {
 async fn expect_code<T: AsyncReadExt + Unpin>(stream: &mut T, expected: &str) -> std::io::Result<()> {
     let mut response = [0; 1024];
     let n = stream.read(&mut response).await?;
-    let response = String::from_utf8_lossy(&response[..n]);
-    if !response.starts_with(expected) {
-        return Err(std::io::Error::new(std::io::ErrorKind::Other, format!("Unexpected response: {}", response)));
+    let response_str = String::from_utf8_lossy(&response[..n]);
+    println!("Received response: {}", response_str);
+    if !response_str.starts_with(expected) {
+        return Err(std::io::Error::new(std::io::ErrorKind::Other, format!("Unexpected response: {}", response_str)));
     }
     Ok(())
 }
@@ -203,28 +204,51 @@ async fn send_email_content_inner<T: AsyncWriteExt + AsyncReadExt + Unpin>(
     to: &str, 
     email_content: &str
 ) -> std::io::Result<()> {
+    println!("Sending MAIL FROM: <{}>", from);
     stream.write_all(format!("MAIL FROM:<{}>\r\n", from).as_bytes()).await?;
     expect_code(stream, "250").await?;
 
+    println!("Sending RCPT TO: <{}>", to);
     stream.write_all(format!("RCPT TO:<{}>\r\n", to).as_bytes()).await?;
     expect_code(stream, "250").await?;
 
+    println!("Sending DATA command");
     stream.write_all(b"DATA\r\n").await?;
     expect_code(stream, "354").await?;
 
+    println!("Sending email content:\n{}", email_content);
     // Send the entire email content
     stream.write_all(email_content.as_bytes()).await?;
 
     // Ensure the email content ends with \r\n.\r\n
     if !email_content.ends_with("\r\n.\r\n") {
+        println!("Adding final .");
         stream.write_all(b"\r\n.\r\n").await?;
     }
 
     expect_code(stream, "250").await?;
 
+    println!("Sending QUIT command");
     stream.write_all(b"QUIT\r\n").await?;
     expect_code(stream, "221").await?;
 
+    Ok(())
+}
+
+fn validate_email_content(content: &str) -> Result<(), String> {
+    let lines: Vec<&str> = content.lines().collect();
+    if !lines[0].starts_with("From: <") || !lines[0].ends_with(">") {
+        return Err("Invalid From header".to_string());
+    }
+    if !lines[1].starts_with("To: <") || !lines[1].ends_with(">") {
+        return Err("Invalid To header".to_string());
+    }
+    if !lines[2].starts_with("Subject: ") {
+        return Err("Invalid Subject header".to_string());
+    }
+    if lines[3] != "" {
+        return Err("Missing blank line after headers".to_string());
+    }
     Ok(())
 }
 
@@ -278,6 +302,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         from, to, subject, body
     );
 
+    if let Err(e) = validate_email_content(&email_content) {
+        eprintln!("Invalid email content: {}", e);
+        return Ok(());
+    }
 
     match send_outgoing_email(&email_content).await {
         Ok(_) => println!("Email sent successfully"),
