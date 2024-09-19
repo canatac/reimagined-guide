@@ -345,7 +345,7 @@ fn process_dkim_signature(signature: &str) -> String {
             // Preserve line breaks and indentation in 'b' tag value
             let b_value = trimmed.splitn(2, '=').nth(1).unwrap_or("");
             format!("b={}", b_value.lines().enumerate().map(|(i, line)| {
-                if i == 0 { line.trim() } else { format!(" {}", line.trim()) }
+                if i == 0 { line.trim().to_string() } else { format!(" {}", line.trim()) }
             }).collect::<Vec<_>>().join("\n"))
         } else {
             trimmed.to_string()
