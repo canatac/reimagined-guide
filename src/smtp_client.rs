@@ -49,7 +49,7 @@ use std::env;
 use dotenv::dotenv;
 const SMTP_PORTS: [u16; 3] = [587, 465, 25];
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(5);
-
+use std::collections::HashMap;
 
 #[derive(Clone)]
 pub struct Email {
@@ -216,42 +216,15 @@ async fn send_email_content_inner<T: AsyncWriteExt + AsyncReadExt + Unpin>(
     stream.write_all(b"DATA\r\n").await?;
     expect_code(stream, "354").await?;
 
-        // Split the email content into headers and body
-        let parts: Vec<&str> = email_content.split("\r\n\r\n").collect();
-        if parts.len() != 2 {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "Invalid email format"));
-        }
-        let (headers, body) = (parts[0], parts[1]);
-        // Process and send headers
-        let mut processed_headers = Vec::new();
-        for header in headers.lines() {
-            if header.starts_with("DKIM-Signature:") {
-                // Remove any line breaks within the DKIM signature
-                let dkim_parts: Vec<&str> = header.splitn(2, ':').collect();
-                if dkim_parts.len() == 2 {
-                    let dkim_value = dkim_parts[1].replace("\r\n", "").replace("\n", "");
-                    processed_headers.push(format!("DKIM-Signature:{}", dkim_value));
-                }
-            } else if header.starts_with("From:") || header.starts_with("To:") {
-                // Ensure From and To headers have angle brackets
-                let parts: Vec<&str> = header.splitn(2, ':').collect();
-                if parts.len() == 2 {
-                    let email = parts[1].trim();
-                    if !email.starts_with('<') || !email.ends_with('>') {
-                        processed_headers.push(format!("{}: <{}>", parts[0], email.trim_matches(|c| c == '<' || c == '>')));
-                    } else {
-                        processed_headers.push(header.to_string());
-                    }
-                }
-            }
-            else {
-                processed_headers.push(header.to_string());
-            }
-        }
-        // Send headers
-        println!("Sending headers:\n{}", headers);
-        for header in headers.lines() {
-            stream.write_all(header.as_bytes()).await?;
+    // Parse and process headers
+    let (headers, body) = parse_email_content(email_content);
+
+    // Send processed headers
+    println!("Sending headers:");
+    for (key, value) in &headers {
+        let header_line = format!("{}: {}", key, value);
+        println!("{}", header_line);
+        stream.write_all(header_line.as_bytes()).await?;
         stream.write_all(b"\r\n").await?;
     }
 
@@ -275,6 +248,82 @@ async fn send_email_content_inner<T: AsyncWriteExt + AsyncReadExt + Unpin>(
      expect_code(stream, "221").await?;
  
      Ok(())
+}
+
+
+fn parse_email_content(content: &str) -> (HashMap<String, String>, String) {
+    let mut headers: HashMap<String, String> = HashMap::new();
+    let mut lines = content.lines();
+    let mut current_header = String::new();
+    let mut body = String::new();
+    let mut in_body = false;
+
+    while let Some(line) = lines.next() {
+        if in_body {
+            body.push_str(line);
+            body.push_str("\r\n");
+        } else if line.is_empty() {
+            in_body = true;
+        } else if line.starts_with(char::is_whitespace) {
+            // Continuation of previous header
+            if !current_header.is_empty() {
+                if let Some(v) = headers.get_mut(&current_header) {
+                    v.push_str(line.trim());
+                    eprintln!("Appended to header '{}': {}", current_header, line.trim());
+                }
+            }
+        } else {
+            // New header
+            if let Some(index) = line.find(':') {
+                let (key, value) = line.split_at(index);
+                current_header = key.trim().to_string();
+                let mut value = value[1..].trim().to_string();
+                
+                // Special handling for DKIM-Signature
+                if current_header == "DKIM-Signature" {
+                    // Collect the entire DKIM-Signature, which may span multiple lines
+                    while let Some(next_line) = lines.next() {
+                        if next_line.starts_with(char::is_whitespace) {
+                            value.push_str(next_line.trim());
+                        } else {
+                            // If the next line doesn't start with whitespace, we've reached the end of the DKIM-Signature
+                            break;
+                        }
+                    }
+                }
+                
+                headers.insert(current_header.clone(), value.clone());
+                eprintln!("Inserted to header '{}': {}", current_header, value);
+            }
+        }
+    }
+
+    // Process specific headers
+    if let Some(from) = headers.get_mut("From") {
+        let formatted = format_email_address(from);
+        *from = formatted.clone();
+        eprintln!("Formatted 'From' header: {}", formatted);
+    }
+    if let Some(to) = headers.get_mut("To") {
+        let formatted = format_email_address(to);
+        *to = formatted.clone();
+        eprintln!("Formatted 'To' header: {}", formatted);
+    }
+    if let Some(dkim) = headers.get_mut("DKIM-Signature") {
+        let cleaned = dkim.replace("\r\n", "").replace("\n", "");
+        *dkim = cleaned.clone();
+        eprintln!("Cleaned 'DKIM-Signature' header: {}", cleaned);
+    }
+
+    (headers, body)
+}
+
+fn format_email_address(addr: &str) -> String {
+    if !addr.contains('<') && !addr.contains('>') {
+        format!("<{}>", addr.trim())
+    } else {
+        addr.to_string()
+    }
 }
 
 fn validate_email_content(content: &str) -> Result<(), String> {
