@@ -216,17 +216,30 @@ async fn send_email_content_inner<T: AsyncWriteExt + AsyncReadExt + Unpin>(
     stream.write_all(b"DATA\r\n").await?;
     expect_code(stream, "354").await?;
 
-    // Split the email content into headers and body
-    let parts: Vec<&str> = email_content.split("\r\n\r\n").collect();
-    if parts.len() != 2 {
-        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "Invalid email format"));
-    }
-    let (headers, body) = (parts[0], parts[1]);
-
-    // Send headers
-    println!("Sending headers:\n{}", headers);
-    for header in headers.lines() {
-        stream.write_all(header.as_bytes()).await?;
+        // Split the email content into headers and body
+        let parts: Vec<&str> = email_content.split("\r\n\r\n").collect();
+        if parts.len() != 2 {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "Invalid email format"));
+        }
+        let (headers, body) = (parts[0], parts[1]);
+        // Process and send headers
+        let mut processed_headers = Vec::new();
+        for header in headers.lines() {
+            if header.starts_with("DKIM-Signature:") {
+                // Remove any line breaks within the DKIM signature
+                let dkim_parts: Vec<&str> = header.splitn(2, ':').collect();
+                if dkim_parts.len() == 2 {
+                    let dkim_value = dkim_parts[1].replace("\r\n", "").replace("\n", "");
+                    processed_headers.push(format!("DKIM-Signature:{}", dkim_value));
+                }
+            } else {
+                processed_headers.push(header.to_string());
+            }
+        }
+        // Send headers
+        println!("Sending headers:\n{}", headers);
+        for header in headers.lines() {
+            stream.write_all(header.as_bytes()).await?;
         stream.write_all(b"\r\n").await?;
     }
 
