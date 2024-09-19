@@ -287,12 +287,13 @@ fn parse_email_content(content: &str) -> (HashMap<String, String>, String) {
                         if in_b_tag {
                             full_signature.push('\n');
                             full_signature.push_str(next_line);  // Use untrimmed line to preserve indentation
-                            if !next_line.ends_with('=') {
-                                break;  // End of 'b' tag value
-                            }
                         } else {
                             full_signature.push(' ');
                             full_signature.push_str(trimmed);
+                        }
+                        // Check if we've reached the end of the 'b' tag
+                        if in_b_tag && !next_line.trim_end().ends_with('=') {
+                            break;  // End of 'b' tag value
                         }
                     }
                     println!("Full DKIM-Signature: {}", full_signature);
