@@ -236,10 +236,13 @@ async fn send_email_content_inner<T: AsyncWriteExt + AsyncReadExt + Unpin>(
      println!("Body content: <START>{}<END>", body.replace("\n", "\\n").replace("\r", "\\r"));
      
      println!("Sending email body:\n{}", body);
-     stream.write_all(body.as_bytes()).await?;
+     // Trim leading and trailing \r\n from the body
+     let trimmed_body = body.trim_matches(|c| c == '\r' || c == '\n');
+     println!("Trimmed body content: <START>{}<END>", trimmed_body.replace("\n", "\\n").replace("\r", "\\r"));
+     stream.write_all(trimmed_body.as_bytes()).await?;
  
      // Ensure the email content ends with \r\n.\r\n
-     if !body.ends_with("\r\n.\r\n") {
+     if !trimmed_body.ends_with("\r\n.\r\n") {
          println!("Adding final .");
          stream.write_all(b"\r\n.\r\n").await?;
      }
