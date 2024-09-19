@@ -233,6 +233,8 @@ async fn send_email_content_inner<T: AsyncWriteExt + AsyncReadExt + Unpin>(
      stream.write_all(b"\r\n").await?;
 
      // Send body
+     println!("Body content: <START>{}<END>", body.replace("\n", "\\n").replace("\r", "\\r"));
+     
      println!("Sending email body:\n{}", body);
      stream.write_all(body.as_bytes()).await?;
  
