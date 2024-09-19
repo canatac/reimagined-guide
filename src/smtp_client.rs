@@ -300,12 +300,10 @@ fn parse_email_content(content: &str) -> (HashMap<String, String>, String) {
                             break;
                         }
                     }
-                    // Remove any extra spaces after semicolons
-                    let cleaned_signature = full_signature.split(';')
-                        .map(|s| s.trim())
-                        .collect::<Vec<&str>>()
-                        .join("; ");
-                    headers.insert(header_name, cleaned_signature);
+                    // Process the DKIM-Signature
+                    let processed_signature = process_dkim_signature(&full_signature);
+                    eprintln!("Processed DKIM-Signature: {}", processed_signature);
+                    headers.insert(header_name, processed_signature);
                 } else {
                     // Handle other headers
                     let mut full_value = value.to_string();
@@ -336,14 +334,32 @@ fn parse_email_content(content: &str) -> (HashMap<String, String>, String) {
         *to = formatted.clone();
         eprintln!("Formatted 'To' header: {}", formatted);
     }
-    if let Some(dkim) = headers.get_mut("DKIM-Signature") {
-        let cleaned = dkim.replace("\r\n", " ").replace("\n", " ");
-        *dkim = cleaned.clone();
-        eprintln!("Cleaned 'DKIM-Signature' header: {}", cleaned);
+    for (key, value) in &headers {
+        eprintln!("Header '{}': {}", key, value);
     }
 
     (headers, body)
 }
+
+fn process_dkim_signature(signature: &str) -> String {
+    signature.split(';')
+        .map(|part| {
+            let mut kv = part.trim().splitn(2, '=');
+            if let (Some(k), Some(v)) = (kv.next(), kv.next()) {
+                if k.trim() == "h" {
+                    // Special handling for the 'h' tag
+                    format!("{}={}", k.trim(), v.split(':').map(|s| s.trim()).collect::<Vec<_>>().join(":"))
+                } else {
+                    format!("{}={}", k.trim(), v.trim())
+                }
+            } else {
+                part.trim().to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
 
 fn format_email_address(addr: &str) -> String {
     if !addr.contains('<') && !addr.contains('>') {
