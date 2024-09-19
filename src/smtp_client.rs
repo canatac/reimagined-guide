@@ -277,13 +277,12 @@ fn parse_email_content(content: &str) -> (HashMap<String, String>, String) {
                     // Special handling for DKIM-Signature
                     let mut full_signature = value.to_string();
                     while let Some(next_line) = lines.peek() {
-                        let trimmed = next_line.trim();
-                        if trimmed.is_empty() || trimmed.contains(':') {
+                        if next_line.trim().is_empty() {
                             break;
                         }
                         full_signature.push(' ');
-                        full_signature.push_str(trimmed);
-                        lines.next(); // consume the peeked 
+                        full_signature.push_str(next_line.trim());
+                        lines.next(); // consume the peeked line
                     }
                     // Process the DKIM-Signature
                     println!("Full DKIM-Signature: {}", full_signature);
@@ -339,19 +338,20 @@ fn process_dkim_signature(signature: &str) -> String {
     let dkim_tags: HashSet<&str> = [
         "v", "a", "b", "bh", "c", "d", "h", "i", "l", "q", "s", "t", "x", "z"
     ].iter().cloned().collect();
+    let mut processed_parts = Vec::new();
+    let mut current_part = String::new();
+
     for part in signature.split_whitespace() {
-        if dkim_tags.contains(&part.split('=').next().unwrap_or("")) {
-            if !current_part.is_empty() {
+        if let Some(tag) = part.split('=').next() {
+            if dkim_tags.contains(tag) && !current_part.is_empty() {
                 processed_parts.push(current_part.trim().to_string());
                 current_part.clear();
             }
-            current_part.push_str(part);
-        } else {
-            if !current_part.is_empty() {
-                current_part.push(' ');
-            }
-            current_part.push_str(part);
         }
+        if !current_part.is_empty() && !current_part.ends_with('=') {
+            current_part.push(' ');
+        }
+        current_part.push_str(part);
     }
 
     if !current_part.is_empty() {
