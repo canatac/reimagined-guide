@@ -276,6 +276,7 @@ fn parse_email_content(content: &str) -> (HashMap<String, String>, String) {
                 if header_name == "DKIM-Signature" {
                     let mut full_signature = value.to_string();
                     let mut in_b_tag = false;
+                    let mut b_tag_content = String::new();
                     while let Some(next_line) = lines.next() {
                         let trimmed = next_line.trim();
                         if trimmed.is_empty() {
@@ -283,18 +284,21 @@ fn parse_email_content(content: &str) -> (HashMap<String, String>, String) {
                         }
                         if trimmed.starts_with("b=") {
                             in_b_tag = true;
+                            b_tag_content.push_str(&trimmed[2..]);  // Start capturing from after "b="
                         }
                         if in_b_tag {
-                            full_signature.push('\n');
-                            full_signature.push_str(next_line);  // Use untrimmed line to preserve indentation
+                            b_tag_content.push_str(trimmed);// Use untrimmed line to preserve indentation
                         } else {
                             full_signature.push(' ');
                             full_signature.push_str(trimmed);
                         }
-                        // Check if we've reached the end of the 'b' tag
-                        if in_b_tag && !next_line.trim_end().ends_with('=') {
+                        if in_b_tag && !trimmed.ends_with('=') {
                             break;  // End of 'b' tag value
                         }
+                    }
+                    if in_b_tag {
+                        full_signature.push_str("b=");
+                        full_signature.push_str(&b_tag_content);
                     }
                     println!("Full DKIM-Signature: {}", full_signature);
                     let processed_signature = process_dkim_signature(&full_signature);
