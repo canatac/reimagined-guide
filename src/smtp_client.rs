@@ -276,9 +276,10 @@ fn parse_email_content(content: &str) -> (HashMap<String, String>, String) {
                 if header_name == "DKIM-Signature" {
                     let mut full_signature = value.to_string();
                     let mut in_b_tag = false;
+                    let mut b_tag_complete = false;
                     while let Some(next_line) = lines.peek() {
                         let trimmed = next_line.trim();
-                        if trimmed.is_empty() {
+                        if trimmed.is_empty() || b_tag_complete {
                             break;
                         }
                         if trimmed.starts_with("b=") {
@@ -287,14 +288,14 @@ fn parse_email_content(content: &str) -> (HashMap<String, String>, String) {
                         if in_b_tag {
                             full_signature.push('\n');
                             full_signature.push_str(next_line);  // Use untrimmed line to preserve indentation
+                            if !next_line.ends_with('=') {
+                                b_tag_complete = true;
+                            }
                         } else {
                             full_signature.push(' ');
                             full_signature.push_str(trimmed);
                         }
                         lines.next(); // consume the peeked line
-                        if in_b_tag && lines.peek().map_or(true, |line| !line.trim_start().starts_with(char::is_alphanumeric)) {
-                            break;  // End of 'b' tag value
-                        }
                     }
                     println!("Full DKIM-Signature: {}", full_signature);
                     let processed_signature = process_dkim_signature(&full_signature);
@@ -338,22 +339,28 @@ fn parse_email_content(content: &str) -> (HashMap<String, String>, String) {
 }
 
 fn process_dkim_signature(signature: &str) -> String {
+    let dkim_tags = ["v", "a", "b", "bh", "c", "d", "h", "i", "l", "q", "s", "t", "x", "z"];
+    
     let parts: Vec<&str> = signature.split(';').collect();
-    let processed_parts: Vec<String> = parts.iter().map(|&part| {
-        let trimmed = part.trim();
-        if trimmed.starts_with("b=") {
-            // Preserve line breaks and indentation in 'b' tag value
-            let b_value = trimmed.splitn(2, '=').nth(1).unwrap_or("");
-            format!("b={}", b_value.lines().enumerate().map(|(i, line)| {
-                if i == 0 { line.trim().to_string() } else { format!(" {}", line.trim()) }
-            }).collect::<Vec<_>>().join("\n"))
-        } else {
-            trimmed.to_string()
-        }
-    }).collect();
+    let processed_parts: Vec<String> = parts.iter()
+        .take_while(|&&part| {
+            let trimmed = part.trim();
+            dkim_tags.iter().any(|&tag| trimmed.starts_with(tag) && trimmed[tag.len()..].trim_start().starts_with('='))
+        })
+        .map(|&part| {
+            let trimmed = part.trim();
+            if trimmed.starts_with("b=") {
+                // Preserve line breaks and indentation in 'b' tag value
+                let b_value = trimmed.splitn(2, '=').nth(1).unwrap_or("");
+                format!("b={}", b_value.lines().enumerate().map(|(i, line)| {
+                    if i == 0 { line.trim().to_string() } else { format!(" {}", line.trim()) }
+                }).collect::<Vec<_>>().join("\n"))
+            } else {
+                trimmed.to_string()
+            }
+        }).collect();
 
-    // Join all parts except the last one (which might be incomplete)
-    processed_parts[..processed_parts.len()-1].join("; ")
+    processed_parts.join("; ")
 }
 
 
