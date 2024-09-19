@@ -253,7 +253,7 @@ async fn send_email_content_inner<T: AsyncWriteExt + AsyncReadExt + Unpin>(
 
 fn parse_email_content(content: &str) -> (HashMap<String, String>, String) {
     let mut headers: HashMap<String, String> = HashMap::new();
-    let mut lines = content.lines();
+    let mut lines = content.lines().peekable();
     let mut current_header = String::new();
     let mut body = String::new();
     let mut in_body = false;
@@ -268,6 +268,7 @@ fn parse_email_content(content: &str) -> (HashMap<String, String>, String) {
             // Continuation of previous header
             if !current_header.is_empty() {
                 if let Some(v) = headers.get_mut(&current_header) {
+                    v.push_str(" ");
                     v.push_str(line.trim());
                     eprintln!("Appended to header '{}': {}", current_header, line.trim());
                 }
@@ -275,24 +276,24 @@ fn parse_email_content(content: &str) -> (HashMap<String, String>, String) {
         } else {
             // New header
             if let Some(index) = line.find(':') {
-                let (key, value) = line.split_at(index);
+                let (key, mut value) = line.split_at(index);
                 current_header = key.trim().to_string();
-                let mut value = value[1..].trim().to_string();
+                value = value[1..].trim();
                 
-                // Special handling for DKIM-Signature
-                if current_header == "DKIM-Signature" {
-                    // Collect the entire DKIM-Signature, which may span multiple lines
-                    while let Some(next_line) = lines.next() {
+                    // Collect multi-line header value
+                    let mut full_value = value.to_string();
+                    while let Some(next_line) = lines.peek() {
                         if next_line.starts_with(char::is_whitespace) {
-                            value.push_str(next_line.trim());
+                            full_value.push_str(" ");
+                            full_value.push_str(next_line.trim());
+                            lines.next(); // consume the peeked line
                         } else {
-                            // If the next line doesn't start with whitespace, we've reached the end of the DKIM-Signature
                             break;
                         }
                     }
-                }
                 
-                headers.insert(current_header.clone(), value.clone());
+                
+                headers.insert(current_header.clone(), full_value.clone());
                 eprintln!("Inserted to header '{}': {}", current_header, value);
             }
         }
@@ -310,7 +311,7 @@ fn parse_email_content(content: &str) -> (HashMap<String, String>, String) {
         eprintln!("Formatted 'To' header: {}", formatted);
     }
     if let Some(dkim) = headers.get_mut("DKIM-Signature") {
-        let cleaned = dkim.replace("\r\n", "").replace("\n", "");
+        let cleaned = dkim.replace("\r\n", " ").replace("\n", " ");
         *dkim = cleaned.clone();
         eprintln!("Cleaned 'DKIM-Signature' header: {}", cleaned);
     }
