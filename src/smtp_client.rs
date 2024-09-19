@@ -277,6 +277,7 @@ fn parse_email_content(content: &str) -> (HashMap<String, String>, String) {
                     let mut full_signature = value.to_string();
                     let mut in_b_tag = false;
                     let mut b_tag_content = String::new();
+
                     while let Some(next_line) = lines.next() {
                         let trimmed = next_line.trim();
                         if trimmed.is_empty() {
@@ -285,20 +286,22 @@ fn parse_email_content(content: &str) -> (HashMap<String, String>, String) {
                         if trimmed.starts_with("b=") {
                             in_b_tag = true;
                             b_tag_content.push_str(&trimmed[2..]);  // Start capturing from after "b="
-                        }
-                        if in_b_tag {
-                            b_tag_content.push_str(trimmed);// Use untrimmed line to preserve indentation
+                            while !b_tag_content.ends_with('=') {
+                                if let Some(next_b_line) = lines.next() {
+                                    b_tag_content.push_str(next_b_line.trim());
+                                } else {
+                                    break;  // End of input
+                                }
+                            }
+                            // Add the captured b tag content to full_signature
+                            full_signature.push_str("b=");
+                            full_signature.push_str(&b_tag_content);
+                            break;  // We've captured the entire b tag, so we can stop 
                         } else {
                             full_signature.push(' ');
                             full_signature.push_str(trimmed);
                         }
-                        if in_b_tag && !trimmed.ends_with('=') {
-                            break;  // End of 'b' tag value
-                        }
-                    }
-                    if in_b_tag {
-                        full_signature.push_str("b=");
-                        full_signature.push_str(&b_tag_content);
+                       
                     }
                     println!("Full DKIM-Signature: {}", full_signature);
                     let processed_signature = process_dkim_signature(&full_signature);
