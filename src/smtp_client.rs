@@ -286,15 +286,15 @@ fn parse_email_content(content: &str) -> (HashMap<String, String>, String) {
                         }
                         if in_b_tag {
                             full_signature.push('\n');
-                            full_signature.push_str(trimmed);
+                            full_signature.push_str(next_line);  // Use untrimmed line to preserve indentation
                         } else {
                             full_signature.push(' ');
                             full_signature.push_str(trimmed);
                         }
-                        if in_b_tag && !trimmed.ends_with('=') {
+                        lines.next(); // consume the peeked line
+                        if in_b_tag && lines.peek().map_or(true, |line| !line.trim().is_empty() && !line.trim_start().starts_with(char::is_alphanumeric)) {
                             break;  // End of 'b' tag value
                         }
-                        lines.next(); // consume the peeked line
                     }
                     println!("Full DKIM-Signature: {}", full_signature);
                     let processed_signature = process_dkim_signature(&full_signature);
@@ -342,12 +342,13 @@ fn process_dkim_signature(signature: &str) -> String {
     parts.iter().enumerate().map(|(i, &part)| {
         let trimmed = part.trim();
         if trimmed.starts_with("b=") {
-            // Preserve line breaks in 'b' tag value
-            trimmed.replace('\n', "\n ")
+            // Preserve line breaks and indentation in 'b' tag value
+            let b_value = trimmed.splitn(2, '=').nth(1).unwrap_or("");
+            format!("b={}", b_value.lines().collect::<Vec<_>>().join("\n "))
         } else {
             trimmed.to_string()
         }
-    }).collect::<Vec<_>>().join("; ")
+    }).collect::<Vec<_>>().join(";\n")
 }
 
 
