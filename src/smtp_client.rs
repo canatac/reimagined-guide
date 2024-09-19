@@ -301,8 +301,9 @@ fn parse_email_content(content: &str) -> (HashMap<String, String>, String) {
                         }
                     }
                     // Process the DKIM-Signature
+                    println!("Full DKIM-Signature: {}", full_signature);
                     let processed_signature = process_dkim_signature(&full_signature);
-                    eprintln!("Processed DKIM-Signature: {}", processed_signature);
+                    eprintln!("Processed DKIM-Signature: {}", processed_signature); 
                     headers.insert(header_name, processed_signature);
                 } else {
                     // Handle other headers
@@ -348,7 +349,7 @@ fn process_dkim_signature(signature: &str) -> String {
             if let (Some(k), Some(v)) = (kv.next(), kv.next()) {
                 if k.trim() == "h" {
                     // Special handling for the 'h' tag
-                    format!("{}={}", k.trim(), v.split(':').map(|s| s.trim()).collect::<Vec<_>>().join(":"))
+                    format!("{}={}", k.trim(), v.split(':').map(str::trim).collect::<Vec<_>>().join(":"))
                 } else {
                     format!("{}={}", k.trim(), v.trim())
                 }
