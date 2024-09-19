@@ -327,8 +327,7 @@ fn parse_email_content(content: &str) -> (HashMap<String, String>, String) {
 }
 
 fn process_dkim_signature(signature: &str) -> String {
-    let mut processed_parts = Vec::new();
-    let mut current_part = String::new();
+
  // Set of accepted DKIM-Signature tags
     // DKIM-Signature header reference:
     // RFC 6376: "DomainKeys Identified Mail (DKIM) Signatures"
