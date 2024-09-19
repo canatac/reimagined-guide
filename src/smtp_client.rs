@@ -292,7 +292,7 @@ fn parse_email_content(content: &str) -> (HashMap<String, String>, String) {
                             full_signature.push_str(trimmed);
                         }
                         lines.next(); // consume the peeked line
-                        if in_b_tag && lines.peek().map_or(true, |line| !line.trim().is_empty() && !line.trim_start().starts_with(char::is_alphanumeric)) {
+                        if in_b_tag && lines.peek().map_or(true, |line| !line.trim_start().starts_with(char::is_alphanumeric)) {
                             break;  // End of 'b' tag value
                         }
                     }
@@ -339,16 +339,21 @@ fn parse_email_content(content: &str) -> (HashMap<String, String>, String) {
 
 fn process_dkim_signature(signature: &str) -> String {
     let parts: Vec<&str> = signature.split(';').collect();
-    parts.iter().enumerate().map(|(i, &part)| {
+    let processed_parts: Vec<String> = parts.iter().map(|&part| {
         let trimmed = part.trim();
         if trimmed.starts_with("b=") {
             // Preserve line breaks and indentation in 'b' tag value
             let b_value = trimmed.splitn(2, '=').nth(1).unwrap_or("");
-            format!("b={}", b_value.lines().collect::<Vec<_>>().join("\n "))
+            format!("b={}", b_value.lines().enumerate().map(|(i, line)| {
+                if i == 0 { line.trim() } else { format!(" {}", line.trim()) }
+            }).collect::<Vec<_>>().join("\n"))
         } else {
             trimmed.to_string()
         }
-    }).collect::<Vec<_>>().join(";\n")
+    }).collect();
+
+    // Join all parts except the last one (which might be incomplete)
+    processed_parts[..processed_parts.len()-1].join("; ")
 }
 
 
