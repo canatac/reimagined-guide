@@ -216,23 +216,40 @@ async fn send_email_content_inner<T: AsyncWriteExt + AsyncReadExt + Unpin>(
     stream.write_all(b"DATA\r\n").await?;
     expect_code(stream, "354").await?;
 
-    println!("Sending email content:\n{}", email_content);
-    // Send the entire email content
-    stream.write_all(email_content.as_bytes()).await?;
+    // Split the email content into headers and body
+    let parts: Vec<&str> = email_content.split("\r\n\r\n").collect();
+    if parts.len() != 2 {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "Invalid email format"));
+    }
+    let (headers, body) = (parts[0], parts[1]);
 
-    // Ensure the email content ends with \r\n.\r\n
-    if !email_content.ends_with("\r\n.\r\n") {
-        println!("Adding final .");
-        stream.write_all(b"\r\n.\r\n").await?;
+    // Send headers
+    println!("Sending headers:\n{}", headers);
+    for header in headers.lines() {
+        stream.write_all(header.as_bytes()).await?;
+        stream.write_all(b"\r\n").await?;
     }
 
-    expect_code(stream, "250").await?;
+     // Add an empty line to separate headers from body
+     stream.write_all(b"\r\n").await?;
 
-    println!("Sending QUIT command");
-    stream.write_all(b"QUIT\r\n").await?;
-    expect_code(stream, "221").await?;
-
-    Ok(())
+     // Send body
+     println!("Sending email body:\n{}", body);
+     stream.write_all(body.as_bytes()).await?;
+ 
+     // Ensure the email content ends with \r\n.\r\n
+     if !body.ends_with("\r\n.\r\n") {
+         println!("Adding final .");
+         stream.write_all(b"\r\n.\r\n").await?;
+     }
+ 
+     expect_code(stream, "250").await?;
+ 
+     println!("Sending QUIT command");
+     stream.write_all(b"QUIT\r\n").await?;
+     expect_code(stream, "221").await?;
+ 
+     Ok(())
 }
 
 fn validate_email_content(content: &str) -> Result<(), String> {
