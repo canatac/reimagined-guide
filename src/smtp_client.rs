@@ -50,6 +50,7 @@ use dotenv::dotenv;
 const SMTP_PORTS: [u16; 3] = [587, 465, 25];
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(5);
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 #[derive(Clone)]
 pub struct Email {
@@ -254,9 +255,18 @@ async fn send_email_content_inner<T: AsyncWriteExt + AsyncReadExt + Unpin>(
 fn parse_email_content(content: &str) -> (HashMap<String, String>, String) {
     let mut headers: HashMap<String, String> = HashMap::new();
     let mut lines = content.lines().peekable();
-    let mut current_header = String::new();
     let mut body = String::new();
     let mut in_body = false;
+
+ // Set of accepted DKIM-Signature tags
+    // DKIM-Signature header reference:
+    // RFC 6376: "DomainKeys Identified Mail (DKIM) Signatures"
+    // Published: September 2011
+    // Status: PROPOSED STANDARD
+    // Reference: https://tools.ietf.org/html/rfc6376
+    let dkim_tags: HashSet<&str> = [
+        "v", "a", "b", "bh", "c", "d", "h", "i", "l", "q", "s", "t", "x", "z"
+    ].iter().cloned().collect();
 
     while let Some(line) = lines.next() {
         if in_body {
@@ -264,37 +274,45 @@ fn parse_email_content(content: &str) -> (HashMap<String, String>, String) {
             body.push_str("\r\n");
         } else if line.is_empty() {
             in_body = true;
-        } else if line.starts_with(char::is_whitespace) {
-            // Continuation of previous header
-            if !current_header.is_empty() {
-                if let Some(v) = headers.get_mut(&current_header) {
-                    v.push_str(" ");
-                    v.push_str(line.trim());
-                    eprintln!("Appended to header '{}': {}", current_header, line.trim());
-                }
-            }
         } else {
-            // New header
+            // New header or continuation
             if let Some(index) = line.find(':') {
                 let (key, mut value) = line.split_at(index);
-                current_header = key.trim().to_string();
+                let header_name = key.trim().to_string();
                 value = value[1..].trim();
-                
-                    // Collect multi-line header value
+
+                if header_name == "DKIM-Signature" {
+                    // Special handling for DKIM-Signature
+                    let mut full_signature = value.to_string();
+                    while let Some(next_line) = lines.peek() {
+                        let trimmed = next_line.trim();
+                        if trimmed.is_empty() || trimmed.contains(':') {
+                            break;
+                        }
+                        if trimmed.split('=').next().map_or(false, |tag| dkim_tags.contains(tag)) {
+                            full_signature.push(' ');
+                            full_signature.push_str(trimmed);
+                            lines.next(); // consume the peeked line
+                        } else {
+                            break;
+                        }
+                    }
+                    headers.insert(header_name, full_signature);
+                } else {
+                    // Handle other headers
                     let mut full_value = value.to_string();
                     while let Some(next_line) = lines.peek() {
                         if next_line.starts_with(char::is_whitespace) {
-                            full_value.push_str(" ");
+                            full_value.push(' ');
                             full_value.push_str(next_line.trim());
                             lines.next(); // consume the peeked line
                         } else {
                             break;
                         }
                     }
-                
-                
-                headers.insert(current_header.clone(), full_value.clone());
-                eprintln!("Inserted to header '{}': {}", current_header, value);
+                    headers.insert(header_name.clone(), full_value.clone());
+                    eprintln!("Inserted header '{}': {}", header_name, full_value);
+                }
             }
         }
     }
