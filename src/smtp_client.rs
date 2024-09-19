@@ -276,25 +276,15 @@ fn parse_email_content(content: &str) -> (HashMap<String, String>, String) {
                 if header_name == "DKIM-Signature" {
                     let mut full_signature = value.to_string();
                     let mut in_b_tag = false;
-                    let mut b_tag_complete = false;
                     while let Some(next_line) = lines.peek() {
-                        let trimmed = next_line.trim();
-                        if trimmed.is_empty() || b_tag_complete {
+                        if next_line.trim().is_empty() || (!next_line.starts_with(char::is_whitespace) && in_b_tag) {
                             break;
                         }
-                        if trimmed.starts_with("b=") {
+                        if next_line.trim().starts_with("b=") {
                             in_b_tag = true;
                         }
-                        if in_b_tag {
-                            full_signature.push('\n');
-                            full_signature.push_str(next_line);  // Use untrimmed line to preserve indentation
-                            if !next_line.ends_with('=') {
-                                b_tag_complete = true;
-                            }
-                        } else {
-                            full_signature.push(' ');
-                            full_signature.push_str(trimmed);
-                        }
+                        full_signature.push('\n');
+                        full_signature.push_str(next_line.trim());
                         lines.next(); // consume the peeked line
                     }
                     println!("Full DKIM-Signature: {}", full_signature);
@@ -350,11 +340,9 @@ fn process_dkim_signature(signature: &str) -> String {
         .map(|&part| {
             let trimmed = part.trim();
             if trimmed.starts_with("b=") {
-                // Preserve line breaks and indentation in 'b' tag value
+                // Remove line breaks in 'b' tag value as per DKIM spec
                 let b_value = trimmed.splitn(2, '=').nth(1).unwrap_or("");
-                format!("b={}", b_value.lines().enumerate().map(|(i, line)| {
-                    if i == 0 { line.trim().to_string() } else { format!(" {}", line.trim()) }
-                }).collect::<Vec<_>>().join("\n"))
+                format!("b={}", b_value.lines().map(|line| line.trim()).collect::<Vec<_>>().join(""))
             } else {
                 trimmed.to_string()
             }
