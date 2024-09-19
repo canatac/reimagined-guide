@@ -275,16 +275,12 @@ fn parse_email_content(content: &str) -> (HashMap<String, String>, String) {
 
                 if header_name == "DKIM-Signature" {
                     let mut full_signature = value.to_string();
-                    let mut in_b_tag = false;
                     while let Some(next_line) = lines.peek() {
                         let trimmed = next_line.trim();
-                        if trimmed.is_empty() || (!trimmed.starts_with(char::is_whitespace) && !in_b_tag) {
+                        if trimmed.is_empty() {
                             break;
                         }
-                        if trimmed.starts_with("b=") {
-                            in_b_tag = true;
-                        }
-                        full_signature.push(' ');
+                        full_signature.push_str(" ");
                         full_signature.push_str(trimmed);
                         lines.next(); // consume the peeked line
                     }
@@ -330,37 +326,10 @@ fn parse_email_content(content: &str) -> (HashMap<String, String>, String) {
 }
 
 fn process_dkim_signature(signature: &str) -> String {
-
- // Set of accepted DKIM-Signature tags
-    // DKIM-Signature header reference:
-    // RFC 6376: "DomainKeys Identified Mail (DKIM) Signatures"
-    // Published: September 2011
-    // Status: PROPOSED STANDARD
-    // Reference: https://tools.ietf.org/html/rfc6376
-    let dkim_tags: HashSet<&str> = [
-        "v", "a", "b", "bh", "c", "d", "h", "i", "l", "q", "s", "t", "x", "z"
-    ].iter().cloned().collect();
-    let mut processed_parts = Vec::new();
-    let mut current_part = String::new();
-
-    for part in signature.split_whitespace() {
-        if let Some(tag) = part.split('=').next() {
-            if dkim_tags.contains(tag) && !current_part.is_empty() {
-                processed_parts.push(current_part.trim().to_string());
-                current_part.clear();
-            }
-        }
-        if !current_part.is_empty() && !current_part.ends_with('=') {
-            current_part.push(' ');
-        }
-        current_part.push_str(part);
-    }
-
-    if !current_part.is_empty() {
-        processed_parts.push(current_part.trim().to_string());
-    }
-
-    processed_parts.join("; ")
+    signature.split(';')
+        .map(|part| part.trim())
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 
