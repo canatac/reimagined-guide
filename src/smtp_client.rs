@@ -232,7 +232,19 @@ async fn send_email_content_inner<T: AsyncWriteExt + AsyncReadExt + Unpin>(
                     let dkim_value = dkim_parts[1].replace("\r\n", "").replace("\n", "");
                     processed_headers.push(format!("DKIM-Signature:{}", dkim_value));
                 }
-            } else {
+            } else if header.starts_with("From:") || header.starts_with("To:") {
+                // Ensure From and To headers have angle brackets
+                let parts: Vec<&str> = header.splitn(2, ':').collect();
+                if parts.len() == 2 {
+                    let email = parts[1].trim();
+                    if !email.starts_with('<') || !email.ends_with('>') {
+                        processed_headers.push(format!("{}: <{}>", parts[0], email.trim_matches(|c| c == '<' || c == '>')));
+                    } else {
+                        processed_headers.push(header.to_string());
+                    }
+                }
+            }
+            else {
                 processed_headers.push(header.to_string());
             }
         }
