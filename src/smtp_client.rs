@@ -276,16 +276,24 @@ fn parse_email_content(content: &str) -> (HashMap<String, String>, String) {
                 if header_name == "DKIM-Signature" {
                     let mut full_signature = value.to_string();
                     let mut in_b_tag = false;
-                    while let Some(next_line) = lines.peek() {
-                        if next_line.trim().is_empty() || (!next_line.starts_with(char::is_whitespace) && in_b_tag) {
+                    while let Some(next_line) = lines.next() {  // Changed from peek() to next()
+                        let trimmed = next_line.trim();
+                        if trimmed.is_empty() {
                             break;
                         }
-                        if next_line.trim().starts_with("b=") {
+                        if trimmed.starts_with("b=") {
                             in_b_tag = true;
                         }
-                        full_signature.push('\n');
-                        full_signature.push_str(next_line.trim());
-                        lines.next(); // consume the peeked line
+                        if in_b_tag {
+                            full_signature.push('\n');
+                            full_signature.push_str(next_line);  // Use untrimmed line to preserve indentation
+                        } else {
+                            full_signature.push(' ');
+                            full_signature.push_str(trimmed);
+                        }
+                        if in_b_tag && !trimmed.starts_with(char::is_alphanumeric) {
+                            break;  // End of 'b' tag value
+                        }
                     }
                     println!("Full DKIM-Signature: {}", full_signature);
                     let processed_signature = process_dkim_signature(&full_signature);
