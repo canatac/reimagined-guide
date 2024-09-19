@@ -258,15 +258,7 @@ fn parse_email_content(content: &str) -> (HashMap<String, String>, String) {
     let mut body = String::new();
     let mut in_body = false;
 
- // Set of accepted DKIM-Signature tags
-    // DKIM-Signature header reference:
-    // RFC 6376: "DomainKeys Identified Mail (DKIM) Signatures"
-    // Published: September 2011
-    // Status: PROPOSED STANDARD
-    // Reference: https://tools.ietf.org/html/rfc6376
-    let dkim_tags: HashSet<&str> = [
-        "v", "a", "b", "bh", "c", "d", "h", "i", "l", "q", "s", "t", "x", "z"
-    ].iter().cloned().collect();
+
 
     while let Some(line) = lines.next() {
         if in_body {
@@ -289,16 +281,9 @@ fn parse_email_content(content: &str) -> (HashMap<String, String>, String) {
                         if trimmed.is_empty() || trimmed.contains(':') {
                             break;
                         }
-                        if trimmed.split('=').next().map_or(false, |tag| dkim_tags.contains(tag)) {
-                            if !full_signature.ends_with(';') {
-                                full_signature.push(';');
-                            }
-                            full_signature.push(' ');
-                            full_signature.push_str(trimmed);
-                            lines.next(); // consume the peeked line
-                        } else {
-                            break;
-                        }
+                        full_signature.push(' ');
+                        full_signature.push_str(trimmed);
+                        lines.next(); // consume the peeked 
                     }
                     // Process the DKIM-Signature
                     println!("Full DKIM-Signature: {}", full_signature);
@@ -343,22 +328,37 @@ fn parse_email_content(content: &str) -> (HashMap<String, String>, String) {
 }
 
 fn process_dkim_signature(signature: &str) -> String {
-    signature.split(';')
-        .map(|part| {
-            let mut kv = part.trim().splitn(2, '=');
-            if let (Some(k), Some(v)) = (kv.next(), kv.next()) {
-                if k.trim() == "h" {
-                    // Special handling for the 'h' tag
-                    format!("{}={}", k.trim(), v.split(':').map(str::trim).collect::<Vec<_>>().join(":"))
-                } else {
-                    format!("{}={}", k.trim(), v.trim())
-                }
-            } else {
-                part.trim().to_string()
+    let mut processed_parts = Vec::new();
+    let mut current_part = String::new();
+ // Set of accepted DKIM-Signature tags
+    // DKIM-Signature header reference:
+    // RFC 6376: "DomainKeys Identified Mail (DKIM) Signatures"
+    // Published: September 2011
+    // Status: PROPOSED STANDARD
+    // Reference: https://tools.ietf.org/html/rfc6376
+    let dkim_tags: HashSet<&str> = [
+        "v", "a", "b", "bh", "c", "d", "h", "i", "l", "q", "s", "t", "x", "z"
+    ].iter().cloned().collect();
+    for part in signature.split_whitespace() {
+        if dkim_tags.contains(&part.split('=').next().unwrap_or("")) {
+            if !current_part.is_empty() {
+                processed_parts.push(current_part.trim().to_string());
+                current_part.clear();
             }
-        })
-        .collect::<Vec<_>>()
-        .join("; ")
+            current_part.push_str(part);
+        } else {
+            if !current_part.is_empty() {
+                current_part.push(' ');
+            }
+            current_part.push_str(part);
+        }
+    }
+
+    if !current_part.is_empty() {
+        processed_parts.push(current_part.trim().to_string());
+    }
+
+    processed_parts.join("; ")
 }
 
 
