@@ -290,6 +290,9 @@ fn parse_email_content(content: &str) -> (HashMap<String, String>, String) {
                             break;
                         }
                         if trimmed.split('=').next().map_or(false, |tag| dkim_tags.contains(tag)) {
+                            if !full_signature.ends_with(';') {
+                                full_signature.push(';');
+                            }
                             full_signature.push(' ');
                             full_signature.push_str(trimmed);
                             lines.next(); // consume the peeked line
@@ -297,7 +300,12 @@ fn parse_email_content(content: &str) -> (HashMap<String, String>, String) {
                             break;
                         }
                     }
-                    headers.insert(header_name, full_signature);
+                    // Remove any extra spaces after semicolons
+                    let cleaned_signature = full_signature.split(';')
+                        .map(|s| s.trim())
+                        .collect::<Vec<&str>>()
+                        .join("; ");
+                    headers.insert(header_name, cleaned_signature);
                 } else {
                     // Handle other headers
                     let mut full_value = value.to_string();
