@@ -185,10 +185,12 @@ async fn send_to_mailing_list(email_req: web::Json<MailingListEmailRequest>) -> 
 }
 
 async fn send_email_handler(email_req: web::Json<EmailRequest>) -> impl Responder {
+    println!("Received email request");  // Add this line
     let dkim_service_url = env::var("DKIM_SERVICE_URL").expect("DKIM_SERVICE_URL not set");
 
     let client = reqwest::Client::new();
 
+    println!("Sending request to DKIM service: {}", dkim_service_url);  // Add this line
     let dkim_response = match client.post(&dkim_service_url)
         .json(&serde_json::json!({
             "from": email_req.from,
@@ -199,6 +201,7 @@ async fn send_email_handler(email_req: web::Json<EmailRequest>) -> impl Responde
         .send()
         .await {
             Ok(resp) => {
+                println!("DKIM service response status: {:?}", resp.status());  // Add this line
                 if resp.status().is_success() {
                     println!("DKIM service responded with success: {:?}", resp.status());
                     return HttpResponse::Ok().json(serde_json::json!({
@@ -268,19 +271,16 @@ async fn main() -> std::io::Result<()> {
     builder.set_certificate_chain_file(env::var("FULLCHAIN_PATH").expect("FULLCHAIN_PATH must be set")).unwrap();
 
     HttpServer::new(|| {
-        let cors = Cors::default()
-            .allowed_origin("http://localhost:50505")
-            .allowed_methods(vec!["GET", "POST"])
-            .allowed_headers(vec![
-                actix_web::http::header::AUTHORIZATION,
-                actix_web::http::header::ACCEPT,
-                actix_web::http::header::CONTENT_TYPE,
-            ])
+        let cors = Cors::permissive()
+            .allow_any_origin()
+            .allow_any_method()
+            .allow_any_header()
             .supports_credentials()
             .max_age(3600);
 
         App::new()
             .wrap(cors)
+            .wrap(actix_web::middleware::Logger::default())
             .route("/send-email", web::post().to(send_email_handler))
             .route("/create-mailing-list", web::post().to(create_mailing_list))
             .route("/send-to-mailing-list", web::post().to(send_to_mailing_list))
