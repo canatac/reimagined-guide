@@ -164,17 +164,6 @@ async fn send_to_mailing_list(email_req: web::Json<MailingListEmailRequest>) -> 
 
 async fn send_email_handler(email_req: web::Json<EmailRequest>) -> impl Responder {
     let dkim_service_url = env::var("DKIM_SERVICE_URL").expect("DKIM_SERVICE_URL not set");
-    
-    let date = Utc::now().to_rfc2822();
-    let body = if email_req.body.ends_with("\r\n") {
-        email_req.body.clone()
-    } else {
-        format!("{}\r\n", email_req.body)
-    };
-    let email_content = format!(
-        "From: {}\r\nTo: {}\r\nSubject: {}\r\nDate: {}\r\n\r\n{}",
-        email_req.from, email_req.to, email_req.subject, date, body
-    );
 
     let client = reqwest::Client::new();
 
@@ -187,7 +176,16 @@ async fn send_email_handler(email_req: web::Json<EmailRequest>) -> impl Responde
         }))
         .send()
         .await {
-            Ok(resp) => resp,
+            Ok(resp) => {
+                if resp.status().is_success() {
+                    println!("DKIM service responded with success: {:?}", resp.status());
+                    return HttpResponse::Ok().json(serde_json::json!({
+                        "status": "success",
+                        "message": "Email signed and sent successfully"
+                    }));
+                }
+                resp
+            },
             Err(e) => {
                 eprintln!("Failed to call DKIM service: {}", e);
                 return HttpResponse::InternalServerError().json(serde_json::json!({
@@ -217,10 +215,15 @@ async fn send_email_handler(email_req: web::Json<EmailRequest>) -> impl Responde
     };
 
     // Assuming the DKIM service returns a "status" field indicating success
+    // Check if the DKIM service returned a messageId
+    let message_id = dkim_result["messageId"].as_str().unwrap_or("");
+    
+    // Update the response to include the messageId if available
     match dkim_result["status"].as_str() {
         Some("success") => HttpResponse::Ok().json(serde_json::json!({
             "status": "success", 
-            "message": "Email signed and sent successfully"
+            "message": "Email signed and sent successfully",
+            "messageId": message_id
         })),
         _ => {
             let error_message = dkim_result["message"].as_str().unwrap_or("Unknown error");
