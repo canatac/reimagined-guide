@@ -269,7 +269,7 @@ async fn main() -> std::io::Result<()> {
 
     HttpServer::new(|| {
         let cors = Cors::default()
-            .allow_any_origin()  // This allows any origin
+            .allowed_origin("http://localhost:50505")
             .allowed_methods(vec!["GET", "POST"])
             .allowed_headers(vec![
                 actix_web::http::header::AUTHORIZATION,
