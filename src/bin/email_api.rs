@@ -3,7 +3,7 @@ This is an API server implementation for the SMTP service.
 
 To run this API server, use the following command from the project root:
 
-cargo run --bin api_server
+cargo run --bin email_api
 
 Make sure you have set the necessary environment variables in your .env file:
     API_SERVER_ADDR: The address and port for the API server (e.g., "127.0.0.1:3000")
@@ -177,6 +177,7 @@ async fn send_email_handler(email_req: web::Json<EmailRequest>) -> impl Responde
     );
 
     let client = reqwest::Client::new();
+
     let dkim_response = match client.post(&dkim_service_url)
         .json(&serde_json::json!({
             "from": email_req.from,
@@ -191,7 +192,7 @@ async fn send_email_handler(email_req: web::Json<EmailRequest>) -> impl Responde
                 eprintln!("Failed to call DKIM service: {}", e);
                 return HttpResponse::InternalServerError().json(serde_json::json!({
                     "status": "error",
-                    "message": "Failed to generate DKIM signature"
+                    "message": "Failed to generate DKIM signature and send email"
                 }));
             }
         };
@@ -200,7 +201,7 @@ async fn send_email_handler(email_req: web::Json<EmailRequest>) -> impl Responde
         eprintln!("DKIM service returned an error: {:?}", dkim_response.status());
         return HttpResponse::InternalServerError().json(serde_json::json!({
             "status": "error",
-            "message": "DKIM service error"
+            "message": "DKIM service error: failed to sign and send email"
         }));
     }
 
@@ -210,18 +211,26 @@ async fn send_email_handler(email_req: web::Json<EmailRequest>) -> impl Responde
             eprintln!("Failed to parse DKIM service response: {}", e);
             return HttpResponse::InternalServerError().json(serde_json::json!({
                 "status": "error",
-                "message": "Failed to parse DKIM signature"
+                "message": "Failed to parse DKIM service response"
             }));
         }
     };
 
-    let dkim_signature = dkim_result["dkimSignature"].as_str().unwrap_or("");
-    let email_content_with_dkim = format!("{}\r\n{}", dkim_signature, email_content);
-
-    match send_outgoing_email(&email_content_with_dkim).await {
-        Ok(_) => HttpResponse::Ok().json(serde_json::json!({"status": "success", "message": "Email sent successfully"})),
-        Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({"status": "error", "message": e.to_string()})),
+    // Assuming the DKIM service returns a "status" field indicating success
+    match dkim_result["status"].as_str() {
+        Some("success") => HttpResponse::Ok().json(serde_json::json!({
+            "status": "success", 
+            "message": "Email signed and sent successfully"
+        })),
+        _ => {
+            let error_message = dkim_result["message"].as_str().unwrap_or("Unknown error");
+            HttpResponse::InternalServerError().json(serde_json::json!({
+                "status": "error",
+                "message": format!("Failed to sign and send email: {}", error_message)
+            }))
+        }
     }
+    
 }
 
 #[actix_web::main]
