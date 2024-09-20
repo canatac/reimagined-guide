@@ -38,6 +38,7 @@ The API server will attempt to send the email using the SMTP client and return t
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 use serde::{Deserialize, Serialize};
+use actix_cors::Cors;
 
 mod smtp_client;
 use simple_smtp_server::send_outgoing_email;
@@ -270,7 +271,15 @@ async fn main() -> std::io::Result<()> {
     builder.set_certificate_chain_file(env::var("FULLCHAIN_PATH").expect("FULLCHAIN_PATH must be set")).unwrap();
 
     HttpServer::new(|| {
+        let cors = Cors::default()
+            .allowed_origin("http://localhost:3000")  // Adjust this to match your front-end URL
+            .allowed_methods(vec!["GET", "POST"])
+            .allowed_headers(vec![http::header::AUTHORIZATION, http::header::ACCEPT])
+            .allowed_header(http::header::CONTENT_TYPE)
+            .max_age(3600);
+
         App::new()
+            .wrap(cors)
             .route("/send-email", web::post().to(send_email_handler))
             .route("/create-mailing-list", web::post().to(create_mailing_list))
             .route("/send-to-mailing-list", web::post().to(send_to_mailing_list))
