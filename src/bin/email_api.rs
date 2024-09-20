@@ -39,16 +39,13 @@ use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 use serde::{Deserialize, Serialize};
 use actix_cors::Cors;
-
 mod smtp_client;
-use simple_smtp_server::send_outgoing_email;
 
 use std::fs::{File, create_dir_all};
 use std::io::{Write, BufRead, BufReader};
 use std::path::Path;
 use dotenv::dotenv;
 use std::env;
-use chrono::Utc;
 use reqwest;
 
 #[derive(Deserialize, Serialize)]
@@ -274,8 +271,8 @@ async fn main() -> std::io::Result<()> {
         let cors = Cors::default()
             .allowed_origin("http://localhost:3000")  // Adjust this to match your front-end URL
             .allowed_methods(vec!["GET", "POST"])
-            .allowed_headers(vec![http::header::AUTHORIZATION, http::header::ACCEPT])
-            .allowed_header(http::header::CONTENT_TYPE)
+            .allowed_headers(vec![actix_web::http::header::AUTHORIZATION, actix_web::http::header::ACCEPT])
+            .allowed_header(actix_web::http::header::CONTENT_TYPE)
             .max_age(3600);
 
         App::new()
