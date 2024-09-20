@@ -129,6 +129,7 @@ struct Email {
     body: String,
     dkim_signature: Option<String>,
     headers: Vec<String>,
+    raw_content: String,
 }
 
 // Function to extract email content
@@ -190,7 +191,6 @@ impl MailServer {
         }
 
         // Add other headers
-        // Add other headers
         for header in &email.headers {
             if !header.starts_with("DKIM-Signature:") &&
                !header.starts_with("From:") &&
@@ -236,6 +236,7 @@ async fn handle_tls_client(tls_stream: TlsStream<TcpStream>, acceptor: Arc<TlsAc
         body: String::new(),
         dkim_signature: None,
         headers: Vec::new(),
+        raw_content: String::new()
     };
 
     let mail_server = Arc::new(MailServer::new("./emails"));
@@ -257,6 +258,16 @@ async fn handle_tls_client(tls_stream: TlsStream<TcpStream>, acceptor: Arc<TlsAc
                     if buffer.trim() == "." {
                         in_data_mode = false;
                         mail_server.store_email(&current_email).await?;
+                        match send_outgoing_email(&current_email.raw_content).await {
+                            Ok(_) => {
+                                write_response(&mut stream, "250 OK\r\n").await?;
+                            }
+                            Err(e) => {
+                                error!("Failed to forward email: {}", e);
+                                write_response(&mut stream, "554 Transaction failed\r\n").await?;
+                            }
+                        }
+                        /*
                         match mail_server.forward_email(&current_email).await {
                             Ok(_) => {
                                 write_response(&mut stream, "250 OK\r\n").await?;
@@ -265,22 +276,41 @@ async fn handle_tls_client(tls_stream: TlsStream<TcpStream>, acceptor: Arc<TlsAc
                                 error!("Failed to forward email: {}", e);
                                 write_response(&mut stream, "554 Transaction failed\r\n").await?;
                             }
-                        }                        
+                        } */                       
                     } else {
-                        if current_email.body.is_empty() && !buffer.trim().is_empty() {
-                            let line = buffer.trim().to_string();
-                            current_email.headers.push(line.clone());
-                            if line.starts_with("DKIM-Signature:") {
-                                current_email.dkim_signature = Some(line);
-                            } else if line.starts_with("From:") {
-                                current_email.from = extract_email_address(&line, "From:").unwrap_or_default();
-                            } else if line.starts_with("To:") {
-                                current_email.to = extract_email_address(&line, "To:").unwrap_or_default();
-                            } else if line.starts_with("Subject:") {
-                                current_email.subject = line.trim_start_matches("Subject:").trim().to_string();
+                        // Collect the stream content without alteration
+                        if current_email.raw_content.is_empty() {
+                            current_email.raw_content = buffer;
+                            let trimmed_buffer = current_email.raw_content.trim();
+                            if !trimmed_buffer.is_empty() {
+                                let line = trimmed_buffer.to_string();
+                                current_email.headers.push(line.clone());
+                                if trimmed_buffer.starts_with("DKIM-Signature:") {
+                                    current_email.dkim_signature = Some(line);
+                                } else if trimmed_buffer.starts_with("From:") {
+                                    current_email.from = extract_email_address(trimmed_buffer, "From:").unwrap_or_default();
+                                } else if trimmed_buffer.starts_with("To:") {
+                                    current_email.to = extract_email_address(trimmed_buffer, "To:").unwrap_or_default();
+                                } else if trimmed_buffer.starts_with("Subject:") {
+                                    current_email.subject = trimmed_buffer.trim_start_matches("Subject:").trim().to_string();
+                                }
                             }
                         } else {
-                            current_email.body.push_str(&buffer);
+                            let trimmed_buffer = buffer.trim();
+                            if !trimmed_buffer.is_empty() {
+                                let line = trimmed_buffer.to_string();
+                                current_email.headers.push(line.clone());
+                                if trimmed_buffer.starts_with("DKIM-Signature:") {
+                                    current_email.dkim_signature = Some(line);
+                                } else if trimmed_buffer.starts_with("From:") {
+                                    current_email.from = extract_email_address(trimmed_buffer, "From:").unwrap_or_default();
+                                } else if trimmed_buffer.starts_with("To:") {
+                                    current_email.to = extract_email_address(trimmed_buffer, "To:").unwrap_or_default();
+                                } else if trimmed_buffer.starts_with("Subject:") {
+                                    current_email.subject = trimmed_buffer.trim_start_matches("Subject:").trim().to_string();
+                                }
+                            }
+                            current_email.raw_content.push_str(&buffer);
                         }
                     }
                 } else {
@@ -327,6 +357,7 @@ async fn handle_plain_client(stream: TcpStream, tls_acceptor: Arc<TlsAcceptor>) 
         body: String::new(),
         headers: Vec::new(),
         dkim_signature: None,
+        raw_content: String::new()
     };
 
     let mail_server = Arc::new(MailServer::new("./emails"));
@@ -360,6 +391,16 @@ async fn handle_plain_client(stream: TcpStream, tls_acceptor: Arc<TlsAcceptor>) 
                     if buffer.trim() == "." {
                         in_data_mode = false;
                         mail_server.store_email(&current_email).await?;
+                        match send_outgoing_email(&current_email.raw_content).await {
+                            Ok(_) => {
+                                write_response(&mut stream, "250 OK\r\n").await?;
+                            }
+                            Err(e) => {
+                                error!("Failed to forward email: {}", e);
+                                write_response(&mut stream, "554 Transaction failed\r\n").await?;
+                            }
+                        }
+                        /*
                         match mail_server.forward_email(&current_email).await {
                             Ok(_) => {
                                 write_response(&mut stream, "250 OK\r\n").await?;
@@ -369,21 +410,41 @@ async fn handle_plain_client(stream: TcpStream, tls_acceptor: Arc<TlsAcceptor>) 
                                 write_response(&mut stream, "554 Transaction failed\r\n").await?;
                             }
                         }
+                         */
+                        
                     } else {
-                        if current_email.body.is_empty() && !buffer.trim().is_empty() {
-                            let line = buffer.trim().to_string();
-                            current_email.headers.push(line.clone());
-                            if line.starts_with("DKIM-Signature:") {
-                                current_email.dkim_signature = Some(line);
-                            } else if line.starts_with("From:") {
-                                current_email.from = extract_email_address(&line, "From:").unwrap_or_default();
-                            } else if line.starts_with("To:") {
-                                current_email.to = extract_email_address(&line, "To:").unwrap_or_default();
-                            } else if line.starts_with("Subject:") {
-                                current_email.subject = line.trim_start_matches("Subject:").trim().to_string();
+                        if current_email.raw_content.is_empty() {
+                            current_email.raw_content = buffer;
+                            let trimmed_buffer = current_email.raw_content.trim();
+                            if !trimmed_buffer.is_empty() {
+                                let line = trimmed_buffer.to_string();
+                                current_email.headers.push(line.clone());
+                                if trimmed_buffer.starts_with("DKIM-Signature:") {
+                                    current_email.dkim_signature = Some(line);
+                                } else if trimmed_buffer.starts_with("From:") {
+                                    current_email.from = extract_email_address(trimmed_buffer, "From:").unwrap_or_default();
+                                } else if trimmed_buffer.starts_with("To:") {
+                                    current_email.to = extract_email_address(trimmed_buffer, "To:").unwrap_or_default();
+                                } else if trimmed_buffer.starts_with("Subject:") {
+                                    current_email.subject = trimmed_buffer.trim_start_matches("Subject:").trim().to_string();
+                                }
                             }
                         } else {
-                            current_email.body.push_str(&buffer);
+                            let trimmed_buffer = buffer.trim();
+                            if !trimmed_buffer.is_empty() {
+                                let line = trimmed_buffer.to_string();
+                                current_email.headers.push(line.clone());
+                                if trimmed_buffer.starts_with("DKIM-Signature:") {
+                                    current_email.dkim_signature = Some(line);
+                                } else if trimmed_buffer.starts_with("From:") {
+                                    current_email.from = extract_email_address(trimmed_buffer, "From:").unwrap_or_default();
+                                } else if trimmed_buffer.starts_with("To:") {
+                                    current_email.to = extract_email_address(trimmed_buffer, "To:").unwrap_or_default();
+                                } else if trimmed_buffer.starts_with("Subject:") {
+                                    current_email.subject = trimmed_buffer.trim_start_matches("Subject:").trim().to_string();
+                                }
+                            }
+                            current_email.raw_content.push_str(&buffer);
                         }
                     }
                 } else {
@@ -464,6 +525,7 @@ async fn process_command(command: &str, email: &mut Email, stream: &mut StreamTy
                 body: String::new(),
                 headers: Vec::new(),
                 dkim_signature: None,
+                raw_content: String::new()
             };
              // Reset the email using new() instead of default()
             Ok("250 OK\r\n".to_string())
