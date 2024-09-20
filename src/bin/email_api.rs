@@ -269,10 +269,14 @@ async fn main() -> std::io::Result<()> {
 
     HttpServer::new(|| {
         let cors = Cors::default()
-            .allowed_origin("http://localhost:3000")  // Adjust this to match your front-end URL
+            .allow_any_origin()  // This allows any origin
             .allowed_methods(vec!["GET", "POST"])
-            .allowed_headers(vec![actix_web::http::header::AUTHORIZATION, actix_web::http::header::ACCEPT])
-            .allowed_header(actix_web::http::header::CONTENT_TYPE)
+            .allowed_headers(vec![
+                actix_web::http::header::AUTHORIZATION,
+                actix_web::http::header::ACCEPT,
+                actix_web::http::header::CONTENT_TYPE,
+            ])
+            .supports_credentials()
             .max_age(3600);
 
         App::new()
