@@ -216,7 +216,24 @@ async fn send_email_content_inner<T: AsyncWriteExt + AsyncReadExt + Unpin>(
     println!("Sending DATA command");
     stream.write_all(b"DATA\r\n").await?;
     expect_code(stream, "354").await?;
+    // Send the entire email content without alteration
+    println!("++++++++++++++++++++++++++++Sending unaltered email content: {}", email_content);
+    stream.write_all(email_content.as_bytes()).await?;
 
+    // Ensure the email content ends with \r\n.\r\n
+    if !email_content.ends_with("\r\n.\r\n") {
+        println!("Adding final .");
+        stream.write_all(b"\r\n.\r\n").await?;
+    }
+
+    expect_code(stream, "250").await?;
+
+    println!("Sending QUIT command");
+    stream.write_all(b"QUIT\r\n").await?;
+    expect_code(stream, "221").await?;
+
+    return Ok(());
+/*
     // Parse and process headers
     let (headers, body) = parse_email_content(email_content);
 
@@ -254,6 +271,8 @@ async fn send_email_content_inner<T: AsyncWriteExt + AsyncReadExt + Unpin>(
      expect_code(stream, "221").await?;
  
      Ok(())
+
+*/
 }
 
 
