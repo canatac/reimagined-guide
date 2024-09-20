@@ -147,12 +147,36 @@ async fn send_to_mailing_list(email_req: web::Json<MailingListEmailRequest>) -> 
             "From: {}\r\nTo: {}\r\nSubject: {}\r\n\r\n{}",
             from, to, subject, body
         );
+        let client = reqwest::Client::new();
+        let dkim_service_url = env::var("DKIM_SERVICE_URL").expect("DKIM_SERVICE_URL not set");
 
+        let dkim_response = match client.post(&dkim_service_url)
+            .json(&serde_json::json!({
+                "from": from,
+                "to": to,
+                "subject": subject,
+                "text": body
+            }))
+            .send()
+            .await {
+                Ok(resp) => {
+                    if resp.status().is_success() {
+                        success_count += 1;
+                    } else {
+                        failure_count += 1;
+                    }
+                },
+                Err(_) => {
+                    failure_count += 1;
+                }
+            };
+/* 
         match send_outgoing_email(&email_content).await {
             Ok(_) => success_count += 1,
             Err(_) => {
                 failure_count += 1;
-            }        }
+            }
+        }*/
     }
 
     HttpResponse::Ok().json(serde_json::json!({
