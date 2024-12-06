@@ -699,32 +699,13 @@ async fn main() -> Result<(), MainError> {
                     let acceptor = tls_acceptor.clone();
                     
                     tokio::spawn(async move {
-                        debug!("About to start TLS handshake for {}", peer_addr);
-                        
-                        // Ajout de timeout pour le handshake
-                        match tokio::time::timeout(
-                            std::time::Duration::from_secs(100),
-                            acceptor.accept(stream)
-                        ).await {
-                                    Ok(Ok(tls_stream)) => {
-                                        info!("TLS handshake successful for {}", peer_addr);
-                                        info!("TLS version: {:?}", tls_stream.get_ref().1.protocol_version());
-                                        info!("Cipher suite: {:?}", tls_stream.get_ref().1.negotiated_cipher_suite());
-                                        
-                                        match handle_tls_client(tls_stream, acceptor.clone()).await {
-                                            Ok(_) => info!("TLS client session completed successfully for {}", peer_addr),
-                                            Err(e) => {
-                                                error!("Error handling TLS client {}: {}", peer_addr, e);
-                                                error!("Error details: {:?}", e);
-                                            }
-                                        }
-                                    }
-                                    Ok(Err(e)) => {
-                                        error!("TLS handshake failed for {}: {}", peer_addr, e);
-                                    }
-                                    Err(_) => {
-                                        error!("TLS handshake timed out for {}", peer_addr);
-                                    }
+                        match acceptor.accept(stream).await {
+                            Ok(tls_stream) => {
+                                if let Err(e) = handle_tls_client(tls_stream, acceptor).await {
+                                    error!("Error handling TLS client {}: {}", peer_addr, e);
+                                }
+                            }
+                            Err(e) => error!("TLS handshake failed for {}: {}", peer_addr, e),
                         }
                     });
                 }
