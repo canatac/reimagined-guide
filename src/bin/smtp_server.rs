@@ -249,6 +249,7 @@ async fn handle_tls_client(tls_stream: TlsStream<TcpStream>) -> std::io::Result<
                 break;
             }
             Ok(_) => {
+                // Convertir en String, en ignorant les caractères non-UTF8
                 let line = String::from_utf8_lossy(&buffer);
                 println!("Received: {}", line.trim());
 
