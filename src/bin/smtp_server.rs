@@ -663,6 +663,8 @@ async fn main() -> Result<(), MainError> {
         .with_no_client_auth()
         .with_single_cert(certs, key)
         .map_err(|err| IoError::new(ErrorKind::InvalidInput, err))?;
+    config.alpn_protocols = vec![b"smtp".to_vec()];
+    
     let tls_acceptor = Arc::new(TlsAcceptor::from(Arc::new(config)));
 
     // Bind TCP listeners for TLS and plain connections
