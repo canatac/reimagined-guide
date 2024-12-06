@@ -219,56 +219,119 @@ impl MailServer {
 
 // Handle TLS client connection
 async fn handle_tls_client(tls_stream: TlsStream<TcpStream>, acceptor: Arc<TlsAcceptor>) -> std::io::Result<()> {
-    let peer_addr = tls_stream.get_ref().0.peer_addr()?;
-    info!("TLS connection established from {}", peer_addr);
+    info!("TLS connection established");
 
     let mut stream = StreamType::Tls(tokio::io::BufReader::new(tls_stream));
 
     // Send initial greeting
-    let greeting = "220 mail.misfits.ai ESMTP Postfix\r\n";
-    info!("Sending initial greeting to {}: {}", peer_addr, greeting.trim());
-    
-    // Forcer le flush après l'envoi du greeting
-    match write_response(&mut stream, greeting).await {
-        Ok(_) => info!("Initial greeting sent successfully to {}", peer_addr),
-        Err(e) => {
-            error!("Failed to send initial greeting to {}: {}", peer_addr, e);
-            return Err(e);
-        }
-    }
+    let greeting = "220 SMTPS Server Ready\r\n";
+    write_response(&mut stream, &greeting).await?;
+
+    let mut in_data_mode: bool = false;
 
     let mut current_email = Email {
         from: String::new(),
         to: String::new(),
         subject: String::new(),
         body: String::new(),
-        headers: Vec::new(),
         dkim_signature: None,
+        headers: Vec::new(),
         raw_content: String::new()
     };
 
-    let mut buffer = String::new();
+    let mail_server = Arc::new(MailServer::new("./emails"));
     loop {
-        buffer.clear();
+        let mut buffer = String::new();
         match stream.read_line(&mut buffer).await {
             Ok(0) => {
-                info!("Client {} disconnected", peer_addr);
+                println!("TLS Client disconnected  : {}", buffer.trim());
                 break;
             }
-            Ok(_) => {
-                let command = buffer.trim();
-                info!("Received from {}: {}", peer_addr, command);
+            Ok(_n) => {                
+                println!("Calling process_command with: {}", buffer.trim());
+                if buffer.trim().eq_ignore_ascii_case("STARTTLS") {
+                    // Client requested STARTTLS on an already-TLS connection
+                    write_response(&mut stream, "454 TLS not available due to temporary reason\r\n").await?;
+                    continue;
+                }
+                if in_data_mode {
+                    if buffer.trim() == "." {
+                        in_data_mode = false;
+                        mail_server.store_email(&current_email).await?;
+                        match send_outgoing_email(&current_email.raw_content).await {
+                            Ok(_) => {
+                                write_response(&mut stream, "250 OK\r\n").await?;
+                            }
+                            Err(e) => {
+                                error!("Failed to forward email: {}", e);
+                                write_response(&mut stream, "554 Transaction failed\r\n").await?;
+                            }
+                        }
+                        /*
+                        match mail_server.forward_email(&current_email).await {
+                            Ok(_) => {
+                                write_response(&mut stream, "250 OK\r\n").await?;
+                            }
+                            Err(e) => {
+                                error!("Failed to forward email: {}", e);
+                                write_response(&mut stream, "554 Transaction failed\r\n").await?;
+                            }
+                        } */                       
+                    } else {
+                        // Collect the stream content without alteration
+                        if current_email.raw_content.is_empty() {
+                            current_email.raw_content = buffer;
+                            let trimmed_buffer = current_email.raw_content.trim();
+                            if !trimmed_buffer.is_empty() {
+                                let line = trimmed_buffer.to_string();
+                                current_email.headers.push(line.clone());
+                                if trimmed_buffer.starts_with("DKIM-Signature:") {
+                                    current_email.dkim_signature = Some(line);
+                                } else if trimmed_buffer.starts_with("From:") {
+                                    current_email.from = extract_email_address(trimmed_buffer, "From:").unwrap_or_default();
+                                } else if trimmed_buffer.starts_with("To:") {
+                                    current_email.to = extract_email_address(trimmed_buffer, "To:").unwrap_or_default();
+                                } else if trimmed_buffer.starts_with("Subject:") {
+                                    current_email.subject = trimmed_buffer.trim_start_matches("Subject:").trim().to_string();
+                                }
+                            }
+                        } else {
+                            let trimmed_buffer = buffer.trim();
+                            if !trimmed_buffer.is_empty() {
+                                let line = trimmed_buffer.to_string();
+                                current_email.headers.push(line.clone());
+                                if trimmed_buffer.starts_with("DKIM-Signature:") {
+                                    current_email.dkim_signature = Some(line);
+                                } else if trimmed_buffer.starts_with("From:") {
+                                    current_email.from = extract_email_address(trimmed_buffer, "From:").unwrap_or_default();
+                                } else if trimmed_buffer.starts_with("To:") {
+                                    current_email.to = extract_email_address(trimmed_buffer, "To:").unwrap_or_default();
+                                } else if trimmed_buffer.starts_with("Subject:") {
+                                    current_email.subject = trimmed_buffer.trim_start_matches("Subject:").trim().to_string();
+                                }
+                            }
+                            current_email.raw_content.push_str(&buffer);
+                        }
+                    }
+                } else {
+                    let response = process_command(&buffer, &mut current_email, &mut stream).await?;
+                    println!("Response: {}", response);
+                    write_response(&mut stream, &response).await?;
 
-                let response = process_command(&buffer, &mut current_email, &mut stream).await?;
-                info!("Sending to {}: {}", peer_addr, response.trim());
-                write_response(&mut stream, &response).await?;
-
-                if command.eq_ignore_ascii_case("QUIT") {
-                    break;
+                    if buffer.trim() == "DATA" {
+                        in_data_mode = true;
+                    } else if buffer.trim() == "QUIT" {
+                        if let Ok(content) = extract_email_content(&current_email.body) {
+                            println!("Extracted email content: {}", content);
+                        } else {
+                            eprintln!("Error extracting email content");
+                        }
+                        break;
+                    }
                 }
             }
             Err(e) => {
-                error!("Error reading from client {}: {}", peer_addr, e);
+                eprintln!("Error reading from client: {}", e);
                 break;
             }
         }
@@ -284,61 +347,122 @@ async fn handle_plain_client(stream: TcpStream, tls_acceptor: Arc<TlsAcceptor>) 
     let mut stream = StreamType::Plain(tokio::io::BufReader::new(stream));
     
     // Send initial greeting
-    let greeting = "220 mail.misfits.ai ESMTP Postfix\r\n";
+    let greeting = "220 mail.misfits.ai ESMTP\r\n";
     info!("Sending greeting to {}: {}", peer_addr, greeting.trim());
     write_response(&mut stream, &greeting).await?;
 
-    let mut buffer = String::new();
+    let mut in_data_mode = false;
+
+    let mut current_email = Email {
+        from: String::new(),
+        to: String::new(),
+        subject: String::new(),
+        body: String::new(),
+        headers: Vec::new(),
+        dkim_signature: None,
+        raw_content: String::new()
+    };
+
+    let mail_server = Arc::new(MailServer::new("./emails"));
+
     loop {
-        buffer.clear();
+        let mut buffer = String::new();
         match stream.read_line(&mut buffer).await {
             Ok(0) => {
-                info!("Client {} disconnected", peer_addr);
+                println!("Client disconnected  : {}", buffer.trim());
                 break;
             }
-            Ok(_) => {
-                let command = buffer.trim();
-                info!("Received from {}: {}", peer_addr, command);
-
-                if command.eq_ignore_ascii_case("STARTTLS") {
-                    info!("Client requested STARTTLS upgrade");
+            Ok(_n) => {                
+                println!("Calling process_command with: {}", buffer.trim());
+                if buffer.trim().eq_ignore_ascii_case("STARTTLS") {
                     write_response(&mut stream, "220 Ready to start TLS\r\n").await?;
-                    
                     // Upgrade to TLS
                     match stream {
                         StreamType::Plain(plain_stream) => {
-                            info!("Starting TLS handshake for {}", peer_addr);
-                            match tls_acceptor.accept(plain_stream.into_inner()).await {
-                                Ok(tls_stream) => {
-                                    info!("TLS handshake successful for {}", peer_addr);
-                                    info!("Protocol version: {:?}", tls_stream.get_ref().1.protocol_version());
-                                    let mut tls_stream = StreamType::Tls(tokio::io::BufReader::new(tls_stream));
-                                    
-                                    // Send a new greeting after TLS upgrade
-                                    write_response(&mut tls_stream, "220 mail.misfits.ai ESMTP Postfix\r\n").await?;
-                                    
-                                    // Continue with TLS stream
-                                    stream = tls_stream;
-                                    continue;
-                                }
-                                Err(e) => {
-                                    error!("TLS handshake failed for {}: {}", peer_addr, e);
-                                    write_response(&mut stream, "454 TLS handshake failed\r\n").await?;
-                                    break;
-                                }
-                            }
+                            let tls_stream = tls_acceptor.accept(plain_stream.into_inner()).await?;
+                            stream = StreamType::Tls(tokio::io::BufReader::new(tls_stream));
+                            println!("Upgraded to TLS connection");
                         }
                         StreamType::Tls(_) => {
-                            write_response(&mut stream, "454 Already in TLS mode\r\n").await?;
+                            // Already TLS, shouldn't happen but handle it anyway
+                            write_response(&mut stream, "454 TLS not available due to temporary reason\r\n").await?;
                         }
                     }
                     continue;
                 }
-
-                // Process other commands
-                let response = process_command(&buffer, &mut current_email, &mut stream).await?;
-                info!("Sending to {}: {}", peer_addr, response.trim());
-                write_response(&mut stream, &response).await?;
+                if in_data_mode {
+                    if buffer.trim() == "." {
+                        in_data_mode = false;
+                        mail_server.store_email(&current_email).await?;
+                        match send_outgoing_email(&current_email.raw_content).await {
+                            Ok(_) => {
+                                write_response(&mut stream, "250 OK\r\n").await?;
+                            }
+                            Err(e) => {
+                                error!("Failed to forward email: {}", e);
+                                write_response(&mut stream, "554 Transaction failed\r\n").await?;
+                            }
+                        }
+                        /*
+                        match mail_server.forward_email(&current_email).await {
+                            Ok(_) => {
+                                write_response(&mut stream, "250 OK\r\n").await?;
+                            }
+                            Err(e) => {
+                                error!("Failed to forward email: {}", e);
+                                write_response(&mut stream, "554 Transaction failed\r\n").await?;
+                            }
+                        }
+                         */
+                        
+                    } else {
+                        if current_email.raw_content.is_empty() {
+                            current_email.raw_content = buffer;
+                            let trimmed_buffer = current_email.raw_content.trim();
+                            if !trimmed_buffer.is_empty() {
+                                let line = trimmed_buffer.to_string();
+                                current_email.headers.push(line.clone());
+                                if trimmed_buffer.starts_with("DKIM-Signature:") {
+                                    current_email.dkim_signature = Some(line);
+                                } else if trimmed_buffer.starts_with("From:") {
+                                    current_email.from = extract_email_address(trimmed_buffer, "From:").unwrap_or_default();
+                                } else if trimmed_buffer.starts_with("To:") {
+                                    current_email.to = extract_email_address(trimmed_buffer, "To:").unwrap_or_default();
+                                } else if trimmed_buffer.starts_with("Subject:") {
+                                    current_email.subject = trimmed_buffer.trim_start_matches("Subject:").trim().to_string();
+                                }
+                            }
+                        } else {
+                            let trimmed_buffer = buffer.trim();
+                            if !trimmed_buffer.is_empty() {
+                                let line = trimmed_buffer.to_string();
+                                current_email.headers.push(line.clone());
+                                if trimmed_buffer.starts_with("DKIM-Signature:") {
+                                    current_email.dkim_signature = Some(line);
+                                } else if trimmed_buffer.starts_with("From:") {
+                                    current_email.from = extract_email_address(trimmed_buffer, "From:").unwrap_or_default();
+                                } else if trimmed_buffer.starts_with("To:") {
+                                    current_email.to = extract_email_address(trimmed_buffer, "To:").unwrap_or_default();
+                                } else if trimmed_buffer.starts_with("Subject:") {
+                                    current_email.subject = trimmed_buffer.trim_start_matches("Subject:").trim().to_string();
+                                }
+                            }
+                            current_email.raw_content.push_str(&buffer);
+                        }
+                    }
+                } else {
+                    let response = process_command(&buffer, &mut current_email, &mut stream).await?;
+                    println!("Response: {}", response);
+                    write_response(&mut stream, &response).await?;
+                    
+                    if buffer.trim() == "DATA" {
+                        in_data_mode = true;
+                    } else if buffer.trim() == "QUIT" {
+                    
+                    write_response(&mut stream, "221 Bye\r\n").await?;
+                        break;
+                    }
+                }
             }
             Err(e) => {
                 error!("Error reading from client {}: {}", peer_addr, e);
@@ -346,6 +470,7 @@ async fn handle_plain_client(stream: TcpStream, tls_acceptor: Arc<TlsAcceptor>) 
             }
         }
     }
+
     Ok(())
 }
 
@@ -475,61 +600,16 @@ async fn handle_auth_plain(command: &str) -> std::io::Result<String> {
 
 // Write a response to the client
 async fn write_response(stream: &mut StreamType, response: &str) -> std::io::Result<()> {
-    info!("Attempting to write response: {}", response.replace("\r\n", "\\r\\n"));
-    
-    let result = match stream {
-        StreamType::Tls(s) => {
-            debug!("Writing to TLS stream");
-            match s.write_all(response.as_bytes()).await {
-                Ok(_) => {
-                    debug!("Successfully wrote response bytes to TLS stream");
-                    match s.flush().await {
-                        Ok(_) => {
-                            debug!("Successfully flushed TLS stream");
-                            Ok(())
-                        },
-                        Err(e) => {
-                            error!("Failed to flush TLS stream: {}", e);
-                            Err(e)
-                        }
-                    }
-                },
-                Err(e) => {
-                    error!("Failed to write to TLS stream: {}", e);
-                    Err(e)
-                }
-            }
+    match stream {
+        StreamType::Tls(ref mut s) => {
+            s.write_all(response.as_bytes()).await?;
+            s.flush().await
         }
-        StreamType::Plain(s) => {
-            debug!("Writing to plain stream");
-            match s.write_all(response.as_bytes()).await {
-                Ok(_) => {
-                    debug!("Successfully wrote response bytes to plain stream");
-                    match s.flush().await {
-                        Ok(_) => {
-                            debug!("Successfully flushed plain stream");
-                            Ok(())
-                        },
-                        Err(e) => {
-                            error!("Failed to flush plain stream: {}", e);
-                            Err(e)
-                        }
-                    }
-                },
-                Err(e) => {
-                    error!("Failed to write to plain stream: {}", e);
-                    Err(e)
-                }
-            }
+        StreamType::Plain(ref mut s) => {
+            s.write_all(response.as_bytes()).await?;
+            s.flush().await
         }
-    };
-
-    match &result {
-        Ok(_) => info!("Successfully sent response: {}", response.replace("\r\n", "\\r\\n")),
-        Err(e) => error!("Failed to send response: {}", e),
     }
-
-    result
 }
 
 // Load SSL certificates
@@ -658,11 +738,6 @@ async fn main() -> Result<(), MainError> {
                             }
                             Err(_) => {
                                 error!("TLS handshake timed out for {}", peer_addr);
-                                // Essayons de voir si le client est toujours connecté
-                                match stream.peer_addr() {
-                                    Ok(addr) => info!("Client {} is still connected", addr),
-                                    Err(e) => error!("Client connection check failed: {}", e),
-                                }
                             }
                         }
                     });
