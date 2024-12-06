@@ -703,7 +703,7 @@ async fn main() -> Result<(), MainError> {
                         
                         // Ajout de timeout pour le handshake
                         match tokio::time::timeout(
-                            std::time::Duration::from_secs(10),
+                            std::time::Duration::from_secs(100),
                             acceptor.accept(stream)
                         ).await {
                                     Ok(Ok(tls_stream)) => {
