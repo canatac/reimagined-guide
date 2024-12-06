@@ -220,11 +220,12 @@ impl MailServer {
 // Handle TLS client connection
 async fn handle_tls_client(tls_stream: TlsStream<TcpStream>) -> std::io::Result<()> {
     info!("TLS connection established");
-
+    let peer_addr = tls_stream.get_ref().0.peer_addr()?;
+    
     let mut stream = StreamType::Tls(tokio::io::BufReader::new(tls_stream));
 
     // Send initial greeting
-    let greeting = "220 SMTPS Server Ready\r\n";
+    let greeting = "220 mail.misfits.ai ESMTP\r\n";
     write_response(&mut stream, &greeting).await?;
 
     let mut in_data_mode: bool = false;
@@ -241,21 +242,22 @@ async fn handle_tls_client(tls_stream: TlsStream<TcpStream>) -> std::io::Result<
 
     let mail_server = Arc::new(MailServer::new("./emails"));
     loop {
-        let mut buffer = String::new();
-        match stream.read_line(&mut buffer).await {
+        let mut buffer = Vec::new();
+        match stream.read_until(b'\n', &mut buffer).await {
             Ok(0) => {
-                println!("TLS Client disconnected  : {}", buffer.trim());
+                println!("TLS Client disconnected");
                 break;
             }
-            Ok(_n) => {                
-                println!("Calling process_command with: {}", buffer.trim());
-                if buffer.trim().eq_ignore_ascii_case("STARTTLS") {
-                    // Client requested STARTTLS on an already-TLS connection
+            Ok(_) => {
+                let line = String::from_utf8_lossy(&buffer);
+                println!("Received: {}", line.trim());
+
+                if line.trim().eq_ignore_ascii_case("STARTTLS") {
                     write_response(&mut stream, "454 TLS not available due to temporary reason\r\n").await?;
                     continue;
                 }
                 if in_data_mode {
-                    if buffer.trim() == "." {
+                    if line.trim() == "." {
                         in_data_mode = false;
                         mail_server.store_email(&current_email).await?;
                         match send_outgoing_email(&current_email.raw_content).await {
@@ -267,60 +269,49 @@ async fn handle_tls_client(tls_stream: TlsStream<TcpStream>) -> std::io::Result<
                                 write_response(&mut stream, "554 Transaction failed\r\n").await?;
                             }
                         }
-                        /*
-                        match mail_server.forward_email(&current_email).await {
-                            Ok(_) => {
-                                write_response(&mut stream, "250 OK\r\n").await?;
-                            }
-                            Err(e) => {
-                                error!("Failed to forward email: {}", e);
-                                write_response(&mut stream, "554 Transaction failed\r\n").await?;
-                            }
-                        } */                       
                     } else {
-                        // Collect the stream content without alteration
                         if current_email.raw_content.is_empty() {
-                            current_email.raw_content = buffer;
-                            let trimmed_buffer = current_email.raw_content.trim();
-                            if !trimmed_buffer.is_empty() {
-                                let line = trimmed_buffer.to_string();
+                            current_email.raw_content = line.to_string();
+                            let trimmed_line = current_email.raw_content.trim();
+                            if !trimmed_line.is_empty() {
+                                let line = trimmed_line.to_string();
                                 current_email.headers.push(line.clone());
-                                if trimmed_buffer.starts_with("DKIM-Signature:") {
+                                if trimmed_line.starts_with("DKIM-Signature:") {
                                     current_email.dkim_signature = Some(line);
-                                } else if trimmed_buffer.starts_with("From:") {
-                                    current_email.from = extract_email_address(trimmed_buffer, "From:").unwrap_or_default();
-                                } else if trimmed_buffer.starts_with("To:") {
-                                    current_email.to = extract_email_address(trimmed_buffer, "To:").unwrap_or_default();
-                                } else if trimmed_buffer.starts_with("Subject:") {
-                                    current_email.subject = trimmed_buffer.trim_start_matches("Subject:").trim().to_string();
+                                } else if trimmed_line.starts_with("From:") {
+                                    current_email.from = extract_email_address(trimmed_line, "From:").unwrap_or_default();
+                                } else if trimmed_line.starts_with("To:") {
+                                    current_email.to = extract_email_address(trimmed_line, "To:").unwrap_or_default();
+                                } else if trimmed_line.starts_with("Subject:") {
+                                    current_email.subject = trimmed_line.trim_start_matches("Subject:").trim().to_string();
                                 }
                             }
                         } else {
-                            let trimmed_buffer = buffer.trim();
-                            if !trimmed_buffer.is_empty() {
-                                let line = trimmed_buffer.to_string();
+                            let trimmed_line = line.trim();
+                            if !trimmed_line.is_empty() {
+                                let line = trimmed_line.to_string();
                                 current_email.headers.push(line.clone());
-                                if trimmed_buffer.starts_with("DKIM-Signature:") {
+                                if trimmed_line.starts_with("DKIM-Signature:") {
                                     current_email.dkim_signature = Some(line);
-                                } else if trimmed_buffer.starts_with("From:") {
-                                    current_email.from = extract_email_address(trimmed_buffer, "From:").unwrap_or_default();
-                                } else if trimmed_buffer.starts_with("To:") {
-                                    current_email.to = extract_email_address(trimmed_buffer, "To:").unwrap_or_default();
-                                } else if trimmed_buffer.starts_with("Subject:") {
-                                    current_email.subject = trimmed_buffer.trim_start_matches("Subject:").trim().to_string();
+                                } else if trimmed_line.starts_with("From:") {
+                                    current_email.from = extract_email_address(trimmed_line, "From:").unwrap_or_default();
+                                } else if trimmed_line.starts_with("To:") {
+                                    current_email.to = extract_email_address(trimmed_line, "To:").unwrap_or_default();
+                                } else if trimmed_line.starts_with("Subject:") {
+                                    current_email.subject = trimmed_line.trim_start_matches("Subject:").trim().to_string();
                                 }
                             }
-                            current_email.raw_content.push_str(&buffer);
+                            current_email.raw_content.push_str(&line);
                         }
                     }
                 } else {
-                    let response = process_command(&buffer, &mut current_email, &mut stream).await?;
+                    let response = process_command(&line, &mut current_email, &mut stream).await?;
                     println!("Response: {}", response);
                     write_response(&mut stream, &response).await?;
 
-                    if buffer.trim() == "DATA" {
+                    if line.trim() == "DATA" {
                         in_data_mode = true;
-                    } else if buffer.trim() == "QUIT" {
+                    } else if line.trim() == "QUIT" {
                         if let Ok(content) = extract_email_content(&current_email.body) {
                             println!("Extracted email content: {}", content);
                         } else {
