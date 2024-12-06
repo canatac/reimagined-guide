@@ -218,7 +218,7 @@ impl MailServer {
 }
 
 // Handle TLS client connection
-async fn handle_tls_client(tls_stream: TlsStream<TcpStream>, _acceptor: Arc<TlsAcceptor>) -> std::io::Result<()> {
+async fn handle_tls_client(tls_stream: TlsStream<TcpStream>) -> std::io::Result<()> {
     info!("TLS connection established");
 
     let mut stream = StreamType::Tls(tokio::io::BufReader::new(tls_stream));
@@ -697,21 +697,17 @@ async fn main() -> Result<(), MainError> {
                 if let Ok((stream, peer_addr)) = result {
                     info!("New TLS client connected from {}", peer_addr);
                     let acceptor = tls_acceptor.clone();
+                    let tls_stream = acceptor.accept(stream).await?;
                     tokio::spawn(async move {
-                        let tls_stream = match acceptor.accept(stream).await {
-                            Ok(tls_stream) => tokio::io::BufReader::new(tls_stream),
-                            Err(e) => {
-                                error!("TLS handshake failed for {}: {}", peer_addr, e);
-                                return;
-                            }
-                        };
-                        let tls_stream = tls_stream.into_inner();
-                        if let Err(e) = handle_tls_client(tls_stream, acceptor).await {
-                            error!("Error handling TLS client {}: {}", peer_addr, e);
+                        if let Err(e) = handle_tls_client(tls_stream).await {
+                            error!("Error handling plain client {}: {}", peer_addr, e);
+                        } else {
+                            info!("Plain client session completed successfully");
                         }
                     });
                 }
             }
+
             // Handle incoming plain connections
             result = plain_listener.accept() => {
                 if let Ok((stream, peer_addr)) = result {
