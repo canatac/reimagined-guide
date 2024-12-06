@@ -168,13 +168,6 @@ async fn send_to_mailing_list(email_req: web::Json<MailingListEmailRequest>) -> 
                     failure_count += 1;
                 }
             };
-/* 
-        match send_outgoing_email(&email_content).await {
-            Ok(_) => success_count += 1,
-            Err(_) => {
-                failure_count += 1;
-            }
-        }*/
     }
 
     HttpResponse::Ok().json(serde_json::json!({

@@ -689,23 +689,35 @@ async fn main() -> Result<(), MainError> {
                     
                     tokio::spawn(async move {
                         debug!("About to start TLS handshake for {}", peer_addr);
-                        match acceptor.accept(stream).await {
+                        
+                        debug!("Starting TLS handshake...");
+                        let accept_result = acceptor.accept(stream).await;
+                        debug!("TLS handshake completed with result: {:?}", accept_result);  // Ajout de log
+                        
+                        match accept_result {
                             Ok(tls_stream) => {
                                 info!("TLS handshake successful for {}", peer_addr);
-                                if let Err(e) = handle_tls_client(tls_stream, acceptor.clone()).await {
-                                    error!("Error handling TLS client {}: {}", peer_addr, e);
-                                } else {
-                                    info!("TLS client session completed successfully");
+                                info!("TLS version: {:?}", tls_stream.get_ref().1.protocol_version());  // Ajout de log
+                                info!("Cipher suite: {:?}", tls_stream.get_ref().1.negotiated_cipher_suite());  // Ajout de log
+                                
+                                match handle_tls_client(tls_stream, acceptor.clone()).await {
+                                    Ok(_) => info!("TLS client session completed successfully for {}", peer_addr),
+                                    Err(e) => {
+                                        error!("Error handling TLS client {}: {}", peer_addr, e);
+                                        error!("Error details: {:?}", e);  // Ajout de log détaillé
+                                    }
                                 }
                             }
                             Err(e) => {
                                 error!("TLS handshake failed for {}: {}", peer_addr, e);
-                                // Log more details about the error
+                                error!("Detailed error: {:?}", e);  // Ajout de log détaillé
                                 if let Some(io_err) = e.source().and_then(|s| s.downcast_ref::<std::io::Error>()) {
                                     error!("IO error kind: {:?}", io_err.kind());
+                                    error!("IO error details: {:?}", io_err);  // Ajout de log détaillé
                                 }
                                 if let Some(tls_err) = e.source().and_then(|s| s.downcast_ref::<rustls::Error>()) {
                                     error!("TLS error: {:?}", tls_err);
+                                    error!("TLS error details: {:?}", tls_err);  // Ajout de log détaillé
                                 }
                             }
                         }
