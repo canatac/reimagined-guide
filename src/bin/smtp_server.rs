@@ -681,18 +681,11 @@ async fn main() -> Result<(), MainError> {
     info!("TLS Server listening on {}", tls_addr);
     info!("Plain Server listening on {}", plain_addr);
 
-    info!("Testing TLS configuration...");
-    tokio::spawn(async move {
-        match tokio::net::TcpStream::connect(tls_addr.clone()).await {
-            Ok(_) => info!("Successfully connected to TLS port"),
-            Err(e) => error!("Failed to connect to TLS port: {}", e),
-        }
-    });
-
     loop {
 
         tokio::select! {
             // Handle incoming TLS connections
+            
             result = tls_listener.accept() => {
                 if let Ok((stream, peer_addr)) = result {
                     info!("New TLS client connected from {}", peer_addr);
@@ -707,7 +700,7 @@ async fn main() -> Result<(), MainError> {
                     });
                 }
             }
-
+ 
             // Handle incoming plain connections
             result = plain_listener.accept() => {
                 if let Ok((stream, peer_addr)) = result {
