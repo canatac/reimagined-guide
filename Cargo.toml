@@ -50,3 +50,7 @@ pem = "3.0.4"
 tempfile = "3.2"
 lazy_static = "1.4.0"
 constant_time_eq = "0.3.1" 
+
+mongodb = { version = "2.0", features = ["tokio-runtime"] }
+futures-util = "0.3.31"
+warp = "0.3.7"
