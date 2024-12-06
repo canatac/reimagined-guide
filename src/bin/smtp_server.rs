@@ -706,10 +706,7 @@ async fn main() -> Result<(), MainError> {
                             std::time::Duration::from_secs(10),
                             acceptor.accept(stream)
                         ).await {
-                            Ok(accept_result) => {
-                                debug!("TLS handshake completed within timeout");
-                                match accept_result {
-                                    Ok(tls_stream) => {
+                                    Ok(Ok(tls_stream)) => {
                                         info!("TLS handshake successful for {}", peer_addr);
                                         info!("TLS version: {:?}", tls_stream.get_ref().1.protocol_version());
                                         info!("Cipher suite: {:?}", tls_stream.get_ref().1.negotiated_cipher_suite());
@@ -722,23 +719,12 @@ async fn main() -> Result<(), MainError> {
                                             }
                                         }
                                     }
-                                    Err(e) => {
+                                    Ok(Err(e)) => {
                                         error!("TLS handshake failed for {}: {}", peer_addr, e);
-                                        error!("Detailed error: {:?}", e);
-                                        if let Some(io_err) = e.source().and_then(|s| s.downcast_ref::<std::io::Error>()) {
-                                            error!("IO error kind: {:?}", io_err.kind());
-                                            error!("IO error details: {:?}", io_err);
-                                        }
-                                        if let Some(tls_err) = e.source().and_then(|s| s.downcast_ref::<rustls::Error>()) {
-                                            error!("TLS error: {:?}", tls_err);
-                                            error!("TLS error details: {:?}", tls_err);
-                                        }
                                     }
-                                }
-                            }
-                            Err(_) => {
-                                error!("TLS handshake timed out for {}", peer_addr);
-                            }
+                                    Err(_) => {
+                                        error!("TLS handshake timed out for {}", peer_addr);
+                                    }
                         }
                     });
                 }
