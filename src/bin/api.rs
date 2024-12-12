@@ -12,6 +12,8 @@ struct MyCustomError;
 impl Reject for MyCustomError {}
 
 async fn create_user(logic: Arc<Logic>, user: User) -> Result<impl warp::Reply, warp::Rejection> {
+    
+    println!("Creating user: {:?}", user);    
     match logic.create_user(&user.username, &user.password, &user.mailbox).await {
         Ok(_) => Ok(warp::reply::with_status("User created", StatusCode::CREATED)),
         Err(_) => Err(warp::reject()),

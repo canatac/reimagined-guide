@@ -40,8 +40,9 @@ impl Logic {
             password: password.to_string(),
             mailbox: mailbox.to_string(),
         };
-
+        println!("Creating user - before insert: {:?}", new_user);
         collection.insert_one(new_user, None).await?;
+        println!("User created");
         Ok(())
     }
 
