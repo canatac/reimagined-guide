@@ -2,6 +2,7 @@ use tokio::net::TcpListener;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use std::sync::Arc;
 use mongodb::Client;
+use std::env;
 
 use crate::logic::Logic;
 pub struct ImapServer {
@@ -114,5 +115,6 @@ async fn main() -> std::io::Result<()> {
     let client = Arc::new(Client::with_uri_str("mongodb://localhost:27017").await.unwrap());
     let logic = Arc::new(Logic::new(client));
     let server = ImapServer::new(logic);
-    server.run("127.0.0.1:143").await
+    let imap_server_address = env::var("IMAP_SERVER").expect("IMAP_SERVER must be set");
+    server.run(&imap_server_address).await
 } 
