@@ -39,7 +39,6 @@ use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 use serde::{Deserialize, Serialize};
 use actix_cors::Cors;
-mod smtp_client;
 
 use std::fs::{File, create_dir_all};
 use std::io::{Write, BufRead, BufReader};
@@ -130,7 +129,7 @@ async fn send_to_mailing_list(email_req: web::Json<MailingListEmailRequest>) -> 
     for line in reader.lines() {
         let to_email = match line {
             Ok(email) => email.trim().to_string(),
-            Err(e) => {
+            Err(_e) => {
                 failure_count += 1;
                 continue;
             }
@@ -141,14 +140,14 @@ async fn send_to_mailing_list(email_req: web::Json<MailingListEmailRequest>) -> 
         let subject = email_req.subject.clone();
         let body = email_req.body.clone();
     
-        let email_content = format!(
+        let _email_content = format!(
             "From: {}\r\nTo: {}\r\nSubject: {}\r\n\r\n{}",
             from, to, subject, body
         );
         let client = reqwest::Client::new();
         let dkim_service_url = env::var("DKIM_SERVICE_URL").expect("DKIM_SERVICE_URL not set");
 
-        let dkim_response = match client.post(&dkim_service_url)
+        let _dkim_response = match client.post(&dkim_service_url)
             .json(&serde_json::json!({
                 "from": from,
                 "to": to,

@@ -28,4 +28,5 @@ Cargo.lock
 *.req
 *.cer
 
-echo "dkim_private_key.pem" >> .gitignore
+*.tmp
+*.log

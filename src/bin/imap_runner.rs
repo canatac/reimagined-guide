@@ -1,16 +1,13 @@
-use warp::Filter;
 use std::sync::Arc;
 use mongodb::{Client, options::ClientOptions};
 use dotenv::dotenv;
 use std::env;
-use log::info;
 
 mod api;
-mod logic;
-mod imap_server;
 
-use crate::logic::Logic;
-use crate::imap_server::ImapServer;
+use simple_smtp_server::logic::Logic;
+use simple_smtp_server::imap_server::ImapServer;
+
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
     dotenv().ok();
@@ -23,19 +20,22 @@ async fn main() -> std::io::Result<()> {
         env::var("MONGODB_CLUSTER_URL").expect("MONGODB_CLUSTER_URL must be set")
     );
 
-    let client_options = ClientOptions::parse(&client_uri).await.unwrap();
-    let client = Arc::new(Client::with_options(client_options).unwrap());
+    // Mongo client
+    let mongo_client_options = ClientOptions::parse(&client_uri).await.unwrap();
+    let mongo_client = Arc::new(Client::with_options(mongo_client_options).unwrap());
 
-    let logic = Arc::new(Logic::new(client.clone()));
+    let logic = Arc::new(Logic::new(mongo_client.clone()));
 
-    let api = api::api_routes(client.clone());
+    let api = api::api_routes(mongo_client.clone());
 
+    let api_port = env::var("IMAP_SERVER_API_PORT").expect("IMAP_SERVER_API_PORT must be set");
     tokio::spawn(async move {
-        warp::serve(api).run(([0, 0, 0, 0], 3030)).await;
+        warp::serve(api).run(([0, 0, 0, 0], api_port.parse::<u16>().unwrap())).await;
     });
 
     let imap_server = ImapServer::new(logic);
-    imap_server.run("0.0.0.0:143").await?;
+    let imap_server_address = env::var("IMAP_SERVER").expect("IMAP_SERVER must be set");
+    imap_server.run(&imap_server_address).await?;
 
     Ok(())
 } 

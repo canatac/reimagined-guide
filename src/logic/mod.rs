@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use mongodb::error::Result;
 use futures_util::TryStreamExt;
+use mongodb::error::Error;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct User {
@@ -77,11 +78,10 @@ impl Logic {
             collection.delete_one(doc! { "id": email_id }, None).await?;
             Ok(())
         } else {
-            Err(mongodb::error::Error::from(mongodb::error::ErrorKind::CommandError {
-                code: 0,
-                code_name: "EmailNotFound".to_string(),
-                message: "Email not found".to_string(),
-            }))
+            Err(Error::from(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Email not found",
+            )))
         }
     }
-} 
+}   

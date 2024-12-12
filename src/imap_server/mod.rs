@@ -1,10 +1,9 @@
 use tokio::net::TcpListener;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use std::sync::Arc;
-mod logic;
+use mongodb::Client;
 
 use crate::logic::Logic;
-
 pub struct ImapServer {
     logic: Arc<Logic>,
 }
@@ -108,4 +107,12 @@ async fn process_imap_command(command: &[u8], logic: &Arc<Logic>) -> String {
         }
         _ => "BAD Command not recognized\r\n".to_string(),
     }
+}
+
+#[tokio::main]
+async fn main() -> std::io::Result<()> {
+    let client = Arc::new(Client::with_uri_str("mongodb://localhost:27017").await.unwrap());
+    let logic = Arc::new(Logic::new(client));
+    let server = ImapServer::new(logic);
+    server.run("127.0.0.1:143").await
 } 

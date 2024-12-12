@@ -50,7 +50,6 @@ use dotenv::dotenv;
 const SMTP_PORTS: [u16; 3] = [587, 465, 25];
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(5);
 use std::collections::HashMap;
-use std::collections::HashSet;
 
 #[derive(Clone)]
 pub struct Email {
@@ -276,7 +275,7 @@ async fn send_email_content_inner<T: AsyncWriteExt + AsyncReadExt + Unpin>(
 }
 
 
-fn parse_email_content(content: &str) -> (HashMap<String, String>, String) {
+fn _parse_email_content(content: &str) -> (HashMap<String, String>, String) {
     let mut headers: HashMap<String, String> = HashMap::new();
     let mut lines = content.lines().peekable();
     let mut body = String::new();
@@ -299,7 +298,6 @@ fn parse_email_content(content: &str) -> (HashMap<String, String>, String) {
 
                 if header_name == "DKIM-Signature" {
                     let mut full_signature = value.to_string();
-                    let mut in_b_tag = false;
                     let mut b_tag_content = String::new();
 
                     while let Some(next_line) = lines.next() {
@@ -308,7 +306,6 @@ fn parse_email_content(content: &str) -> (HashMap<String, String>, String) {
                             break;
                         }
                         if trimmed.starts_with("b=") {
-                            in_b_tag = true;
                             b_tag_content.push_str(&trimmed[2..]);  // Start capturing from after "b="
                             while !b_tag_content.ends_with('=') {
                                 if let Some(next_b_line) = lines.next() {
@@ -328,7 +325,7 @@ fn parse_email_content(content: &str) -> (HashMap<String, String>, String) {
                        
                     }
                     println!("Full DKIM-Signature: {}", full_signature);
-                    let processed_signature = process_dkim_signature(&full_signature);
+                    let processed_signature = _process_dkim_signature(&full_signature);
                     eprintln!("Processed DKIM-Signature: {}", processed_signature);
                     headers.insert(header_name, processed_signature);
                 } else {
@@ -352,12 +349,12 @@ fn parse_email_content(content: &str) -> (HashMap<String, String>, String) {
 
     // Process specific headers
     if let Some(from) = headers.get_mut("From") {
-        let formatted = format_email_address(from);
+        let formatted = _format_email_address(from);
         *from = formatted.clone();
         eprintln!("Formatted 'From' header: {}", formatted);
     }
     if let Some(to) = headers.get_mut("To") {
-        let formatted = format_email_address(to);
+        let formatted = _format_email_address(to);
         *to = formatted.clone();
         eprintln!("Formatted 'To' header: {}", formatted);
     }
@@ -368,7 +365,7 @@ fn parse_email_content(content: &str) -> (HashMap<String, String>, String) {
     (headers, body)
 }
 
-fn process_dkim_signature(signature: &str) -> String {
+fn _process_dkim_signature(signature: &str) -> String {
     // RFC 6376
     let dkim_tags = ["v", "a", "b", "bh", "c", "d", "h", "i", "l", "q", "s", "t", "x", "z"];
     
@@ -393,7 +390,7 @@ fn process_dkim_signature(signature: &str) -> String {
 }
 
 
-fn format_email_address(addr: &str) -> String {
+fn _format_email_address(addr: &str) -> String {
     if !addr.contains('<') && !addr.contains('>') {
         format!("<{}>", addr.trim())
     } else {
@@ -401,7 +398,7 @@ fn format_email_address(addr: &str) -> String {
     }
 }
 
-fn validate_email_content(content: &str) -> Result<(), String> {
+fn _validate_email_content(content: &str) -> Result<(), String> {
     let lines: Vec<&str> = content.lines().collect();
     if !lines[0].starts_with("From: <") || !lines[0].ends_with(">") {
         return Err("Invalid From header".to_string());
@@ -468,7 +465,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         from, to, subject, body
     );
 
-    if let Err(e) = validate_email_content(&email_content) {
+    if let Err(e) = _validate_email_content(&email_content) {
         eprintln!("Invalid email content: {}", e);
         return Ok(());
     }

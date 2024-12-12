@@ -58,8 +58,7 @@ use std::error::Error;
 use std::fmt;
 use constant_time_eq::constant_time_eq;
 
-use simple_smtp_server::send_outgoing_email;
-use simple_smtp_server::extract_email_address;
+use simple_smtp_server::smtp_client::{send_outgoing_email, extract_email_address};
 
 // Custom error type for the main function
 #[derive(Debug)]
@@ -181,7 +180,7 @@ impl MailServer {
         Ok(())
     }
 
-    async fn forward_email(&self, email: &Email) -> std::io::Result<()> {
+    async fn _forward_email(&self, email: &Email) -> std::io::Result<()> {
         let mut email_content = String::new();
 
         // Add DKIM-Signature if present

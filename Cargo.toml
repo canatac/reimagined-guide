@@ -8,10 +8,6 @@ name = "smtp_server"
 path = "src/bin/smtp_server.rs"
 
 [[bin]]
-name = "smtp_client"
-path = "src/bin/smtp_client.rs"
-
-[[bin]]
 name = "email_api"
 path = "src/bin/email_api.rs"
 
