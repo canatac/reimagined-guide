@@ -74,7 +74,7 @@ pub fn api_routes(client: Arc<mongodb::Client>) -> impl Filter<Extract = impl wa
         );
 
     // Pour create_user(logic: Arc<Logic>, user: User)
-    let create_user_route = warp::path!("users")
+    let create_user_route = warp::path!("create_user")
         .and(warp::post())
         .and(with_logic(logic.clone()))
         .and(warp::body::json::<User>())  // Désérialise le body en User, pas en Logic
