@@ -149,9 +149,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let routes = api_routes(client);
 
     // Démarrage du serveur
-    println!("Starting server at http://localhost:3030");
+    let api_port = env::var("IMAP_SERVER_API_PORT").expect("IMAP_SERVER_API_PORT must be set");
+    println!("Starting server at http://localhost:{}", api_port);
     warp::serve(routes)
-        .run(([127, 0, 0, 1], 3030))
+        .run(([127, 0, 0, 1], api_port.parse::<u16>().unwrap()))
         .await;
 
     Ok(())
