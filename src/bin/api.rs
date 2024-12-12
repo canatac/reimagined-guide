@@ -5,6 +5,7 @@ use warp::reject::Reject;
 use dotenv::dotenv;
 use simple_smtp_server::logic::User;
 use warp::http::StatusCode;
+use std::env;
 
 #[derive(Debug)]
 struct MyCustomError;
