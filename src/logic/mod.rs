@@ -31,6 +31,20 @@ impl Logic {
         Logic { client }
     }
 
+    pub async fn create_user(&self, username: &str, password: &str, mailbox: &str) -> Result<()> {
+        let database_name = std::env::var("MONGODB_DATABASE").expect("MONGODB_DATABASE must be set");
+        let collection = self.client.database(&database_name).collection::<User>("users");
+
+        let new_user = User {
+            username: username.to_string(),
+            password: password.to_string(),
+            mailbox: mailbox.to_string(),
+        };
+
+        collection.insert_one(new_user, None).await?;
+        Ok(())
+    }
+
     pub async fn authenticate_user(&self, username: &str, password: &str) -> Result<Option<User>> {
         let database_name = std::env::var("MONGODB_DATABASE").expect("MONGODB_DATABASE must be set");
         let collection = self.client.database(&database_name).collection::<User>("users");

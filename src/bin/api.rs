@@ -3,10 +3,20 @@ use warp::Filter;
 use std::sync::Arc;
 use warp::reject::Reject;
 use dotenv::dotenv;
+use simple_smtp_server::logic::User;
+use warp::http::StatusCode;
 
 #[derive(Debug)]
 struct MyCustomError;
 impl Reject for MyCustomError {}
+
+async fn create_user(logic: Arc<Logic>, user: User) -> Result<impl warp::Reply, warp::Rejection> {
+    match logic.create_user(&user.username, &user.password, &user.mailbox).await {
+        Ok(_) => Ok(warp::reply::with_status("User created", StatusCode::CREATED)),
+        Err(_) => Err(warp::reject()),
+    }
+}
+
 async fn login(logic: Arc<Logic>, username: String, password: String) -> Result<impl warp::Reply, warp::Rejection> {
     match logic.authenticate_user(&username, &password).await {
         Ok(Some(user)) => Ok(warp::reply::json(&user)),
@@ -62,6 +72,14 @@ pub fn api_routes(client: Arc<mongodb::Client>) -> impl Filter<Extract = impl wa
             login(logic, username, password)
         );
 
+    // Pour create_user(logic: Arc<Logic>, user: User)
+    let create_user_route = warp::path!("users")
+        .and(warp::post())
+        .and(with_logic(logic.clone()))
+        .and(warp::body::json::<User>())  // Désérialise le body en User, pas en Logic
+        .and_then(|logic: Arc<Logic>, user: User| create_user(logic, user));
+
+
     // Pour get_emails(logic: Arc<Logic>, mailbox: String)
     let get_emails_route = warp::path!("emails" / String)
         .and(warp::get())
@@ -108,6 +126,7 @@ pub fn api_routes(client: Arc<mongodb::Client>) -> impl Filter<Extract = impl wa
         .or(store_email_flag_route)
         .or(delete_email_route)
         .or(archive_email_route)
+        .or(create_user_route)
 }
 
 fn with_logic(logic: Arc<Logic>) -> impl Filter<Extract = (Arc<Logic>,), Error = std::convert::Infallible> + Clone {
