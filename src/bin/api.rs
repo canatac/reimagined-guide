@@ -141,12 +141,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialisation de l'environnement
     dotenv().ok();
     env_logger::init();
-
     let client_uri = format!(
-        "mongodb+srv://{}:{}@{}/?retryWrites=true&w=majority",
+        "mongodb+srv://{}:{}@{}/?retryWrites=true&w=majority&appName={}",
         env::var("MONGODB_USERNAME").expect("MONGODB_USERNAME must be set"),
         env::var("MONGODB_PASSWORD").expect("MONGODB_PASSWORD must be set"),
-        env::var("MONGODB_CLUSTER_URL").expect("MONGODB_CLUSTER_URL must be set")
+        env::var("MONGODB_CLUSTER_URL").expect("MONGODB_CLUSTER_URL must be set"),
+        env::var("MONGODB_APP_NAME").expect("MONGODB_APP_NAME must be set")
     );
     let client = Arc::new(
         mongodb::Client::with_uri_str(&client_uri)
