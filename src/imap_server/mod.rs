@@ -74,27 +74,46 @@ impl ImapServer {
                                         let username = credentials[1];
                                         let password = credentials[2];
                                         match logic.authenticate_user(username, password).await {
-                                            Ok(_) => {
+                                            Ok(Some(_)) => {
+                                                sessions.lock().unwrap().insert(username.to_string(), true);
                                                 current_session = Some(username.to_string());
-                                                
-                                                let response = format!("{} OK AUTHENTICATE completed\r\n", stored_tag);
+                                                let response = format!("{} OK AUTHENTICATE completed\r\n", 
+                                                stored_tag);
                                                 println!("Auth Response: {}", response);  // Ajout de log
                                                 response
-                                                }
+                                            },
+                                            Ok(None) => {
+                                                let response = format!("{} NO AUTHENTICATE failed: Invalid credentials\r\n",
+                                                    auth_tag.as_ref().unwrap_or(&"*".to_string()));
+                                                println!("Auth Response: {}", response);  // Ajout de log
+                                                response
+                                            },
                                             Err(_) => {
-                                                format!("{} NO AUTHENTICATE failed\r\n", stored_tag)
+                                                let response = format!("{} NO AUTHENTICATE failed: Internal error\r\n",
+                                                    auth_tag.as_ref().unwrap_or(&"*".to_string()));
+                                                println!("Auth Response: {}", response);  // Ajout de log
+                                                response
                                             }
                                         }
                                     } else {
-                                        format!("{} NO AUTHENTICATE failed: Invalid credentials format\r\n", stored_tag)
+                                        let response = format!("{} NO AUTHENTICATE failed: Invalid credentials format\r\n",
+                                            auth_tag.as_ref().unwrap_or(&"*".to_string()));
+                                        println!("Auth Response: {}", response);  // Ajout de log
+                                        response
                                     }
                                 } else {
-                                    format!("{} NO AUTHENTICATE failed: Invalid UTF-8\r\n", stored_tag)
+                                    let response = format!("{} NO AUTHENTICATE failed: Invalid UTF-8\r\n",
+                                        auth_tag.as_ref().unwrap_or(&"*".to_string()));
+                                    println!("Auth Response: {}", response);  // Ajout de log
+                                    response
                                 }
                             } else {
-                                format!("{} NO AUTHENTICATE failed: Invalid base64\r\n", stored_tag)
+                                let response = format!("{} NO AUTHENTICATE failed: Invalid base64\r\n",
+                                    auth_tag.as_ref().unwrap_or(&"*".to_string()));
+                                println!("Auth Response: {}", response);  // Ajout de log
+                                response
                             }
-                        } else {
+                        } else {  
                             "* BAD Missing authentication tag\r\n".to_string()
                         }
                         
