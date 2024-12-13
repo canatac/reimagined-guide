@@ -20,8 +20,8 @@ async fn create_user(logic: Arc<Logic>, user: User) -> Result<impl warp::Reply, 
     }
 }
 
-async fn login(logic: Arc<Logic>, username: String, password: String) -> Result<impl warp::Reply, warp::Rejection> {
-    match logic.authenticate_user(&username, &password).await {
+async fn login(logic: Arc<Logic>, username: String, password: String, mailbox: String) -> Result<impl warp::Reply, warp::Rejection> {
+    match logic.authenticate_user(&username, &password, &mailbox).await {
         Ok(Some(user)) => Ok(warp::reply::json(&user)),
         Ok(None) => Err(warp::reject::custom(MyCustomError)),
         Err(_) => Err(warp::reject()),
@@ -68,11 +68,11 @@ pub fn api_routes(client: Arc<mongodb::Client>) -> impl Filter<Extract = impl wa
     let logic = Arc::new(Logic::new(client));
 
     // Pour login(logic: Arc<Logic>, username: String, password: String)
-    let login_route = warp::path!("login" / String / String)
+    let login_route = warp::path!("login" / String / String / String)
         .and(warp::get())
         .and(with_logic(logic.clone()))
-        .and_then(|username: String, password: String, logic: Arc<Logic>| 
-            login(logic, username, password)
+        .and_then(|username: String, password: String, mailbox: String, logic: Arc<Logic>| 
+            login(logic, username, password, mailbox)
         );
 
     // Pour create_user(logic: Arc<Logic>, user: User)
