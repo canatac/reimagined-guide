@@ -49,7 +49,7 @@ impl ImapServer {
 async fn process_imap_command(command: &[u8], logic: &Arc<Logic>) -> String {
     let command_str = String::from_utf8_lossy(command);
     let parts: Vec<&str> = command_str.split_whitespace().collect();
-
+    println!("Command: {:?}", parts);
     match parts.get(0) {
         Some(&"LOGIN") => {
             if let (Some(username), Some(password)) = (parts.get(1), parts.get(2)) {
