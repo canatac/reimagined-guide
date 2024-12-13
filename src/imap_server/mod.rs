@@ -66,52 +66,35 @@ impl ImapServer {
                     let response = if waiting_for_auth {
                         waiting_for_auth = false;
                         // Traiter la réponse d'authentification
-                        if let Ok(decoded) = base64::decode(command_str.trim()) {
-                            if let Ok(auth_str) = String::from_utf8(decoded) {
-                                let credentials: Vec<&str> = auth_str.split('\0').collect();
-                                if credentials.len() >= 3 {
-                                    let username = credentials[1];
-                                    let password = credentials[2];
-                                    match logic.authenticate_user(username, password).await {
-                                        Ok(Some(_)) => {
-                                            sessions.lock().unwrap().insert(username.to_string(), true);
-                                            current_session = Some(username.to_string());
-                                            let response = format!("{} OK AUTHENTICATE completed\r\n", 
-                                                auth_tag.as_ref().unwrap_or(&"*".to_string()));
-                                            println!("Auth Response: {}", response);  // Ajout de log
-                                            response
-                                        },
-                                        Ok(None) => {
-                                            let response = format!("{} NO AUTHENTICATE failed: Invalid credentials\r\n",
-                                                auth_tag.as_ref().unwrap_or(&"*".to_string()));
-                                            println!("Auth Response: {}", response);  // Ajout de log
-                                            response
-                                        },
-                                        Err(_) => {
-                                            let response = format!("{} NO AUTHENTICATE failed: Internal error\r\n",
-                                                auth_tag.as_ref().unwrap_or(&"*".to_string()));
-                                            println!("Auth Response: {}", response);  // Ajout de log
-                                            response
+                        if let Some(stored_tag) = auth_tag.take() {
+                            if let Ok(decoded) = base64::decode(command_str.trim()) {
+                                if let Ok(auth_str) = String::from_utf8(decoded) {
+                                    let credentials: Vec<&str> = auth_str.split('\0').collect();
+                                    if credentials.len() >= 3 {
+                                        let username = credentials[1];
+                                        let password = credentials[2];
+                                        match logic.authenticate_user(username, password).await {
+                                            Ok(_) => {
+                                                current_session = Some(username.to_string());
+                                                format!("{} OK AUTHENTICATE completed\r\n", stored_tag)
+                                            }
+                                            Err(_) => {
+                                                format!("{} NO AUTHENTICATE failed\r\n", stored_tag)
+                                            }
                                         }
+                                    } else {
+                                        format!("{} NO AUTHENTICATE failed: Invalid credentials format\r\n", stored_tag)
                                     }
                                 } else {
-                                    let response = format!("{} NO AUTHENTICATE failed: Invalid credentials format\r\n",
-                                        auth_tag.as_ref().unwrap_or(&"*".to_string()));
-                                    println!("Auth Response: {}", response);  // Ajout de log
-                                    response
+                                    format!("{} NO AUTHENTICATE failed: Invalid UTF-8\r\n", stored_tag)
                                 }
                             } else {
-                                let response = format!("{} NO AUTHENTICATE failed: Invalid UTF-8\r\n",
-                                    auth_tag.as_ref().unwrap_or(&"*".to_string()));
-                                println!("Auth Response: {}", response);  // Ajout de log
-                                response
+                                format!("{} NO AUTHENTICATE failed: Invalid base64\r\n", stored_tag)
                             }
                         } else {
-                            let response = format!("{} NO AUTHENTICATE failed: Invalid base64\r\n",
-                                auth_tag.as_ref().unwrap_or(&"*".to_string()));
-                            println!("Auth Response: {}", response);  // Ajout de log
-                            response
+                            "* BAD Missing authentication tag\r\n".to_string()
                         }
+                        
                     } else {
                         let response = process_imap_command(&buffer[..n], &logic, &sessions, &mut current_session).await;
                         if response == "+ \r\n" {
