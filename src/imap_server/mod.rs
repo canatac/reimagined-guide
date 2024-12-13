@@ -137,11 +137,13 @@ async fn main() -> std::io::Result<()> {
     );
     let client = Arc::new(
         mongodb::Client::with_uri_str(&client_uri)
-            .await?
+                .await.unwrap()
     );
 
     let logic = Arc::new(Logic::new(client));
     let server = ImapServer::new(logic);
     let imap_server_address = env::var("IMAP_SERVER").expect("IMAP_SERVER must be set");
-    server.run(&imap_server_address).await
+    server.run(&imap_server_address).await.unwrap();
+
+    Ok(())
 } 
