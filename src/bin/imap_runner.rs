@@ -14,11 +14,13 @@ async fn main() -> std::io::Result<()> {
     env_logger::init();
 
     let client_uri = format!(
-        "mongodb+srv://{}:{}@{}/?retryWrites=true&w=majority",
+        "mongodb+srv://{}:{}@{}/?retryWrites=true&w=majority&appName={}",
         env::var("MONGODB_USERNAME").expect("MONGODB_USERNAME must be set"),
         env::var("MONGODB_PASSWORD").expect("MONGODB_PASSWORD must be set"),
-        env::var("MONGODB_CLUSTER_URL").expect("MONGODB_CLUSTER_URL must be set")
+        env::var("MONGODB_CLUSTER_URL").expect("MONGODB_CLUSTER_URL must be set"),
+        env::var("MONGODB_APP_NAME").expect("MONGODB_APP_NAME must be set")
     );
+    println!("Client URI: {}", client_uri);
 
     // Mongo client
     let mongo_client_options = ClientOptions::parse(&client_uri).await.unwrap();
