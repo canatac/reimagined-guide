@@ -58,6 +58,7 @@ impl Logic {
             "username": username, 
             "password": password 
         };
+        println!("Filter: {:?}", filter);
         let user = collection.find_one(filter, None).await?;
         if let Some(user) = user {
             println!("Found user: {:?}", user);
