@@ -27,17 +27,24 @@ impl ImapServer {
                 let mut buffer = [0; 1024];
                 loop {
                     let n = match socket.read(&mut buffer).await {
-                        Ok(n) if n == 0 => return,
-                        Ok(n) => n,
+                        Ok(n) if n == 0 => {
+                            println!("Connection closed by client");
+                            return;
+                        }
+                        Ok(n) => {
+                            println!("Read {} bytes from socket", n);
+                            n
+                        }
                         Err(e) => {
-                            eprintln!("failed to read from socket; err = {:?}", e);
+                            eprintln!("Failed to read from socket; err = {:?}", e);
                             return;
                         }
                     };
 
                     let response = process_imap_command(&buffer[..n], &logic).await;
+                    println!("Response: {}", response);
                     if let Err(e) = socket.write_all(response.as_bytes()).await {
-                        eprintln!("failed to write to socket; err = {:?}", e);
+                        eprintln!("Failed to write to socket; err = {:?}", e);
                         return;
                     }
                 }
