@@ -48,8 +48,9 @@ impl Logic {
 
     pub async fn authenticate_user(&self, username: &str, password: &str) -> Result<Option<User>> {
         let database_name = std::env::var("MONGODB_DATABASE").expect("MONGODB_DATABASE must be set");
+        println!("Database name: {:?}", database_name);
         let collection_name = std::env::var("MONGODB_COLLECTION").expect("MONGODB_COLLECTION must be set");
-        
+        println!("Collection name: {:?}", collection_name);
         let collection = self.client.database(&database_name).collection::<User>(&collection_name);
         let filter = doc! { "username": username, "password": password };
         let user = collection.find_one(filter, None).await?;
