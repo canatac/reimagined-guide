@@ -66,19 +66,6 @@ impl Logic {
             println!("No user found with the given username, mailbox, and password.");
             Ok(None)
         }
-        
-        //let filter = doc! { "username": username, "password": password, "mailbox": mailbox };
-        /* 
-        let mut cursor = collection.find(None, None).await?;
-        let mut users = Vec::new();
-        while let Some(user) = cursor.try_next().await? {
-            println!("Found user: {:?}", user);
-            users.push(user);
-        }*/
-        //let user: Option<User> = collection.find_one(filter, None).await?;
-        //println!("Authenticated user: {:?}", user);
-        //Ok(user)
-        //Ok(users.first().cloned())
     }
 
     pub async fn get_emails(&self, mailbox: &str) -> Result<Vec<Email>> {

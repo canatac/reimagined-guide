@@ -26,6 +26,12 @@ impl ImapServer {
             let (mut socket, peer_addr) = listener.accept().await?;
             println!("New IMAP client connected from {}", peer_addr);
 
+            let greeting = "* OK IMAP4rev1 Server Ready\r\n";
+            if let Err(e) = socket.write_all(greeting.as_bytes()).await {
+                eprintln!("Failed to send greeting; err = {:?}", e);
+                continue;
+            }
+
             let logic = self.logic.clone();
             let sessions = self.sessions.clone();
             

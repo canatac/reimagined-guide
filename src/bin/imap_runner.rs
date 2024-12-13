@@ -20,7 +20,6 @@ async fn main() -> std::io::Result<()> {
         env::var("MONGODB_CLUSTER_URL").expect("MONGODB_CLUSTER_URL must be set"),
         env::var("MONGODB_APP_NAME").expect("MONGODB_APP_NAME must be set")
     );
-    println!("Client URI: {}", client_uri);
 
     // Mongo client
     let mongo_client_options = ClientOptions::parse(&client_uri).await.unwrap();
