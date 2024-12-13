@@ -76,8 +76,11 @@ impl ImapServer {
                                         match logic.authenticate_user(username, password).await {
                                             Ok(_) => {
                                                 current_session = Some(username.to_string());
-                                                format!("{} OK AUTHENTICATE completed\r\n", stored_tag)
-                                            }
+                                                
+                                                let response = format!("{} OK AUTHENTICATE completed\r\n", stored_tag);
+                                                println!("Auth Response: {}", response);  // Ajout de log
+                                                response
+                                                }
                                             Err(_) => {
                                                 format!("{} NO AUTHENTICATE failed\r\n", stored_tag)
                                             }
