@@ -94,6 +94,10 @@ async fn process_imap_command(
     let command_name = parts[1];
 
     match command_name {
+        "CAPABILITY" => {
+            // Répondre avec les capacités que votre serveur supporte actuellement
+            format!("* CAPABILITY IMAP4rev1 AUTH=PLAIN LOGIN SELECT FETCH STORE DELETE\r\n{} OK CAPABILITY completed\r\n", tag)
+        },
         "LOGIN" => {
             if let (Some(username), Some(password)) = (parts.get(2), parts.get(3)) {
                 match logic.authenticate_user(username, password).await {
