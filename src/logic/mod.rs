@@ -53,17 +53,33 @@ impl Logic {
         let collection_name = std::env::var("MONGODB_COLLECTION").expect("MONGODB_COLLECTION must be set");
         println!("Collection name: {:?}", collection_name);
         let collection = self.client.database(&database_name).collection::<User>(&collection_name);
+        
+        let filter = doc! { 
+            "username": username, 
+            "mailbox": mailbox,
+            "password": password 
+        };
+        let user = collection.find_one(filter, None).await?;
+        if let Some(user) = user {
+            println!("Found user: {:?}", user);
+            Ok(Some(user))
+        } else {
+            println!("No user found with the given username, mailbox, and password.");
+            Ok(None)
+        }
+        
         //let filter = doc! { "username": username, "password": password, "mailbox": mailbox };
+        /* 
         let mut cursor = collection.find(None, None).await?;
         let mut users = Vec::new();
         while let Some(user) = cursor.try_next().await? {
             println!("Found user: {:?}", user);
             users.push(user);
-        }
+        }*/
         //let user: Option<User> = collection.find_one(filter, None).await?;
         //println!("Authenticated user: {:?}", user);
         //Ok(user)
-        Ok(users.first().cloned())
+        //Ok(users.first().cloned())
     }
 
     pub async fn get_emails(&self, mailbox: &str) -> Result<Vec<Email>> {
