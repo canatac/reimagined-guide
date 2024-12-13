@@ -38,6 +38,7 @@ impl ImapServer {
             tokio::spawn(async move {
                 let mut buffer = [0; 1024];
                 let mut current_session: Option<String> = None;
+                let mut waiting_for_auth = false;
 
                 loop {
                     let n = match socket.read(&mut buffer).await {
@@ -60,9 +61,42 @@ impl ImapServer {
                             return;
                         }
                     };
+                    let command_str = String::from_utf8_lossy(&buffer[..n]);
+                    let response = if waiting_for_auth {
+                        waiting_for_auth = false;
+                        // Traiter la réponse d'authentification
+                        if let Ok(decoded) = base64::decode(command_str.trim()) {
+                            if let Ok(auth_str) = String::from_utf8(decoded) {
+                                let credentials: Vec<&str> = auth_str.split('\0').collect();
+                                if credentials.len() >= 3 {
+                                    let username = credentials[1];
+                                    let password = credentials[2];
+                                    match logic.authenticate_user(username, password).await {
+                                        Ok(Some(_)) => {
+                                            sessions.lock().unwrap().insert(username.to_string(), true);
+                                            current_session = Some(username.to_string());
+                                            "OK AUTHENTICATE completed\r\n".to_string()
+                                        },
+                                        Ok(None) => "NO AUTHENTICATE failed: Invalid credentials\r\n".to_string(),
+                                        Err(_) => "NO AUTHENTICATE failed: Internal error\r\n".to_string(),
+                                    }
+                                } else {
+                                    "NO AUTHENTICATE failed: Invalid credentials format\r\n".to_string()
+                                }
+                            } else {
+                                "NO AUTHENTICATE failed: Invalid UTF-8\r\n".to_string()
+                            }
+                        } else {
+                            "NO AUTHENTICATE failed: Invalid base64\r\n".to_string()
+                        }
+                    } else {
+                        let response = process_imap_command(&buffer[..n], &logic, &sessions, &mut current_session).await;
+                        if response == "+ \r\n" {
+                            waiting_for_auth = true;
+                        }
+                        response
+                    };
 
-                    let response = process_imap_command(&buffer[..n], &logic, &sessions, &mut current_session).await;
-                    println!("Response: {}", response);
                     if let Err(e) = socket.write_all(response.as_bytes()).await {
                         eprintln!("Failed to write to socket; err = {:?}", e);
                         if let Some(session) = current_session {
@@ -83,7 +117,9 @@ async fn process_imap_command(
     current_session: &mut Option<String>
 ) -> String {
     let command_str = String::from_utf8_lossy(command);
-    let parts: Vec<&str> = command_str.split_whitespace().collect();
+    let cleaned_command = command_str.replace("\\\"", "\"");
+    let parts: Vec<&str> = cleaned_command.split_whitespace().collect();
+
     println!("Command: {:?}", parts);
 
     if parts.len() < 2 {
@@ -98,8 +134,20 @@ async fn process_imap_command(
             // Répondre avec les capacités que votre serveur supporte actuellement
             format!("* CAPABILITY IMAP4rev1 AUTH=PLAIN LOGIN SELECT FETCH STORE DELETE\r\n{} OK CAPABILITY completed\r\n", tag)
         },
+        "AUTHENTICATE" => {
+            let auth_type = parts[2];
+            match auth_type {
+                "PLAIN" => {
+                        // Envoyer le challenge pour l'authentification PLAIN
+                    format!("+ \r\n")  // Le client doit répondre avec les credentials en base64
+                },
+                _ => format!("{} NO AUTHENTICATE method not supported\r\n", tag)
+            }            
+        },
         "LOGIN" => {
             if let (Some(username), Some(password)) = (parts.get(2), parts.get(3)) {
+                let username = username.trim_matches('"');
+                let password = password.trim_matches('"');
                 match logic.authenticate_user(username, password).await {
                     Ok(Some(_)) => {
                         sessions.lock().unwrap().insert(username.to_string(), true);
