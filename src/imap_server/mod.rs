@@ -67,8 +67,8 @@ async fn process_imap_command(command: &[u8], logic: &Arc<Logic>) -> String {
 
     match command_name {
         "LOGIN" => {
-            if let (Some(username), Some(password)) = (parts.get(1), parts.get(2)) {
-                match logic.authenticate_user(username, password).await {
+            if let (Some(username), Some(password), Some(mailbox)) = (parts.get(1), parts.get(2), parts.get(3)) {
+                match logic.authenticate_user(username, password, mailbox).await {
                     Ok(Some(_)) => "OK LOGIN completed\r\n".to_string(),
                     Ok(None) => "NO LOGIN failed: Invalid credentials\r\n".to_string(),
                     Err(_) => "NO LOGIN failed: Internal error\r\n".to_string(),
