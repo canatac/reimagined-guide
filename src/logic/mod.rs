@@ -1,11 +1,10 @@
-use mongodb::{Client, bson::doc};
+use mongodb::{Client, bson::doc, error::Result};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use mongodb::error::Result;
 use futures_util::TryStreamExt;
 use mongodb::error::Error;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct User {
     pub username: String,
     pub password: String,
@@ -54,11 +53,17 @@ impl Logic {
         let collection_name = std::env::var("MONGODB_COLLECTION").expect("MONGODB_COLLECTION must be set");
         println!("Collection name: {:?}", collection_name);
         let collection = self.client.database(&database_name).collection::<User>(&collection_name);
-        let filter = doc! { "username": username, "password": password, "mailbox": mailbox };
-        
-        let user = collection.find_one(filter, None).await?;
-        println!("Authenticated user: {:?}", user);
-        Ok(user)
+        //let filter = doc! { "username": username, "password": password, "mailbox": mailbox };
+        let mut cursor = collection.find(None, None).await?;
+        let mut users = Vec::new();
+        while let Some(user) = cursor.try_next().await? {
+            println!("Found user: {:?}", user);
+            users.push(user);
+        }
+        //let user: Option<User> = collection.find_one(filter, None).await?;
+        //println!("Authenticated user: {:?}", user);
+        //Ok(user)
+        Ok(users.first().cloned())
     }
 
     pub async fn get_emails(&self, mailbox: &str) -> Result<Vec<Email>> {

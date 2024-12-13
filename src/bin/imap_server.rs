@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use mongodb::Client;
 use std::env;
 use simple_smtp_server::logic::Logic;
 use simple_smtp_server::imap_server::ImapServer;
@@ -22,7 +21,7 @@ async fn main() -> std::io::Result<()> {
         mongodb::Client::with_uri_str(&client_uri)
             .await.unwrap()
     );
-
+    
     let logic = Arc::new(Logic::new(client));
     let server = ImapServer::new(logic);
     let imap_server_address = env::var("IMAP_SERVER").expect("IMAP_SERVER must be set");

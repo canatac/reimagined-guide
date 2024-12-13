@@ -1,8 +1,7 @@
 use tokio::net::TcpListener;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use std::sync::Arc;
-use mongodb::Client;
-use std::env;
+
 
 use crate::logic::Logic;
 pub struct ImapServer {
@@ -23,6 +22,7 @@ impl ImapServer {
             println!("New IMAP client connected from {}", peer_addr);
 
             let logic = self.logic.clone();
+            println!("logic.client.uri: {:?}", self.logic.client.uri());
             tokio::spawn(async move {
                 let mut buffer = [0; 1024];
                 loop {
