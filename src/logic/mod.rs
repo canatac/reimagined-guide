@@ -53,6 +53,7 @@ impl Logic {
         let collection = self.client.database(&database_name).collection::<User>(&collection_name);
         let filter = doc! { "username": username, "password": password };
         let user = collection.find_one(filter, None).await?;
+        println!("Authenticated user: {:?}", user);
         Ok(user)
     }
 
