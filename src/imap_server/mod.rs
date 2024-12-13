@@ -39,6 +39,7 @@ impl ImapServer {
                 let mut buffer = [0; 1024];
                 let mut current_session: Option<String> = None;
                 let mut waiting_for_auth = false;
+                let mut auth_tag: Option<String> = None;  // Ajout pour stocker le tag
 
                 loop {
                     let n = match socket.read(&mut buffer).await {
@@ -75,19 +76,41 @@ impl ImapServer {
                                         Ok(Some(_)) => {
                                             sessions.lock().unwrap().insert(username.to_string(), true);
                                             current_session = Some(username.to_string());
-                                            "OK AUTHENTICATE completed\r\n".to_string()
+                                            let response = format!("{} OK AUTHENTICATE completed\r\n", 
+                                                auth_tag.as_ref().unwrap_or(&"*".to_string()));
+                                            println!("Auth Response: {}", response);  // Ajout de log
+                                            response
                                         },
-                                        Ok(None) => "NO AUTHENTICATE failed: Invalid credentials\r\n".to_string(),
-                                        Err(_) => "NO AUTHENTICATE failed: Internal error\r\n".to_string(),
+                                        Ok(None) => {
+                                            let response = format!("{} NO AUTHENTICATE failed: Invalid credentials\r\n",
+                                                auth_tag.as_ref().unwrap_or(&"*".to_string()));
+                                            println!("Auth Response: {}", response);  // Ajout de log
+                                            response
+                                        },
+                                        Err(_) => {
+                                            let response = format!("{} NO AUTHENTICATE failed: Internal error\r\n",
+                                                auth_tag.as_ref().unwrap_or(&"*".to_string()));
+                                            println!("Auth Response: {}", response);  // Ajout de log
+                                            response
+                                        }
                                     }
                                 } else {
-                                    "NO AUTHENTICATE failed: Invalid credentials format\r\n".to_string()
+                                    let response = format!("{} NO AUTHENTICATE failed: Invalid credentials format\r\n",
+                                        auth_tag.as_ref().unwrap_or(&"*".to_string()));
+                                    println!("Auth Response: {}", response);  // Ajout de log
+                                    response
                                 }
                             } else {
-                                "NO AUTHENTICATE failed: Invalid UTF-8\r\n".to_string()
+                                let response = format!("{} NO AUTHENTICATE failed: Invalid UTF-8\r\n",
+                                    auth_tag.as_ref().unwrap_or(&"*".to_string()));
+                                println!("Auth Response: {}", response);  // Ajout de log
+                                response
                             }
                         } else {
-                            "NO AUTHENTICATE failed: Invalid base64\r\n".to_string()
+                            let response = format!("{} NO AUTHENTICATE failed: Invalid base64\r\n",
+                                auth_tag.as_ref().unwrap_or(&"*".to_string()));
+                            println!("Auth Response: {}", response);  // Ajout de log
+                            response
                         }
                     } else {
                         let response = process_imap_command(&buffer[..n], &logic, &sessions, &mut current_session).await;
