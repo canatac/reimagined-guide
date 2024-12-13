@@ -57,8 +57,16 @@ async fn process_imap_command(command: &[u8], logic: &Arc<Logic>) -> String {
     let command_str = String::from_utf8_lossy(command);
     let parts: Vec<&str> = command_str.split_whitespace().collect();
     println!("Command: {:?}", parts);
-    match parts.get(0) {
-        Some(&"LOGIN") => {
+
+    if parts.len() < 2 {
+        return "BAD Command not recognized\r\n".to_string();
+    }
+
+    let tag = parts[0];
+    let command_name = parts[1];
+
+    match command_name {
+        "LOGIN" => {
             if let (Some(username), Some(password)) = (parts.get(1), parts.get(2)) {
                 match logic.authenticate_user(username, password).await {
                     Ok(Some(_)) => "OK LOGIN completed\r\n".to_string(),
@@ -69,7 +77,7 @@ async fn process_imap_command(command: &[u8], logic: &Arc<Logic>) -> String {
                 "BAD LOGIN requires a username and password\r\n".to_string()
             }
         }
-        Some(&"SELECT") => {
+        "SELECT" => {
             if let Some(mailbox) = parts.get(1) {
                 match logic.get_emails(mailbox).await {
                     Ok(_) => "OK SELECT completed\r\n".to_string(),
@@ -79,7 +87,7 @@ async fn process_imap_command(command: &[u8], logic: &Arc<Logic>) -> String {
                 "BAD SELECT requires a mailbox name\r\n".to_string()
             }
         }
-        Some(&"FETCH") => {
+        "FETCH" => {
             if let Some(email_id) = parts.get(1) {
                 match logic.fetch_email(email_id).await {
                     Ok(Some(_)) => "OK FETCH completed\r\n".to_string(),
@@ -90,7 +98,7 @@ async fn process_imap_command(command: &[u8], logic: &Arc<Logic>) -> String {
                 "BAD FETCH requires an email ID\r\n".to_string()
             }
         }
-        Some(&"STORE") => {
+        "STORE" => {
             if let (Some(email_id), Some(flag)) = (parts.get(1), parts.get(2)) {
                 match logic.store_email_flag(email_id, flag).await {
                     Ok(_) => "OK STORE completed\r\n".to_string(),
@@ -100,7 +108,7 @@ async fn process_imap_command(command: &[u8], logic: &Arc<Logic>) -> String {
                 "BAD STORE requires an email ID and a flag\r\n".to_string()
             }
         }
-        Some(&"DELETE") => {
+        "DELETE" => {
             if let Some(email_id) = parts.get(1) {
                 match logic.delete_email(email_id).await {
                     Ok(_) => "OK DELETE completed\r\n".to_string(),
@@ -110,7 +118,7 @@ async fn process_imap_command(command: &[u8], logic: &Arc<Logic>) -> String {
                 "BAD DELETE requires an email ID\r\n".to_string()
             }
         }
-        Some(&"LOGOUT") => {
+        "LOGOUT" => {
             "OK LOGOUT completed\r\n".to_string()
         }
         _ => "BAD Command not recognized\r\n".to_string(),
