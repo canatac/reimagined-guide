@@ -22,7 +22,6 @@ impl ImapServer {
             println!("New IMAP client connected from {}", peer_addr);
 
             let logic = self.logic.clone();
-            println!("logic.client.uri: {:?}", self.logic.client.uri());
             tokio::spawn(async move {
                 let mut buffer = [0; 1024];
                 loop {
