@@ -26,47 +26,35 @@ impl ImapServer {
         loop {
             let (mut socket, peer_addr) = listener.accept().await?;
             println!("New IMAP client connected from {}", peer_addr);
-
-            let greeting = "* OK IMAP4rev1 Server Ready\r\n";
+            // Send initial greeting
+            let greeting = format!("* OK IMAP4rev1 Service Ready\r\n");
             if let Err(e) = socket.write_all(greeting.as_bytes()).await {
                 eprintln!("Failed to send greeting; err = {:?}", e);
-                continue;
+                return Ok(());
             }
-
             let logic = self.logic.clone();
-            let sessions = self.sessions.clone();
-
             tokio::spawn(async move {
                 let mut buffer = [0; 1024];
-                let mut current_session: Option<String> = None;
-
                 loop {
                     let n = match socket.read(&mut buffer).await {
                         Ok(n) if n == 0 => {
                             println!("Connection closed by client");
-                            if let Some(session) = &current_session {
-                                sessions.lock().unwrap().remove(session);
-                            }
                             return;
                         }
-                        Ok(n) => n,
+                        Ok(n) => {
+                            println!("Read {} bytes from socket", n);
+                            n
+                        }
                         Err(e) => {
                             eprintln!("Failed to read from socket; err = {:?}", e);
-                            if let Some(session) = &current_session {
-                                sessions.lock().unwrap().remove(session);
-                            }
                             return;
                         }
                     };
 
-                    let command_str = String::from_utf8_lossy(&buffer[..n]);
-                    let response = process_imap_command(&command_str, &logic, &sessions, &mut current_session).await;
-
+                    let response = process_imap_command(&buffer[..n], &logic).await;
+                    println!("Response: {}", response);
                     if let Err(e) = socket.write_all(response.as_bytes()).await {
                         eprintln!("Failed to write to socket; err = {:?}", e);
-                        if let Some(session) = &current_session {
-                            sessions.lock().unwrap().remove(session);
-                        }
                         return;
                     }
                 }
@@ -76,12 +64,11 @@ impl ImapServer {
 }
 
 async fn process_imap_command(
-    command: &str,
+    command: &[u8],
     logic: &Arc<Logic>,
-    sessions: &Arc<Mutex<HashMap<String, bool>>>,
-    current_session: &mut Option<String>,
 ) -> String {
-    let command_parts: Vec<&str> = command.trim().split_whitespace().collect();
+    let command_str = String::from_utf8_lossy(command);
+    let command_parts: Vec<&str> = command_str.trim().split_whitespace().collect();
     if command_parts.len() < 2 {
         return "BAD Invalid command format\r\n".to_string();
     }
@@ -108,8 +95,6 @@ async fn process_imap_command(
 
             match logic.authenticate_user(username, password).await {
                 Ok(Some(_)) => {
-                    sessions.lock().unwrap().insert(username.to_string(), true);
-                    *current_session = Some(username.to_string());
                     format!("{} OK LOGIN completed\r\n", tag)
                 }
                 Ok(None) => {
@@ -120,9 +105,6 @@ async fn process_imap_command(
             }
         }
         "EXAMINE" => {
-            if current_session.is_none() {
-                return format!("{} NO EXAMINE failed: Not authenticated\r\n", tag);
-            }
             if command_parts.len() < 3 {
                 return format!("{} BAD EXAMINE requires a mailbox name\r\n", tag);
             }
@@ -138,9 +120,6 @@ async fn process_imap_command(
             }
         }
         "CREATE" => {
-            if current_session.is_none() {
-                return format!("{} NO CREATE failed: Not authenticated\r\n", tag);
-            }
             if command_parts.len() < 3 {
                 return format!("{} BAD CREATE requires a mailbox name\r\n", tag);
             }
@@ -151,9 +130,6 @@ async fn process_imap_command(
             }
         }
         "DELETE" => {
-            if current_session.is_none() {
-                return format!("{} NO DELETE failed: Not authenticated\r\n", tag);
-            }
             if command_parts.len() < 3 {
                 return format!("{} BAD DELETE requires a mailbox name\r\n", tag);
             }
@@ -164,9 +140,6 @@ async fn process_imap_command(
             }
         }
         "RENAME" => {
-            if current_session.is_none() {
-                return format!("{} NO RENAME failed: Not authenticated\r\n", tag);
-            }
             if command_parts.len() < 4 {
                 return format!("{} BAD RENAME requires old and new mailbox names\r\n", tag);
             }
@@ -178,9 +151,6 @@ async fn process_imap_command(
             }
         }
         "SUBSCRIBE" => {
-            if current_session.is_none() {
-                return format!("{} NO SUBSCRIBE failed: Not authenticated\r\n", tag);
-            }
             if command_parts.len() < 3 {
                 return format!("{} BAD SUBSCRIBE requires a mailbox name\r\n", tag);
             }
@@ -191,9 +161,6 @@ async fn process_imap_command(
             }
         }
         "UNSUBSCRIBE" => {
-            if current_session.is_none() {
-                return format!("{} NO UNSUBSCRIBE failed: Not authenticated\r\n", tag);
-            }
             if command_parts.len() < 3 {
                 return format!("{} BAD UNSUBSCRIBE requires a mailbox name\r\n", tag);
             }
@@ -204,9 +171,6 @@ async fn process_imap_command(
             }
         }
         "LSUB" => {
-            if current_session.is_none() {
-                return format!("{} NO LSUB failed: Not authenticated\r\n", tag);
-            }
             let reference = command_parts.get(2).unwrap_or(&"%");
             let mailbox = command_parts.get(3).unwrap_or(&"*");
             match logic.list_subscribed_mailboxes(reference, mailbox).await {
@@ -222,9 +186,6 @@ async fn process_imap_command(
             }
         }
         "STATUS" => {
-            if current_session.is_none() {
-                return format!("{} NO STATUS failed: Not authenticated\r\n", tag);
-            }
             if command_parts.len() < 4 {
                 return format!("{} BAD STATUS requires a mailbox name and status data items\r\n", tag);
             }
@@ -238,36 +199,24 @@ async fn process_imap_command(
             }
         }
         "CHECK" => {
-            if current_session.is_none() {
-                return format!("{} NO CHECK failed: Not authenticated\r\n", tag);
-            }
             match logic.check_mailbox().await {
                 Ok(_) => format!("{} OK CHECK completed\r\n", tag),
                 Err(_) => format!("{} NO CHECK failed: Internal error\r\n", tag),
             }
         }
         "CLOSE" => {
-            if current_session.is_none() {
-                return format!("{} NO CLOSE failed: Not authenticated\r\n", tag);
-            }
             match logic.close_mailbox().await {
                 Ok(_) => format!("{} OK CLOSE completed\r\n", tag),
                 Err(_) => format!("{} NO CLOSE failed: Internal error\r\n", tag),
             }
         }
         "EXPUNGE" => {
-            if current_session.is_none() {
-                return format!("{} NO EXPUNGE failed: Not authenticated\r\n", tag);
-            }
             match logic.expunge_mailbox().await {
                 Ok(_) => format!("{} OK EXPUNGE completed\r\n", tag),
                 Err(_) => format!("{} NO EXPUNGE failed: Internal error\r\n", tag),
             }
         }
         "SEARCH" => {
-            if current_session.is_none() {
-                return format!("{} NO SEARCH failed: Not authenticated\r\n", tag);
-            }
             let search_criteria = command_parts[2..].join(" ");
             match logic.search_messages(&search_criteria).await {
                 Ok(results) => {
@@ -278,9 +227,6 @@ async fn process_imap_command(
             }
         }
         "COPY" => {
-            if current_session.is_none() {
-                return format!("{} NO COPY failed: Not authenticated\r\n", tag);
-            }
             if command_parts.len() < 4 {
                 return format!("{} BAD COPY requires message set and mailbox name\r\n", tag);
             }
@@ -294,3 +240,4 @@ async fn process_imap_command(
         _ => format!("{} BAD Command not recognized\r\n", tag),
     }
 }
+
