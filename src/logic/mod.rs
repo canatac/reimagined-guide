@@ -113,7 +113,8 @@ impl Logic {
         let user = collection.find_one(filter, None).await?;
         if let Some(user) = user {
             println!("Found user: {:?}", user);
-                Ok(Some(user))
+            format!("{} OK LOGIN completed\r\n","A000");
+            Ok(Some(user))
             } else {
                 println!("No user found with the given username, mailbox, and password.");
                 Ok(None)
