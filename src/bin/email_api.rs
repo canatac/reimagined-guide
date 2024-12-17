@@ -47,7 +47,7 @@ use dotenv::dotenv;
 use std::env;
 use reqwest;
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Debug, PartialEq)]
 struct EmailRequest {
     from: String,
     to: String,
@@ -176,81 +176,39 @@ async fn send_to_mailing_list(email_req: web::Json<MailingListEmailRequest>) -> 
     }))
 }
 
-async fn send_email_handler(email_req: web::Json<EmailRequest>) -> impl Responder {
-    println!("Received email request");  // Add this line
-    let dkim_service_url = env::var("DKIM_SERVICE_URL").expect("DKIM_SERVICE_URL not set");
+async fn send_email_handler(
+    email_req: web::Json<EmailRequest>,
+    dkim_service: web::Data<Box<dyn DkimService>>,
+) -> impl Responder {
+    println!("Received email request");
 
-    let client = reqwest::Client::new();
-
-    println!("Sending request to DKIM service: {}", dkim_service_url);  // Add this line
-    let dkim_response = match client.post(&dkim_service_url)
-        .json(&serde_json::json!({
-            "from": email_req.from,
-            "to": email_req.to,
-            "subject": email_req.subject,
-            "text": email_req.body
-        }))
-        .send()
-        .await {
-            Ok(resp) => {
-                println!("DKIM service response status: {:?}", resp.status());  // Add this line
-                if resp.status().is_success() {
-                    println!("DKIM service responded with success: {:?}", resp.status());
-                    return HttpResponse::Ok().json(serde_json::json!({
-                        "status": "success",
-                        "message": "Email signed and sent successfully"
-                    }));
+    match dkim_service.sign_email(&email_req).await {
+        Ok(dkim_result) => {
+            println!("DKIM service returned success");
+            let message_id = dkim_result["messageId"].as_str().unwrap_or("");
+            match dkim_result["status"].as_str() {
+                Some("success") => HttpResponse::Ok().json(serde_json::json!({
+                    "status": "success", 
+                    "message": "Email signed and sent successfully",
+                    "messageId": message_id
+                })),
+                _ => {
+                    let error_message = dkim_result["message"].as_str().unwrap_or("Unknown error");
+                    HttpResponse::InternalServerError().json(serde_json::json!({
+                        "status": "error",
+                        "message": format!("Failed to sign and send email: {}", error_message)
+                    }))
                 }
-                resp
-            },
-            Err(e) => {
-                eprintln!("Failed to call DKIM service: {}", e);
-                return HttpResponse::InternalServerError().json(serde_json::json!({
-                    "status": "error",
-                    "message": "Failed to generate DKIM signature and send email"
-                }));
             }
-        };
-
-    if !dkim_response.status().is_success() {
-        eprintln!("DKIM service returned an error: {:?}", dkim_response.status());
-        return HttpResponse::InternalServerError().json(serde_json::json!({
-            "status": "error",
-            "message": "DKIM service error: failed to sign and send email"
-        }));
-    }
-
-    let dkim_result: serde_json::Value = match dkim_response.json().await {
-        Ok(result) => result,
-        Err(e) => {
-            eprintln!("Failed to parse DKIM service response: {}", e);
-            return HttpResponse::InternalServerError().json(serde_json::json!({
-                "status": "error",
-                "message": "Failed to parse DKIM service response"
-            }));
         }
-    };
-
-    // Assuming the DKIM service returns a "status" field indicating success
-    // Check if the DKIM service returned a messageId
-    let message_id = dkim_result["messageId"].as_str().unwrap_or("");
-    
-    // Update the response to include the messageId if available
-    match dkim_result["status"].as_str() {
-        Some("success") => HttpResponse::Ok().json(serde_json::json!({
-            "status": "success", 
-            "message": "Email signed and sent successfully",
-            "messageId": message_id
-        })),
-        _ => {
-            let error_message = dkim_result["message"].as_str().unwrap_or("Unknown error");
+        Err(e) => {
+            eprintln!("Failed to call DKIM service: {}", e);
             HttpResponse::InternalServerError().json(serde_json::json!({
                 "status": "error",
-                "message": format!("Failed to sign and send email: {}", error_message)
+                "message": "Failed to generate DKIM signature and send email"
             }))
         }
     }
-    
 }
 
 #[actix_web::main]
@@ -273,6 +231,7 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .wrap(cors)
             .wrap(actix_web::middleware::Logger::default())
+            .app_data(web::Data::new(RealDkimService))
             .route("/send-email", web::post().to(send_email_handler))
             .route("/create-mailing-list", web::post().to(create_mailing_list))
             .route("/send-to-mailing-list", web::post().to(send_to_mailing_list))
@@ -280,4 +239,97 @@ async fn main() -> std::io::Result<()> {
     .bind_openssl("0.0.0.0:8443", builder)?
     .run()
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_web::{test, App};
+    use dotenv::dotenv;
+    use mockall::predicate::eq;
+    use mockall::mock;
+
+    mock! {
+        pub DkimService {
+            pub async fn sign_email(&self, email: &EmailRequest) -> Result<serde_json::Value, std::io::Error>;
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl DkimService for MockDkimService {
+        async fn sign_email(&self, email: &EmailRequest) -> Result<serde_json::Value, std::io::Error> {
+            self.sign_email(email).await
+        }
+    }
+
+    #[actix_web::test]
+    async fn test_send_email() {
+        dotenv::from_filename(".env.test").ok();
+
+        let mut mock_dkim_service = MockDkimService::new();
+        mock_dkim_service
+            .expect_sign_email()
+            .with(eq(EmailRequest {
+                from: "sender@example.com".to_string(),
+                to: "recipient@example.com".to_string(),
+                subject: "Test Email".to_string(),
+                body: "This is a test email.".to_string(),
+            }))
+            .times(1)
+            .returning(|_| Ok(serde_json::json!({"status": "success", "messageId": "12345"})));
+
+        let app = test::init_service(
+            App::new()
+            .app_data(web::Data::new(Box::new(mock_dkim_service) as Box<dyn DkimService>))
+            .route("/send-email", web::post().to(send_email_handler))
+        ).await;
+
+        let email_request = EmailRequest {
+            from: "sender@example.com".to_string(),
+            to: "recipient@example.com".to_string(),
+            subject: "Test Email".to_string(),
+            body: "This is a test email.".to_string(),
+        };
+        println!("Sending test request to /send-email");
+
+        let req = test::TestRequest::post()
+            .uri("/send-email")
+            .set_json(&email_request)
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        println!("Response status: {:?}", resp.status());
+        assert!(resp.status().is_success());
+    }
+}
+
+#[async_trait::async_trait]
+pub trait DkimService: Send + Sync {
+    async fn sign_email(&self, email: &EmailRequest) -> Result<serde_json::Value, std::io::Error>;
+}
+
+pub struct RealDkimService;
+
+#[async_trait::async_trait]
+impl DkimService for RealDkimService {
+    async fn sign_email(&self, email: &EmailRequest) -> Result<serde_json::Value, std::io::Error> {
+        let dkim_service_url = env::var("DKIM_SERVICE_URL").expect("DKIM_SERVICE_URL not set");
+        let client = reqwest::Client::new();
+
+        let response = client.post(&dkim_service_url)
+            .json(&serde_json::json!({
+                "from": email.from,
+                "to": email.to,
+                "subject": email.subject,
+                "text": email.body
+            }))
+            .send()
+            .await
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+        if response.status().is_success() {
+            response.json().await.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+        } else {
+            Err(std::io::Error::new(std::io::ErrorKind::Other, "Failed to sign email"))
+        }
+    }
 }

@@ -6,17 +6,20 @@ use dotenv::dotenv;
 use simple_smtp_server::logic::User;
 use warp::http::StatusCode;
 use std::env;
+use simple_smtp_server::logic::LogicTrait;
 
 #[derive(Debug)]
 struct MyCustomError;
 impl Reject for MyCustomError {}
 
-async fn create_user(logic: Arc<Logic>, user: User) -> Result<impl warp::Reply, warp::Rejection> {
-    
-    println!("Creating user: {:?}", user);    
+async fn create_user(logic: Arc<dyn LogicTrait>, user: User) -> Result<impl warp::Reply, warp::Rejection> {
+    println!("Creating user: {:?}", user);
     match logic.create_user(&user.username, &user.password, &user.mailbox).await {
         Ok(_) => Ok(warp::reply::with_status("User created", StatusCode::CREATED)),
-        Err(_) => Err(warp::reject()),
+        Err(e) => {
+            eprintln!("Error creating user: {:?}", e);
+            Err(warp::reject())
+        },
     }
 }
 
@@ -79,7 +82,7 @@ pub fn api_routes(client: Arc<mongodb::Client>) -> impl Filter<Extract = impl wa
     let create_user_route = warp::path!("create_user")
         .and(warp::post())
         .and(with_logic(logic.clone()))
-        .and(warp::body::json::<User>())  // Désérialise le body en User, pas en Logic
+        .and(warp::body::json::<User>())
         .and_then(|logic: Arc<Logic>, user: User| create_user(logic, user));
 
 
@@ -164,4 +167,67 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use warp::test::request;
+    use std::sync::Arc;
+    use simple_smtp_server::logic::{Logic, User};
+    use mockall::predicate::eq;
+    use mockall::mock;
+
+    // Mock the Logic struct
+    mock! {
+        pub Logic {
+            pub async fn create_user(&self, username: &str, password: &str, mailbox: &str) -> Result<(), mongodb::error::Error>;
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl LogicTrait for MockLogic {
+        async fn create_user(&self, username: &str, password: &str, mailbox: &str) -> Result<(), mongodb::error::Error> {
+            self.create_user(username, password, mailbox).await
+        }
+    }
+
+    #[tokio::test]
+    async fn test_create_user_route() {
+        dotenv::from_filename(".env.test").ok();
+
+        // Créer une instance mockée de Logic
+        let mut mock_logic = MockLogic::new();
+        mock_logic
+            .expect_create_user()
+            .with(eq("testuser"), eq("password"), eq("testmailbox"))
+            .times(1)
+            .returning(|_, _, _| Ok(()));
+
+        let logic: Arc<dyn LogicTrait> = Arc::new(mock_logic);
+
+        let user = User {
+            username: "testuser".to_string(),
+            password: "password".to_string(),
+            mailbox: "testmailbox".to_string(),
+        };
+
+        // Créer un filtre pour le handler create_user
+        let create_user_filter = warp::path!("create_user")
+            .and(warp::post())
+            .and(warp::any().map(move || logic.clone()))
+            .and(warp::body::json())
+            .and_then(create_user);
+
+        let res = request()
+            .method("POST")
+            .path("/create_user")
+            .json(&user)
+            .reply(&create_user_filter)
+            .await;
+
+        assert_eq!(res.status(), 201);
+    }
+
+    // Ajoutez d'autres tests pour les autres routes ici
 }

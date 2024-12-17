@@ -40,7 +40,7 @@ use std::io::{Error as IoError, ErrorKind};
 use std::sync::Arc;
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
-use chrono::Utc;
+use chrono::{Utc, DateTime};
 use log::{info, error, debug};
 use rustls::ServerConfig;
 
@@ -59,6 +59,7 @@ use std::fmt;
 use constant_time_eq::constant_time_eq;
 
 use simple_smtp_server::smtp_client::{send_outgoing_email, extract_email_address};
+use simple_smtp_server::logic::{Logic, Email as LogicEmail};
 
 // Custom error type for the main function
 #[derive(Debug)]
@@ -131,25 +132,7 @@ struct Email {
     raw_content: String,
 }
 
-// Function to extract email content
-fn extract_email_content(email_content: &str) -> Result<String, Box<dyn std::error::Error>> {
-    let parsed = parse_mail(email_content.as_bytes())?;
-    
-    // Try to get the plain text part first
-    if let Some(plain_text) = parsed.subparts.iter().find(|part| part.ctype.mimetype == "text/plain") {
-        return Ok(plain_text.get_body()?.trim().to_string());
-    }
-    
-    // If no plain text, try to get the HTML part and strip HTML tags
-    if let Some(html) = parsed.subparts.iter().find(|part| part.ctype.mimetype == "text/html") {
-        let html_content = html.get_body()?;
-        // This is a very basic HTML stripping, you might want to use a proper HTML parser
-        return Ok(html_content.replace(|c: char| c == '<' || c == '>', "").trim().to_string());
-    }
-    
-    // If no multipart, just return the body
-    Ok(parsed.get_body()?.trim().to_string())
-}
+
 
 // Struct to represent the mail server
 struct MailServer {
@@ -166,7 +149,7 @@ impl MailServer {
     }
 
     // Store an email in the mail directory
-    async fn store_email(&self, email: &Email) -> std::io::Result<()> {
+    async fn store_email(&self, email: &CustomEmail) -> std::io::Result<()> {
         let timestamp = Utc::now().format("%Y%m%d%H%M%S");
         let filename = format!("{}-{}.eml", timestamp, email.to.replace("@", "_at_"));
         let path = Path::new(&self.mail_dir).join(filename);
@@ -217,7 +200,7 @@ impl MailServer {
 }
 
 // Handle TLS client connection
-async fn handle_tls_client(tls_stream: TlsStream<TcpStream>) -> std::io::Result<()> {
+async fn handle_tls_client(tls_stream: TlsStream<TcpStream>, logic: Arc<Logic>) -> std::io::Result<()> {
     info!("TLS connection established");
     let peer_addr = tls_stream.get_ref().0.peer_addr()?;
     
@@ -229,14 +212,19 @@ async fn handle_tls_client(tls_stream: TlsStream<TcpStream>) -> std::io::Result<
 
     let mut in_data_mode: bool = false;
 
-    let mut current_email = Email {
+    let mut current_email = CustomEmail {
+        id: String::new(),
         from: String::new(),
         to: String::new(),
         subject: String::new(),
         body: String::new(),
+        flags: Vec::new(),
+        sequence_number: 0,
+        uid: 0,
+        internal_date: Utc::now(),
         dkim_signature: None,
         headers: Vec::new(),
-        raw_content: String::new()
+        raw_content: String::new(),
     };
 
     let mail_server = Arc::new(MailServer::new("./emails"));
@@ -259,15 +247,26 @@ async fn handle_tls_client(tls_stream: TlsStream<TcpStream>) -> std::io::Result<
                 if in_data_mode {
                     if line.trim() == "." {
                         in_data_mode = false;
-                        mail_server.store_email(&current_email).await?;
-                        match send_outgoing_email(&current_email.raw_content).await {
-                            Ok(_) => {
-                                write_response(&mut stream, "250 OK\r\n").await?;
-                            }
-                            Err(e) => {
-                                error!("Failed to forward email: {}", e);
-                                write_response(&mut stream, "554 Transaction failed\r\n").await?;
-                            }
+                        // Convert to logic's Email struct
+                        let email_to_store = LogicEmail {
+                            id: current_email.id.clone(),
+                            from: current_email.from.clone(),
+                            to: current_email.to.clone(),
+                            subject: current_email.subject.clone(),
+                            body: current_email.body.clone(),
+                            flags: current_email.flags.clone(),
+                            sequence_number: current_email.sequence_number,
+                            uid: current_email.uid,
+                            internal_date: current_email.internal_date,
+                        };
+
+                        // Store the email in MongoDB
+                        if let Err(e) = logic.store_email(&email_to_store).await {
+                            eprintln!("Failed to store email in MongoDB: {}", e);
+                            write_response(&mut stream, "554 Transaction failed\r\n").await?;
+                        } else {
+                            println!("Email stored successfully in MongoDB");
+                            write_response(&mut stream, "250 OK\r\n").await?;
                         }
                     } else {
                         if current_email.raw_content.is_empty() {
@@ -344,14 +343,19 @@ async fn handle_plain_client(stream: TcpStream, tls_acceptor: Arc<TlsAcceptor>) 
 
     let mut in_data_mode = false;
 
-    let mut current_email = Email {
+    let mut current_email = CustomEmail {
+        id: String::new(),
         from: String::new(),
         to: String::new(),
         subject: String::new(),
         body: String::new(),
-        headers: Vec::new(),
+        flags: Vec::new(),
+        sequence_number: 0,
+        uid: 0,
+        internal_date: Utc::now(),
         dkim_signature: None,
-        raw_content: String::new()
+        headers: Vec::new(),
+        raw_content: String::new(),
     };
 
     let mail_server = Arc::new(MailServer::new("./emails"));
@@ -466,7 +470,7 @@ async fn handle_plain_client(stream: TcpStream, tls_acceptor: Arc<TlsAcceptor>) 
 }
 
 // Process SMTP commands
-async fn process_command(command: &str, email: &mut Email, stream: &mut StreamType) -> std::io::Result<String> {
+async fn process_command(command: &str, email: &mut CustomEmail, stream: &mut StreamType) -> std::io::Result<String> {
     // Implement your SMTP command processing logic here
     // This is a basic example and should be expanded based on your needs
 
@@ -512,14 +516,19 @@ async fn process_command(command: &str, email: &mut Email, stream: &mut StreamTy
             Ok("221 Bye\r\n".to_string())
         } 
         "RSET" => {
-            *email = Email {
+            *email = CustomEmail {
+                id: String::new(),
                 from: String::new(),
                 to: String::new(),
                 subject: String::new(),
                 body: String::new(),
-                headers: Vec::new(),
+                flags: Vec::new(),
+                sequence_number: 0,
+                uid: 0,
+                internal_date: Utc::now(),
                 dkim_signature: None,
-                raw_content: String::new()
+                headers: Vec::new(),
+                raw_content: String::new(),
             };
              // Reset the email using new() instead of default()
             Ok("250 OK\r\n".to_string())
@@ -674,18 +683,29 @@ async fn main() -> Result<(), MainError> {
     info!("TLS Server listening on {}", tls_addr);
     info!("Plain Server listening on {}", plain_addr);
 
-    loop {
+    // Initialisation du client MongoDB
+    let client_uri = format!(
+        "mongodb+srv://{}:{}@{}/?retryWrites=true&w=majority&appName={}",
+        env::var("MONGODB_USERNAME").expect("MONGODB_USERNAME must be set"),
+        env::var("MONGODB_PASSWORD").expect("MONGODB_PASSWORD must be set"),
+        env::var("MONGODB_CLUSTER_URL").expect("MONGODB_CLUSTER_URL must be set"),
+        env::var("MONGODB_APP_NAME").expect("MONGODB_APP_NAME must be set")
+    );
 
+    let client = Arc::new(mongodb::Client::with_uri_str(&client_uri).await.unwrap());
+    let logic = Arc::new(Logic::new(client));
+
+    loop {
         tokio::select! {
             // Handle incoming TLS connections
-            
             result = tls_listener.accept() => {
                 if let Ok((stream, peer_addr)) = result {
                     info!("New TLS client connected from {}", peer_addr);
                     let acceptor = tls_acceptor.clone();
-                    let tls_stream = acceptor.accept(stream).await?;
+                    let logic_clone = logic.clone(); // Clone the Arc before moving into the closure
                     tokio::spawn(async move {
-                        if let Err(e) = handle_tls_client(tls_stream).await {
+                        let tls_stream = acceptor.accept(stream).await.unwrap();
+                        if let Err(e) = handle_tls_client(tls_stream, logic_clone).await {
                             error!("Error handling plain client {}: {}", peer_addr, e);
                         } else {
                             info!("Plain client session completed successfully");
@@ -693,7 +713,7 @@ async fn main() -> Result<(), MainError> {
                     });
                 }
             }
- 
+
             // Handle incoming plain connections
             result = plain_listener.accept() => {
                 if let Ok((stream, peer_addr)) = result {
@@ -707,9 +727,71 @@ async fn main() -> Result<(), MainError> {
                         }
                     });
                 }
-            }   
+            }
         }
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
 
+    Ok(())
+}
+
+struct CustomEmail {
+    id: String,
+    from: String,
+    to: String,
+    subject: String,
+    body: String,
+    flags: Vec<String>,
+    sequence_number: u32,
+    uid: u32,
+    internal_date: DateTime<Utc>,
+    dkim_signature: Option<String>,
+    headers: Vec<String>,
+    raw_content: String,
+}
+
+// Function to extract email content
+fn extract_email_content(email_content: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let parsed = parse_mail(email_content.as_bytes())?;
+    
+    // Try to get the plain text part first
+    if let Some(plain_text) = parsed.subparts.iter().find(|part| part.ctype.mimetype == "text/plain") {
+        return Ok(plain_text.get_body()?.trim().to_string());
     }
+    
+    // If no plain text, try to get the HTML part and strip HTML tags
+    if let Some(html) = parsed.subparts.iter().find(|part| part.ctype.mimetype == "text/html") {
+        let html_content = html.get_body()?;
+        // This is a very basic HTML stripping, you might want to use a proper HTML parser
+        return Ok(html_content.replace(|c: char| c == '<' || c == '>', "").trim().to_string());
+    }
+    
+    // If no multipart, just return the body
+    Ok(parsed.get_body()?.trim().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_email_content_plain_text() {
+        let email_content = "From: sender@example.com\r\nTo: recipient@example.com\r\nSubject: Test\r\n\r\nThis is a plain text email.";
+        let result = extract_email_content(email_content).unwrap();
+        assert_eq!(result, "This is a plain text email.");
+    }
+
+    #[test]
+    fn test_extract_email_content_html() {
+        let email_content = "From: sender@example.com\r\nTo: recipient@example.com\r\nSubject: Test\r\nContent-Type: text/html\r\n\r\n<html><body>This is an <b>HTML</b> email.</body></html>";
+        let result = extract_email_content(email_content).unwrap();
+        assert_eq!(result, "<html><body>This is an <b>HTML</b> email.</body></html>");
+    }
+
+    #[test]
+    fn test_extract_email_content_no_body() {
+        let email_content = "From: sender@example.com\r\nTo: recipient@example.com\r\nSubject: Test\r\n";
+        let result = extract_email_content(email_content).unwrap();
+        assert_eq!(result, "");
+    }
+}
