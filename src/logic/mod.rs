@@ -80,15 +80,33 @@ impl Logic {
         };
         #[cfg(not(test))]
         {
-        let database_name = std::env::var("MONGODB_DATABASE").expect("MONGODB_DATABASE must be set");
-        let collection_name = std::env::var("MONGODB_COLLECTION").expect("MONGODB_COLLECTION must be set");
-        println!("Collection name: {:?}", collection_name);
-        let collection = self.client.database(&database_name).collection::<User>(&collection_name);
+            let database_name = std::env::var("MONGODB_DATABASE").expect("MONGODB_DATABASE must be set");
+            let collection_name = std::env::var("MONGODB_COLLECTION").expect("MONGODB_COLLECTION must be set");
+            let collection = self.client.database(&database_name).collection::<User>(&collection_name);
 
+            // Insert the user
+            collection.insert_one(new_user, None).await?;
 
-        println!("Creating user - before insert: {:?}", new_user);
-        collection.insert_one(new_user, None).await?;
-        println!("User created");
+            // Standard mailboxes to create
+            let standard_mailboxes = vec!["INBOX", "SENT", "DRAFTS", "ARCHIVE", "TRASH"];
+            let mailbox_collection = self.client.database(&database_name).collection::<Mailbox>("mailboxes");
+
+            for &mailbox_name in &standard_mailboxes {
+                let mailbox_filter = doc! { "name": mailbox_name, "user_id": username };
+                if mailbox_collection.find_one(mailbox_filter.clone(), None).await?.is_none() {
+                    let mailbox = Mailbox {
+                        name: mailbox_name.to_string(),
+                        flags: vec![],
+                        exists: 0,
+                        recent: 0,
+                        unseen: 0,
+                        permanent_flags: vec![],
+                        uid_validity: 1,
+                        uid_next: 1,
+                    };
+                    mailbox_collection.insert_one(mailbox, None).await?;
+                }
+            }
             Ok(())
         }
         #[cfg(test)]

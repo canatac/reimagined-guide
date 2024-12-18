@@ -123,7 +123,7 @@ async fn process_imap_command(
             if command_parts.len() < 3 {
                 return format!("{} BAD SELECT requires a mailbox name\r\n", tag);
             }
-            let mailbox = command_parts[2];
+            let mailbox = command_parts[2].trim_matches('"');
             match logic.select_mailbox(mailbox).await {
                 Ok(status) => {
                     let flags = "\\Seen \\Answered \\Flagged \\Deleted \\Draft";
