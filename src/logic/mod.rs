@@ -214,7 +214,9 @@ impl Logic {
             let collection = self.client.database(&database_name).collection::<Mailbox>("mailboxes");
 
             let filter = doc! { "name": mailbox };
+            println!("Filter: {:?}", filter);
             if let Some(mailbox) = collection.find_one(filter, None).await? {
+                println!("Mailbox: {:?}", mailbox);
                 Ok(mailbox)
             } else {
                 Err(Error::from(std::io::Error::new(
