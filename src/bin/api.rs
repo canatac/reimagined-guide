@@ -5,8 +5,19 @@ use warp::reject::Reject;
 use dotenv::dotenv;
 use simple_smtp_server::logic::User;
 use warp::http::StatusCode;
+
+
 use std::env;
 use simple_smtp_server::logic::LogicTrait;
+use serde::{Deserialize, Serialize};
+use jsonwebtoken::{encode, decode, Header, EncodingKey, DecodingKey, Validation};
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Claims {
+    sub: String, // Subject (username)
+    exp: usize,  // Expiration time
+}
+
 
 #[derive(Debug)]
 struct MyCustomError;
@@ -25,43 +36,58 @@ async fn create_user(logic: Arc<dyn LogicTrait>, user: User) -> Result<impl warp
 
 async fn login(logic: Arc<Logic>, username: String, password: String) -> Result<impl warp::Reply, warp::Rejection> {
     match logic.authenticate_user(&username, &password).await {
-        Ok(Some(user)) => Ok(warp::reply::json(&user)),
+        Ok(Some(user)) => {
+            let claims = Claims {
+                sub: user.username.clone(),
+                exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
+            };
+            let token = encode(&Header::default(), &claims, &EncodingKey::from_secret("secret".as_ref())).unwrap();
+            Ok(warp::reply::json(&token))
+        }
         Ok(None) => Err(warp::reject::custom(MyCustomError)),
         Err(_) => Err(warp::reject()),
     }
 }
-
-async fn get_emails(logic: Arc<Logic>, mailbox: String) -> Result<impl warp::Reply, warp::Rejection> {
-    match logic.get_emails(&mailbox).await {
+fn with_auth() -> impl Filter<Extract = (String,), Error = warp::Rejection> + Clone {
+    warp::header::<String>("authorization")
+        .and_then(|auth_header: String| async move {
+            let token = auth_header.trim_start_matches("Bearer ");
+            let token_data = decode::<Claims>(&token, &DecodingKey::from_secret("secret".as_ref()), &Validation::default())
+                .map_err(|_| warp::reject::custom(MyCustomError))?;
+            Ok::<_, warp::Rejection>(token_data.claims.sub)
+        })
+} 
+async fn get_emails(logic: Arc<Logic>, mailbox: String, username: String) -> Result<impl warp::Reply, warp::Rejection> {
+    match logic.get_emails(&username, &mailbox).await {
         Ok(emails) => Ok(warp::reply::json(&emails)),
         Err(_) => Err(warp::reject()),
     }
 }
 
-async fn fetch_email(logic: Arc<Logic>, email_id: String) -> Result<impl warp::Reply, warp::Rejection> {
-    match logic.fetch_email(&email_id).await {
+async fn fetch_email(logic: Arc<Logic>, email_id: String, username: String) -> Result<impl warp::Reply, warp::Rejection> {
+    match logic.fetch_email(&username, &email_id).await {
         Ok(Some(email)) => Ok(warp::reply::json(&email)),
         Ok(None) => Err(warp::reject::custom(MyCustomError)),
         Err(_) => Err(warp::reject()),
     }
 }
 
-async fn store_email_flag(logic: Arc<Logic>, email_id: String, flag: String) -> Result<impl warp::Reply, warp::Rejection> {
-    match logic.store_email_flag(&email_id, &flag).await {
+async fn store_email_flag(logic: Arc<Logic>, email_id: String, flag: String, username: String) -> Result<impl warp::Reply, warp::Rejection> {
+    match logic.store_email_flag(&username, &email_id, &flag).await {
         Ok(_) => Ok(warp::reply::with_status("Flag updated", warp::http::StatusCode::OK)),
         Err(_) => Err(warp::reject()),
     }
 }
 
-async fn delete_email(logic: Arc<Logic>, email_id: String) -> Result<impl warp::Reply, warp::Rejection> {
-    match logic.delete_email(&email_id).await {
+async fn delete_email(logic: Arc<Logic>, email_id: String, username: String) -> Result<impl warp::Reply, warp::Rejection> {
+    match logic.delete_email(&username, &email_id).await {
         Ok(_) => Ok(warp::reply::with_status("Email deleted", warp::http::StatusCode::OK)),
         Err(_) => Err(warp::reject()),
     }
 }
 
-async fn archive_email(logic: Arc<Logic>, email_id: String) -> Result<impl warp::Reply, warp::Rejection> {
-    match logic.archive_email(&email_id).await {
+async fn archive_email(logic: Arc<Logic>, email_id: String, username: String) -> Result<impl warp::Reply, warp::Rejection> {
+    match logic.archive_email(&username, &email_id).await {
         Ok(_) => Ok(warp::reply::with_status("Email archived", warp::http::StatusCode::OK)),
         Err(_) => Err(warp::reject()),
     }
@@ -90,40 +116,45 @@ pub fn api_routes(client: Arc<mongodb::Client>) -> impl Filter<Extract = impl wa
     let get_emails_route = warp::path!("emails" / String)
         .and(warp::get())
         .and(with_logic(logic.clone()))
-        .and_then(|mailbox: String, logic: Arc<Logic>| 
-            get_emails(logic, mailbox)
+        .and(with_auth())
+        .and_then(|mailbox: String, logic: Arc<Logic>, username: String| 
+            get_emails(logic, mailbox, username)
         );
 
     // Pour fetch_email(logic: Arc<Logic>, email_id: String)
     let fetch_email_route = warp::path!("email" / String)
         .and(warp::get())
         .and(with_logic(logic.clone()))
-        .and_then(|email_id: String, logic: Arc<Logic>| 
-            fetch_email(logic, email_id)
+        .and(with_auth())
+        .and_then(|email_id: String, logic: Arc<Logic>, username: String| 
+            fetch_email(logic, email_id, username)
         );
 
     // Pour store_email_flag(logic: Arc<Logic>, email_id: String, flag: String)
     let store_email_flag_route = warp::path!("email" / "flag" / String / String)
         .and(warp::post())
         .and(with_logic(logic.clone()))
-        .and_then(|email_id: String, flag: String, logic: Arc<Logic>| 
-            store_email_flag(logic, email_id, flag)
+        .and(with_auth())
+        .and_then(|email_id: String, flag: String, logic: Arc<Logic>, username: String| 
+            store_email_flag(logic, email_id, flag, username)
         );
 
     // Pour delete_email(logic: Arc<Logic>, email_id: String)
     let delete_email_route = warp::path!("email" / String)
         .and(warp::delete())
         .and(with_logic(logic.clone()))
-        .and_then(|email_id: String, logic: Arc<Logic>| 
-            delete_email(logic, email_id)
+        .and(with_auth())
+        .and_then(|email_id: String, logic: Arc<Logic>, username: String| 
+            delete_email(logic, email_id, username)
         );
 
     // Pour archive_email(logic: Arc<Logic>, email_id: String)
     let archive_email_route = warp::path!("email" / "archive" / String)
         .and(warp::post())
         .and(with_logic(logic.clone()))
-        .and_then(|email_id: String, logic: Arc<Logic>| 
-            archive_email(logic, email_id)
+        .and(with_auth())
+        .and_then(|email_id: String, logic: Arc<Logic>, username: String| 
+            archive_email(logic, email_id, username)
         );
 
     login_route
