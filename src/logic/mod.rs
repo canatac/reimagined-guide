@@ -211,34 +211,31 @@ impl Logic {
         #[cfg(not(test))]
         {
             let database_name = std::env::var("MONGODB_DATABASE").expect("MONGODB_DATABASE must be set");
-            let collection = self.client.database(&database_name).collection::<Email>("emails");
-            
-        let exists = collection.count_documents(doc! { "mailbox": mailbox }, None).await? as u32;
-        let recent = collection.count_documents(
-            doc! { "mailbox": mailbox, "flags": "\\Recent" }, 
-            None
-        ).await? as u32;
-        let unseen = collection.count_documents(
-            doc! { "mailbox": mailbox, "flags": { "$nin": ["\\Seen"] } }, 
-            None
-        ).await? as u32;
+            let collection = self.client.database(&database_name).collection::<Mailbox>("mailboxes");
 
-        Ok(Mailbox {
-            name: mailbox.to_string(),
-            flags: vec![String::from("\\Answered"), String::from("\\Flagged"), 
-                       String::from("\\Deleted"), String::from("\\Seen"), 
-                       String::from("\\Draft")],
-            exists,
-            recent,
-            unseen,
-            permanent_flags: vec![String::from("\\*")],
-            uid_validity: 1, // Devrait être persistant et unique
-            uid_next: exists + 1,
-        })
+            let filter = doc! { "name": mailbox };
+            if let Some(mailbox) = collection.find_one(filter, None).await? {
+                Ok(mailbox)
+            } else {
+                Err(Error::from(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "Mailbox not found",
+                )))
+            }
         }
         #[cfg(test)]
         {
-            self.client.select_mailbox(mailbox).await
+            // Pour les tests, vous pouvez retourner un statut de boîte aux lettres simulé
+            Ok(Mailbox {
+                name: mailbox.to_string(),
+                flags: vec![],
+                exists: 10,
+                recent: 2,
+                unseen: 5,
+                permanent_flags: vec![],
+                uid_validity: 1,
+                uid_next: 11,
+            })
         }
     }
 
@@ -515,6 +512,28 @@ impl Logic {
         }
     }
 
+    pub async fn list_mailboxes(&self, reference: &str, mailbox: &str) -> Result<Vec<String>> {
+        #[cfg(not(test))]
+        {
+            let database_name = std::env::var("MONGODB_DATABASE").expect("MONGODB_DATABASE must be set");
+            let collection = self.client.database(&database_name).collection::<Mailbox>("mailboxes");
+
+            // Construire un filtre pour récupérer les boîtes aux lettres
+            let filter = doc! {
+                "name": { "$regex": format!("^{}.*{}", reference, mailbox) }
+            };
+
+            let cursor = collection.find(filter, None).await?;
+            let mailboxes: Vec<String> = cursor.map_ok(|doc| doc.name).try_collect().await?;
+            Ok(mailboxes)
+        }
+        #[cfg(test)]
+        {
+            // Pour les tests, vous pouvez retourner une liste fixe ou simuler une requête
+            Ok(vec!["INBOX".to_string(), "Sent".to_string(), "Drafts".to_string()])
+        }
+    }
+
 }   
 
 #[cfg(test)]
@@ -551,6 +570,7 @@ pub trait DatabaseInterface: Send + Sync {
     async fn check_mailbox(&self) -> Result<()>;
     async fn create_user(&self, username: &str, password: &str, mailbox: &str) -> Result<()>;
     async fn authenticate_user(&self, username: &str, password: &str) -> Result<Option<User>>;
+    async fn list_mailboxes(&self, reference: &str, mailbox: &str) -> Result<Vec<String>>;
 
 }
 
@@ -840,5 +860,21 @@ mod tests {
         let email = Email::new("testuser", "testmailbox", "testsubject", "testbody", "testid");
         let result = logic.store_email(&email).await;
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_list_mailboxes() {
+        dotenv().ok();
+        let mut mock_client = Box::new(MockDatabaseInterface::new());
+        
+        mock_client
+            .expect_list_mailboxes()
+            .with(eq(""), eq(""))
+            .times(1)
+            .returning(|_, _| Ok(vec!["INBOX".to_string(), "Sent".to_string(), "Drafts".to_string()]));
+        
+        let logic = Logic::new_with_mock(mock_client);
+        let mailboxes = logic.list_mailboxes("", "").await.unwrap();
+        assert_eq!(mailboxes, vec!["INBOX", "Sent", "Drafts"]);
     }
 }

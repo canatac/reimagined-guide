@@ -104,6 +104,42 @@ async fn process_imap_command(
                 Err(_) => format!("{} NO LOGIN failed: Internal error\r\n", tag),
             }
         }
+        "LIST" => {
+            let reference = command_parts.get(2).unwrap_or(&"");
+            let mailbox = command_parts.get(3).unwrap_or(&"*");
+            match logic.list_mailboxes(reference, mailbox).await {
+                Ok(mailboxes) => {
+                    let mut response = String::new();
+                    for mailbox in mailboxes {
+                        response.push_str(&format!("* LIST (\\HasNoChildren) \"/\" \"{}\"\r\n", mailbox));
+                    }
+                    response.push_str(&format!("{} OK LIST completed\r\n", tag));
+                    response
+                }
+                Err(_) => format!("{} NO LIST failed: Internal error\r\n", tag),
+            }
+        }
+        "SELECT" => {
+            if command_parts.len() < 3 {
+                return format!("{} BAD SELECT requires a mailbox name\r\n", tag);
+            }
+            let mailbox = command_parts[2];
+            match logic.select_mailbox(mailbox).await {
+                Ok(status) => {
+                    let flags = "\\Seen \\Answered \\Flagged \\Deleted \\Draft";
+                    let exists = status.exists;
+                    let recent = status.recent;
+                    let unseen = status.unseen;
+                    let uid_validity = status.uid_validity;
+                    let uid_next = status.uid_next;
+                    format!(
+                        "* FLAGS ({})\r\n* {} EXISTS\r\n* {} RECENT\r\n* OK [UNSEEN {}] Message {} is first unseen\r\n* OK [UIDVALIDITY {}] UIDs valid\r\n* OK [UIDNEXT {}] Predicted next UID\r\n{} OK [READ-WRITE] SELECT completed\r\n",
+                        flags, exists, recent, unseen, unseen, uid_validity, uid_next, tag
+                    )
+                }
+                Err(_) => format!("{} NO SELECT failed: Mailbox not found\r\n", tag),
+            }
+        }
         "EXAMINE" => {
             if command_parts.len() < 3 {
                 return format!("{} BAD EXAMINE requires a mailbox name\r\n", tag);
