@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use crate::logic::Logic;
 use std::time::Duration;
 use tokio::time::sleep;
+use uuid::Uuid;
 
 pub struct ImapServer {
     logic: Arc<Logic>,
@@ -36,6 +37,7 @@ impl ImapServer {
             let sessions = self.sessions.clone();
             tokio::spawn(async move {
                 let mut buffer = [0; 1024];
+                let mut session_id = None; // Track session ID for this connection
                 loop {
                     let n = match socket.read(&mut buffer).await {
                         Ok(n) if n == 0 => {
@@ -52,7 +54,7 @@ impl ImapServer {
                         }
                     };
 
-                    let response = process_imap_command(&buffer[..n], &logic, &sessions).await;
+                    let response = process_imap_command(&buffer[..n], &logic, &sessions, &mut session_id).await;
                     println!("Response: {}", response);
                     if let Err(e) = socket.write_all(response.as_bytes()).await {
                         eprintln!("Failed to write to socket; err = {:?}", e);
@@ -68,6 +70,7 @@ async fn process_imap_command(
     command: &[u8],
     logic: &Arc<Logic>,
     sessions: &Arc<Mutex<HashMap<String, String>>>, // Track active sessions with user info
+    session_id: &mut Option<String>, // Track session ID for this connection
 ) -> String {
     let command_str = String::from_utf8_lossy(command);
     let command_parts: Vec<&str> = command_str.trim().split_whitespace().collect();
@@ -87,7 +90,9 @@ async fn process_imap_command(
         }
         "LOGOUT" => {
             // Invalidate the session
-            sessions.lock().unwrap().remove(&tag.to_string());
+            if let Some(id) = session_id.take() {
+                sessions.lock().unwrap().remove(&id);
+            }
             format!("* BYE IMAP4rev1 Server logging out\r\n{} OK LOGOUT completed\r\n", tag)
         }
         "LOGIN" => {
@@ -99,8 +104,10 @@ async fn process_imap_command(
 
             match logic.authenticate_user(username, password).await {
                 Ok(Some(user)) => {
-                    // Store the session
-                    sessions.lock().unwrap().insert(tag.to_string(), user.username.clone());
+                    // Generate a new session ID
+                    let new_session_id = Uuid::new_v4().to_string();
+                    sessions.lock().unwrap().insert(new_session_id.clone(), user.username.clone());
+                    *session_id = Some(new_session_id); // Store the session ID
                     format!("{} OK LOGIN completed\r\n", tag)
                 }
                 Ok(None) => {
@@ -113,18 +120,22 @@ async fn process_imap_command(
         "LIST" => {
             let reference = command_parts.get(2).unwrap_or(&"");
             let mailbox = command_parts.get(3).unwrap_or(&"*");
-            let username = sessions.lock().unwrap().get(&tag.to_string()).cloned();
-            if let Some(user) = username {
-                match logic.list_mailboxes(&user, reference, mailbox).await {
-                    Ok(mailboxes) => {
-                        let mut response = String::new();
-                        for mailbox in mailboxes {
-                            response.push_str(&format!("* LIST (\\HasNoChildren) \"/\" \"{}\"\r\n", mailbox));
+            if let Some(id) = session_id {
+                let username = sessions.lock().unwrap().get(id).cloned();
+                if let Some(user) = username {
+                    match logic.list_mailboxes(&user, reference, mailbox).await {
+                        Ok(mailboxes) => {
+                            let mut response = String::new();
+                            for mailbox in mailboxes {
+                                response.push_str(&format!("* LIST (\\HasNoChildren) \"/\" \"{}\"\r\n", mailbox));
+                            }
+                            response.push_str(&format!("{} OK LIST completed\r\n", tag));
+                            response
                         }
-                        response.push_str(&format!("{} OK LIST completed\r\n", tag));
-                        response
+                        Err(_) => format!("{} NO LIST failed: Internal error\r\n", tag),
                     }
-                    Err(_) => format!("{} NO LIST failed: Internal error\r\n", tag),
+                } else {
+                    format!("{} NO LIST failed: User not authenticated\r\n", tag)
                 }
             } else {
                 format!("{} NO LIST failed: User not authenticated\r\n", tag)
@@ -135,22 +146,26 @@ async fn process_imap_command(
                 return format!("{} BAD SELECT requires a mailbox name\r\n", tag);
             }
             let mailbox = command_parts[2];
-            let username = sessions.lock().unwrap().get(&tag.to_string()).cloned();
-            if let Some(user) = username {
-                match logic.select_mailbox(&user, mailbox).await {
-                    Ok(status) => {
-                        let flags = "\\Seen \\Answered \\Flagged \\Deleted \\Draft";
-                        let exists = status.exists;
-                        let recent = status.recent;
-                        let unseen = status.unseen;
-                        let uid_validity = status.uid_validity;
-                        let uid_next = status.uid_next;
-                        format!(
-                            "* FLAGS ({})\r\n* {} EXISTS\r\n* {} RECENT\r\n* OK [UNSEEN {}] Message {} is first unseen\r\n* OK [UIDVALIDITY {}] UIDs valid\r\n* OK [UIDNEXT {}] Predicted next UID\r\n{} OK [READ-WRITE] SELECT completed\r\n",
-                            flags, exists, recent, unseen, unseen, uid_validity, uid_next, tag
-                        )
+            if let Some(id) = session_id {
+                let username = sessions.lock().unwrap().get(id).cloned();
+                if let Some(user) = username {
+                    match logic.select_mailbox(&user, mailbox).await {
+                        Ok(status) => {
+                            let flags = "\\Seen \\Answered \\Flagged \\Deleted \\Draft";
+                            let exists = status.exists;
+                            let recent = status.recent;
+                            let unseen = status.unseen;
+                            let uid_validity = status.uid_validity;
+                            let uid_next = status.uid_next;
+                            format!(
+                                "* FLAGS ({})\r\n* {} EXISTS\r\n* {} RECENT\r\n* OK [UNSEEN {}] Message {} is first unseen\r\n* OK [UIDVALIDITY {}] UIDs valid\r\n* OK [UIDNEXT {}] Predicted next UID\r\n{} OK [READ-WRITE] SELECT completed\r\n",
+                                flags, exists, recent, unseen, unseen, uid_validity, uid_next, tag
+                            )
+                        }
+                        Err(_) => format!("{} NO SELECT failed: Mailbox not found\r\n", tag),
                     }
-                    Err(_) => format!("{} NO SELECT failed: Mailbox not found\r\n", tag),
+                } else {
+                    format!("{} NO SELECT failed: User not authenticated\r\n", tag)
                 }
             } else {
                 format!("{} NO SELECT failed: User not authenticated\r\n", tag)
@@ -160,17 +175,21 @@ async fn process_imap_command(
             if command_parts.len() < 3 {
                 return format!("{} BAD EXAMINE requires a mailbox name\r\n", tag);
             }
-            let username = sessions.lock().unwrap().get(&tag.to_string()).cloned();
-            if let Some(user) = username {
-                let mailbox = command_parts[2];
-                match logic.get_mailbox_status(&user, mailbox).await {
-                    Ok(status) => {
-                        let flags = "\\Seen \\Answered \\Flagged \\Deleted \\Draft \\Recent";
-                        let exists = status.exists;
-                        let recent = status.recent;
-                        format!("* FLAGS ({})\r\n* {} EXISTS\r\n* {} RECENT\r\n{} OK [READ-ONLY] EXAMINE completed\r\n", flags, exists, recent, tag)
+            let mailbox = command_parts[2];
+            if let Some(id) = session_id {
+                let username = sessions.lock().unwrap().get(id).cloned();
+                if let Some(user) = username {
+                    match logic.get_mailbox_status(&user, mailbox).await {
+                        Ok(status) => {
+                            let flags = "\\Seen \\Answered \\Flagged \\Deleted \\Draft \\Recent";
+                            let exists = status.exists;
+                            let recent = status.recent;
+                            format!("* FLAGS ({})\r\n* {} EXISTS\r\n* {} RECENT\r\n{} OK [READ-ONLY] EXAMINE completed\r\n", flags, exists, recent, tag)
+                        }
+                        Err(_) => format!("{} NO EXAMINE failed: Mailbox not found\r\n", tag),
                     }
-                    Err(_) => format!("{} NO EXAMINE failed: Mailbox not found\r\n", tag),
+                } else {
+                    format!("{} NO EXAMINE failed: User not authenticated\r\n", tag)
                 }
             } else {
                 format!("{} NO EXAMINE failed: User not authenticated\r\n", tag)
@@ -181,11 +200,15 @@ async fn process_imap_command(
                 return format!("{} BAD CREATE requires a mailbox name\r\n", tag);
             }
             let mailbox = command_parts[2];
-            let username = sessions.lock().unwrap().get(&tag.to_string()).cloned();
-            if let Some(user) = username {
-                match logic.create_mailbox(&user, mailbox).await {
-                    Ok(_) => format!("{} OK CREATE completed\r\n", tag),
-                    Err(_) => format!("{} NO CREATE failed: Internal error\r\n", tag),
+            if let Some(id) = session_id {
+                let username = sessions.lock().unwrap().get(id).cloned();
+                if let Some(user) = username {
+                    match logic.create_mailbox(&user, mailbox).await {
+                        Ok(_) => format!("{} OK CREATE completed\r\n", tag),
+                        Err(_) => format!("{} NO CREATE failed: Internal error\r\n", tag),
+                    }
+                } else {
+                    format!("{} NO CREATE failed: User not authenticated\r\n", tag)
                 }
             } else {
                 format!("{} NO CREATE failed: User not authenticated\r\n", tag)
@@ -196,11 +219,15 @@ async fn process_imap_command(
                 return format!("{} BAD DELETE requires a mailbox name\r\n", tag);
             }
             let mailbox = command_parts[2];
-            let username = sessions.lock().unwrap().get(&tag.to_string()).cloned();
-            if let Some(user) = username {
-                match logic.delete_mailbox(&user, mailbox).await {
-                    Ok(_) => format!("{} OK DELETE completed\r\n", tag),
-                    Err(_) => format!("{} NO DELETE failed: Internal error\r\n", tag),
+            if let Some(id) = session_id {
+                let username = sessions.lock().unwrap().get(id).cloned();
+                if let Some(user) = username {
+                    match logic.delete_mailbox(&user, mailbox).await {
+                        Ok(_) => format!("{} OK DELETE completed\r\n", tag),
+                        Err(_) => format!("{} NO DELETE failed: Internal error\r\n", tag),
+                    }
+                } else {
+                    format!("{} NO DELETE failed: User not authenticated\r\n", tag)
                 }
             } else {
                 format!("{} NO DELETE failed: User not authenticated\r\n", tag)
@@ -212,11 +239,15 @@ async fn process_imap_command(
             }
             let old_name = command_parts[2];
             let new_name = command_parts[3];
-            let username = sessions.lock().unwrap().get(&tag.to_string()).cloned();
-            if let Some(user) = username {
-                match logic.rename_mailbox(&user, old_name, new_name).await {
-                    Ok(_) => format!("{} OK RENAME completed\r\n", tag),
-                    Err(_) => format!("{} NO RENAME failed: Internal error\r\n", tag),
+            if let Some(id) = session_id {
+                let username = sessions.lock().unwrap().get(id).cloned();
+                if let Some(user) = username {
+                    match logic.rename_mailbox(&user, old_name, new_name).await {
+                        Ok(_) => format!("{} OK RENAME completed\r\n", tag),
+                        Err(_) => format!("{} NO RENAME failed: Internal error\r\n", tag),
+                    }
+                } else {
+                    format!("{} NO RENAME failed: User not authenticated\r\n", tag)
                 }
             } else {
                 format!("{} NO RENAME failed: User not authenticated\r\n", tag)
@@ -227,11 +258,15 @@ async fn process_imap_command(
                 return format!("{} BAD SUBSCRIBE requires a mailbox name\r\n", tag);
             }
             let mailbox = command_parts[2];
-            let username = sessions.lock().unwrap().get(&tag.to_string()).cloned();
-            if let Some(user) = username {
-                match logic.subscribe_mailbox(&user, mailbox).await {
-                    Ok(_) => format!("{} OK SUBSCRIBE completed\r\n", tag),
-                    Err(_) => format!("{} NO SUBSCRIBE failed: Internal error\r\n", tag),
+            if let Some(id) = session_id {
+                let username = sessions.lock().unwrap().get(id).cloned();
+                if let Some(user) = username {
+                    match logic.subscribe_mailbox(&user, mailbox).await {
+                        Ok(_) => format!("{} OK SUBSCRIBE completed\r\n", tag),
+                        Err(_) => format!("{} NO SUBSCRIBE failed: Internal error\r\n", tag),
+                    }
+                } else {
+                    format!("{} NO SUBSCRIBE failed: User not authenticated\r\n", tag)
                 }
             } else {
                 format!("{} NO SUBSCRIBE failed: User not authenticated\r\n", tag)
@@ -242,11 +277,15 @@ async fn process_imap_command(
                 return format!("{} BAD UNSUBSCRIBE requires a mailbox name\r\n", tag);
             }
             let mailbox = command_parts[2];
-            let username = sessions.lock().unwrap().get(&tag.to_string()).cloned();
-            if let Some(user) = username {
-                match logic.unsubscribe_mailbox(&user, mailbox).await {
-                    Ok(_) => format!("{} OK UNSUBSCRIBE completed\r\n", tag),
-                    Err(_) => format!("{} NO UNSUBSCRIBE failed: Internal error\r\n", tag),
+            if let Some(id) = session_id {
+                let username = sessions.lock().unwrap().get(id).cloned();
+                if let Some(user) = username {
+                    match logic.unsubscribe_mailbox(&user, mailbox).await {
+                        Ok(_) => format!("{} OK UNSUBSCRIBE completed\r\n", tag),
+                        Err(_) => format!("{} NO UNSUBSCRIBE failed: Internal error\r\n", tag),
+                    }
+                } else {
+                    format!("{} NO UNSUBSCRIBE failed: User not authenticated\r\n", tag)
                 }
             } else {
                 format!("{} NO UNSUBSCRIBE failed: User not authenticated\r\n", tag)
@@ -255,18 +294,22 @@ async fn process_imap_command(
         "LSUB" => {
             let reference = command_parts.get(2).unwrap_or(&"%");
             let mailbox = command_parts.get(3).unwrap_or(&"*");
-            let username = sessions.lock().unwrap().get(&tag.to_string()).cloned();
-            if let Some(user) = username {
-                match logic.list_subscribed_mailboxes(&user, reference, mailbox).await {
-                    Ok(mailboxes) => {
-                        let mut response = String::new();
-                        for mailbox in mailboxes {
-                            response.push_str(&format!("* LSUB (\\HasNoChildren) \"{}\"\r\n", mailbox));
+            if let Some(id) = session_id {
+                let username = sessions.lock().unwrap().get(id).cloned();
+                if let Some(user) = username {
+                    match logic.list_subscribed_mailboxes(&user, reference, mailbox).await {
+                        Ok(mailboxes) => {
+                            let mut response = String::new();
+                            for mailbox in mailboxes {
+                                response.push_str(&format!("* LSUB (\\HasNoChildren) \"{}\"\r\n", mailbox));
+                            }
+                            response.push_str(&format!("{} OK LSUB completed\r\n", tag));
+                            response
                         }
-                        response.push_str(&format!("{} OK LSUB completed\r\n", tag));
-                        response
+                        Err(_) => format!("{} NO LSUB failed: Internal error\r\n", tag),
                     }
-                    Err(_) => format!("{} NO LSUB failed: Internal error\r\n", tag),
+                } else {
+                    format!("{} NO LSUB failed: User not authenticated\r\n", tag)
                 }
             } else {
                 format!("{} NO LSUB failed: User not authenticated\r\n", tag)
@@ -278,41 +321,62 @@ async fn process_imap_command(
             }
             let mailbox = command_parts[2];
             let data_items = command_parts[3..].join(" ");
-            let username = sessions.lock().unwrap().get(&tag.to_string()).cloned();
-            if let Some(user) = username {
-                match logic.get_mailbox_status_items(&user, mailbox, &data_items).await {
-                    Ok(status_items) => {
-                        format!("* STATUS {} ({})\r\n{} OK STATUS completed\r\n", mailbox, status_items, tag)
+            if let Some(id) = session_id {
+                let username = sessions.lock().unwrap().get(id).cloned();
+                if let Some(user) = username {
+                    match logic.get_mailbox_status_items(&user, mailbox, &data_items).await {
+                        Ok(status_items) => {
+                            format!("* STATUS {} ({})\r\n{} OK STATUS completed\r\n", mailbox, status_items, tag)
+                        }
+                        Err(_) => format!("{} NO STATUS failed: Internal error\r\n", tag),
                     }
-                    Err(_) => format!("{} NO STATUS failed: Internal error\r\n", tag),
+                } else {
+                    format!("{} NO STATUS failed: User not authenticated\r\n", tag)
                 }
             } else {
                 format!("{} NO STATUS failed: User not authenticated\r\n", tag)
             }
         }
         "CHECK" => {
-            match logic.check_mailbox().await {
-                Ok(_) => format!("{} OK CHECK completed\r\n", tag),
-                Err(_) => format!("{} NO CHECK failed: Internal error\r\n", tag),
+            if let Some(id) = session_id {
+                let username = sessions.lock().unwrap().get(id).cloned();
+                if let Some(user) = username {
+                    match logic.check_mailbox().await {
+                        Ok(_) => format!("{} OK CHECK completed\r\n", tag),
+                        Err(_) => format!("{} NO CHECK failed: Internal error\r\n", tag),
+                    }
+                } else {
+                    format!("{} NO CHECK failed: User not authenticated\r\n", tag)
+                }
+            } else {
+                format!("{} NO CHECK failed: User not authenticated\r\n", tag)
             }
         }
         "CLOSE" => {
-            let username = sessions.lock().unwrap().get(&tag.to_string()).cloned();
-            if let Some(user) = username {
-                match logic.close_mailbox(&user).await {
-                    Ok(_) => format!("{} OK CLOSE completed\r\n", tag),
-                    Err(_) => format!("{} NO CLOSE failed: Internal error\r\n", tag),
+            if let Some(id) = session_id {
+                let username = sessions.lock().unwrap().get(id).cloned();
+                if let Some(user) = username {
+                    match logic.close_mailbox(&user).await {
+                        Ok(_) => format!("{} OK CLOSE completed\r\n", tag),
+                        Err(_) => format!("{} NO CLOSE failed: Internal error\r\n", tag),
+                    }
+                } else {
+                    format!("{} NO CLOSE failed: User not authenticated\r\n", tag)
                 }
             } else {
                 format!("{} NO CLOSE failed: User not authenticated\r\n", tag)
             }
         }
         "EXPUNGE" => {
-            let username = sessions.lock().unwrap().get(&tag.to_string()).cloned();
-            if let Some(user) = username {
-                match logic.expunge_mailbox(&user).await {
-                    Ok(_) => format!("{} OK EXPUNGE completed\r\n", tag),
-                    Err(_) => format!("{} NO EXPUNGE failed: Internal error\r\n", tag),
+            if let Some(id) = session_id {
+                let username = sessions.lock().unwrap().get(id).cloned();
+                if let Some(user) = username {
+                    match logic.expunge_mailbox(&user).await {
+                        Ok(_) => format!("{} OK EXPUNGE completed\r\n", tag),
+                        Err(_) => format!("{} NO EXPUNGE failed: Internal error\r\n", tag),
+                    }
+                } else {
+                    format!("{} NO EXPUNGE failed: User not authenticated\r\n", tag)
                 }
             } else {
                 format!("{} NO EXPUNGE failed: User not authenticated\r\n", tag)
@@ -320,14 +384,18 @@ async fn process_imap_command(
         }
         "SEARCH" => {
             let search_criteria = command_parts[2..].join(" ");
-            let username = sessions.lock().unwrap().get(&tag.to_string()).cloned();
-            if let Some(user) = username {
-                match logic.search_messages(&user, &search_criteria).await {
-                    Ok(results) => {
-                        let result_str = results.iter().map(|n| n.to_string()).collect::<Vec<String>>().join(" ");
-                        format!("* SEARCH {}\r\n{} OK SEARCH completed\r\n", result_str, tag)
+            if let Some(id) = session_id {
+                let username = sessions.lock().unwrap().get(id).cloned();
+                if let Some(user) = username {
+                    match logic.search_messages(&user, &search_criteria).await {
+                        Ok(results) => {
+                            let result_str = results.iter().map(|n| n.to_string()).collect::<Vec<String>>().join(" ");
+                            format!("* SEARCH {}\r\n{} OK SEARCH completed\r\n", result_str, tag)
+                        }
+                        Err(_) => format!("{} NO SEARCH failed: Internal error\r\n", tag),
                     }
-                    Err(_) => format!("{} NO SEARCH failed: Internal error\r\n", tag),
+                } else {
+                    format!("{} NO SEARCH failed: User not authenticated\r\n", tag)
                 }
             } else {
                 format!("{} NO SEARCH failed: User not authenticated\r\n", tag)
@@ -339,11 +407,15 @@ async fn process_imap_command(
             }
             let message_set = command_parts[2];
             let mailbox = command_parts[3];
-            let username = sessions.lock().unwrap().get(&tag.to_string()).cloned(); 
-            if let Some(user) = username {
-                match logic.copy_messages(&user, message_set, mailbox).await {
-                    Ok(_) => format!("{} OK COPY completed\r\n", tag),
-                    Err(_) => format!("{} NO COPY failed: Internal error\r\n", tag),
+            if let Some(id) = session_id {
+                let username = sessions.lock().unwrap().get(id).cloned();
+                if let Some(user) = username {
+                    match logic.copy_messages(&user, message_set, mailbox).await {
+                        Ok(_) => format!("{} OK COPY completed\r\n", tag),
+                        Err(_) => format!("{} NO COPY failed: Internal error\r\n", tag),
+                    }
+                } else {
+                    format!("{} NO COPY failed: User not authenticated\r\n", tag)
                 }
             } else {
                 format!("{} NO COPY failed: User not authenticated\r\n", tag)
