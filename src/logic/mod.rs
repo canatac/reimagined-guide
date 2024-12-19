@@ -366,6 +366,7 @@ impl Logic {
     pub async fn create_mailbox(&self, username: &str, mailbox: &str) -> Result<()> {
         #[cfg(not(test))]
         {
+            println!("Creating mailbox: {}", mailbox);
             let database_name = std::env::var("MONGODB_DATABASE").expect("MONGODB_DATABASE must be set");
             let collection = self.client.database(&database_name).collection::<Mailbox>("mailboxes");
 
@@ -373,8 +374,10 @@ impl Logic {
             let standard_mailboxes = vec!["INBOX", "SENT", "DRAFTS", "ARCHIVE", "TRASH"];
 
             for &mailbox_name in &standard_mailboxes {
+                println!("Checking mailbox: {}", mailbox_name);
                 let mailbox_filter = doc! { "name": mailbox_name, "user_id": username };
                 if collection.find_one(mailbox_filter.clone(), None).await?.is_none() {
+                    println!("Creating mailbox: {}", mailbox_name);
                     let new_mailbox = Mailbox {
                         name: mailbox_name.to_string(),
                         flags: vec![],
@@ -392,6 +395,7 @@ impl Logic {
             // Create the specific mailbox if it doesn't exist
             let specific_mailbox_filter = doc! { "name": mailbox, "user_id": username };
             if collection.find_one(specific_mailbox_filter.clone(), None).await?.is_none() {
+                println!("Creating mailbox: {}", mailbox);
                 let new_mailbox = Mailbox {
                     name: mailbox.to_string(),
                     flags: vec![],
