@@ -165,6 +165,7 @@ async fn handle_tls_client(tls_stream: TlsStream<TcpStream>, logic: Arc<Logic>) 
     write_response(&mut stream, &greeting).await?;
 
     let mut in_data_mode: bool = false;
+    let mut in_body = false; // Indicateur pour savoir si nous sommes dans le corps de l'email
 
     let mut current_email = CustomEmail {
         email: Email::new("", "", "", "", ""),
@@ -216,38 +217,29 @@ async fn handle_tls_client(tls_stream: TlsStream<TcpStream>, logic: Arc<Logic>) 
                             write_response(&mut stream, "250 OK\r\n").await?;
                         }
                     } else {
-                        if current_email.raw_content.is_empty() {
-                            current_email.raw_content = line.to_string();
-                            let trimmed_line = current_email.raw_content.trim();
-                            if !trimmed_line.is_empty() {
-                                let line = trimmed_line.to_string();
-                                current_email.email.headers.push((line.clone(), line.clone()));
-                                if trimmed_line.starts_with("DKIM-Signature:") {
-                                    current_email.dkim_signature = Some(line);
-                                } else if trimmed_line.starts_with("From:") {
-                                    current_email.email.from = extract_email_address(trimmed_line, "From:").unwrap_or_default();
-                                } else if trimmed_line.starts_with("To:") {
-                                    current_email.email.to = extract_email_address(trimmed_line, "To:").unwrap_or_default();
-                                } else if trimmed_line.starts_with("Subject:") {
-                                    current_email.email.subject = trimmed_line.trim_start_matches("Subject:").trim().to_string();
+                        if !in_body {
+                            if line.trim().is_empty() {
+                                in_body = true; // Ligne vide détectée, commencez à capturer le corps
+                            } else {
+                                // Traitez les en-têtes
+                                let trimmed_line = line.trim();
+                                if !trimmed_line.is_empty() {
+                                    let line = trimmed_line.to_string();
+                                    current_email.email.headers.push((line.clone(), line.clone()));
+                                    if trimmed_line.starts_with("DKIM-Signature:") {
+                                        current_email.dkim_signature = Some(line);
+                                    } else if trimmed_line.starts_with("From:") {
+                                        current_email.email.from = extract_email_address(trimmed_line, "From:").unwrap_or_default();
+                                    } else if trimmed_line.starts_with("To:") {
+                                        current_email.email.to = extract_email_address(trimmed_line, "To:").unwrap_or_default();
+                                    } else if trimmed_line.starts_with("Subject:") {
+                                        current_email.email.subject = trimmed_line.trim_start_matches("Subject:").trim().to_string();
+                                    }
                                 }
                             }
                         } else {
-                            let trimmed_line = line.trim();
-                            if !trimmed_line.is_empty() {
-                                let line = trimmed_line.to_string();
-                                current_email.email.headers.push((line.clone(), line.clone()));
-                                if trimmed_line.starts_with("DKIM-Signature:") {
-                                    current_email.dkim_signature = Some(line);
-                                } else if trimmed_line.starts_with("From:") {
-                                    current_email.email.from = extract_email_address(trimmed_line, "From:").unwrap_or_default();
-                                } else if trimmed_line.starts_with("To:") {
-                                    current_email.email.to = extract_email_address(trimmed_line, "To:").unwrap_or_default();
-                                } else if trimmed_line.starts_with("Subject:") {
-                                    current_email.email.subject = trimmed_line.trim_start_matches("Subject:").trim().to_string();
-                                }
-                            }
-                            current_email.raw_content.push_str(&line);
+                            // Ajoutez la ligne au corps de l'email
+                            current_email.email.body.push_str(&line);
                         }
                     }
                 } else {
