@@ -46,6 +46,10 @@ use std::path::Path;
 use dotenv::dotenv;
 use std::env;
 use reqwest;
+use simple_smtp_server::entities::Email;
+use uuid::Uuid;
+use chrono::Utc;
+use simple_smtp_server::smtp_client::send_outgoing_email;
 
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
 struct EmailRequest {
@@ -187,16 +191,40 @@ async fn send_email_handler(
             println!("DKIM service returned success");
             let message_id = dkim_result["messageId"].as_str().unwrap_or("");
             match dkim_result["status"].as_str() {
-                Some("success") => HttpResponse::Ok().json(serde_json::json!({
-                    "status": "success", 
-                    "message": "Email signed and sent successfully",
-                    "messageId": message_id
-                })),
+                Some("success") => {
+                    // Construct the email with DKIM signature
+                    let email = Email {
+                        id: Uuid::new_v4().to_string(),
+                        from: email_req.from.clone(),
+                        to: email_req.to.clone(),
+                        subject: email_req.subject.clone(),
+                        body: email_req.body.clone(),
+                        headers: vec![("DKIM-Signature".to_string(), dkim_result["dkimSignature"].as_str().unwrap_or("").to_string())],
+                        flags: vec![],
+                        sequence_number: 0,
+                        uid: 0,
+                        internal_date: Utc::now(),
+                        dkim_signature: Some(dkim_result["dkimSignature"].as_str().unwrap_or("").to_string()),
+                    };
+
+                    // Send the email
+                    match send_outgoing_email(&email).await {
+                        Ok(_) => HttpResponse::Ok().json(serde_json::json!({
+                            "status": "success",
+                            "message": "Email signed and sent successfully",
+                            "messageId": message_id
+                        })),
+                        Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({
+                            "status": "error",
+                            "message": format!("Failed to send email: {}", e)
+                        })),
+                    }
+                }
                 _ => {
                     let error_message = dkim_result["message"].as_str().unwrap_or("Unknown error");
                     HttpResponse::InternalServerError().json(serde_json::json!({
                         "status": "error",
-                        "message": format!("Failed to sign and send email: {}", error_message)
+                        "message": format!("Failed to sign email: {}", error_message)
                     }))
                 }
             }
@@ -205,7 +233,7 @@ async fn send_email_handler(
             eprintln!("Failed to call DKIM service: {}", e);
             HttpResponse::InternalServerError().json(serde_json::json!({
                 "status": "error",
-                "message": "Failed to generate DKIM signature and send email"
+                "message": "Failed to generate DKIM signature"
             }))
         }
     }

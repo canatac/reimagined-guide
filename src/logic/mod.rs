@@ -4,6 +4,7 @@ use std::sync::Arc;
 use futures_util::TryStreamExt;
 use mongodb::error::Error;
 use chrono::{DateTime, Utc};
+use crate::entities::Email;
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct User {
@@ -12,34 +13,6 @@ pub struct User {
     pub mailbox: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Email {
-    pub id: String,
-    pub from: String,
-    pub to: String,
-    pub subject: String,
-    pub body: String,
-    pub flags: Vec<String>,
-    pub sequence_number: u32,
-    pub uid: u32,
-    pub internal_date: DateTime<Utc>,
-}
-
-impl Email {
-    pub fn new(id: &str, from: &str, to: &str, subject: &str, body: &str) -> Self {
-        Email {
-            id: id.to_string(),
-            from: from.to_string(),
-            to: to.to_string(),
-            subject: subject.to_string(),
-            body: body.to_string(),
-            flags: Vec::new(),
-            sequence_number: 0,
-            uid: 0,
-            internal_date: Utc::now(),
-        }
-    }
-}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Mailbox {
@@ -51,6 +24,7 @@ pub struct Mailbox {
     pub permanent_flags: Vec<String>,
     pub uid_validity: u32,
     pub uid_next: u32,
+    pub user_id: String,
 }
 
 pub struct Logic {
@@ -102,6 +76,7 @@ impl Logic {
                         permanent_flags: vec![],
                         uid_validity: 1,
                         uid_next: 1,
+                        user_id: username.to_string(),
                     };
                     mailbox_collection.insert_one(mailbox, None).await?;
                 }
@@ -252,6 +227,7 @@ impl Logic {
                 permanent_flags: vec![],
                 uid_validity: 1,
                 uid_next: 11,
+                user_id: username.to_string(),
             })
         }
     }
@@ -379,7 +355,7 @@ impl Logic {
                 if collection.find_one(mailbox_filter.clone(), None).await?.is_none() {
                     println!("Creating mailbox: {}", mailbox_name);
                     let new_mailbox = Mailbox {
-                        name: mailbox_name.to_string(),
+                        name: mailbox.to_string(),
                         flags: vec![],
                         exists: 0,
                         recent: 0,
@@ -387,6 +363,7 @@ impl Logic {
                         permanent_flags: vec![String::from("\\*")],
                         uid_validity: 1,
                         uid_next: 1,
+                        user_id: username.to_string(),
                     };
                     collection.insert_one(new_mailbox, None).await?;
                 }
@@ -405,6 +382,7 @@ impl Logic {
                     permanent_flags: vec![String::from("\\*")],
                     uid_validity: 1,
                     uid_next: 1,
+                    user_id: username.to_string(),
                 };
                 collection.insert_one(new_mailbox, None).await?;
             }
@@ -621,6 +599,7 @@ mod tests {
     use super::*;
     use dotenv::dotenv;
     use crate::logic::Logic;
+    use crate::entities::Email;
     use mockall::predicate::eq;
 
     #[tokio::test]
@@ -756,6 +735,7 @@ mod tests {
                 permanent_flags: vec![],
                 uid_validity: 1,
                 uid_next: 1,
+                user_id: "testuser".to_string(),
             }));
 
         let logic = Logic::new_with_mock(mock_client);
@@ -853,6 +833,7 @@ mod tests {
                 permanent_flags: vec![],
                 uid_validity: 1,
                 uid_next: 1,
+                user_id: "testuser".to_string(),
             }));
 
         let logic = Logic::new_with_mock(mock_client);

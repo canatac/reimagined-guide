@@ -50,15 +50,9 @@ use dotenv::dotenv;
 const SMTP_PORTS: [u16; 3] = [587, 465, 25];
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(5);
 use std::collections::HashMap;
-
-#[derive(Clone)]
-pub struct Email {
-    pub from: String,
-    pub to: String,
-    pub subject: String,
-    pub body: String,
-    pub headers: Vec<(String, String)>,
-}
+use crate::entities::Email;
+use uuid::Uuid;
+use chrono::{Utc};
 
 enum StreamType {
     Plain(TcpStream),
@@ -91,9 +85,24 @@ async fn expect_code<T: AsyncReadExt + Unpin>(stream: &mut T, expected: &str) ->
     }
     Ok(())
 }
-pub async fn send_outgoing_email(email_content: &str) -> std::io::Result<()> {
-    println!("Sending email: {}", email_content);
-    let recipient_email = extract_email_address(email_content, "To:")
+pub async fn send_outgoing_email(email: &Email) -> std::io::Result<()> {
+    println!("Sending email: {}", email.body);
+
+    // Construct the email content
+    let mut email_content = format!(
+        "From: {}\r\nTo: {}\r\nSubject: {}\r\n",
+        email.from, email.to, email.subject
+    );
+
+    // Add headers
+    for (key, value) in &email.headers {
+        email_content.push_str(&format!("{}: {}\r\n", key, value));
+    }
+
+    // Add body
+    email_content.push_str(&format!("\r\n{}", email.body));
+
+    let recipient_email = extract_email_address(&email_content, "To:")
         .ok_or_else(|| IoError::new(ErrorKind::InvalidInput, "Invalid recipient email"))?;
     let recipient_domain = recipient_email.split('@').nth(1)
         .ok_or_else(|| IoError::new(ErrorKind::InvalidInput, "Invalid recipient email"))?;
@@ -172,7 +181,7 @@ pub async fn send_outgoing_email(email_content: &str) -> std::io::Result<()> {
         }
     }
     // Use the appropriate stream for the rest of the communication
-    send_email_content(&mut stream_type, email_content).await?;
+    send_email_content(&mut stream_type, &email_content).await?;
 
     Ok(())
 }
@@ -232,56 +241,14 @@ async fn send_email_content_inner<T: AsyncWriteExt + AsyncReadExt + Unpin>(
     expect_code(stream, "221").await?;
 
     return Ok(());
-/*
-    // Parse and process headers
-    let (headers, body) = parse_email_content(email_content);
 
-    // Send processed headers
-    println!("Sending headers:");
-    for (key, value) in &headers {
-        let header_line = format!("{}: {}", key, value);
-        println!("{}", header_line);
-        stream.write_all(header_line.as_bytes()).await?;
-        stream.write_all(b"\r\n").await?;
-    }
-
-     // Add an empty line to separate headers from body
-     stream.write_all(b"\r\n").await?;
-
-     // Send body
-     println!("Body content: <START>{}<END>", body.replace("\n", "\\n").replace("\r", "\\r"));
-     
-     println!("Sending email body:\n{}", body);
-     // Trim leading and trailing \r\n from the body
-     let trimmed_body = body.trim_matches(|c| c == '\r' || c == '\n');
-     println!("Trimmed body content: <START>{}<END>", trimmed_body.replace("\n", "\\n").replace("\r", "\\r"));
-     stream.write_all(trimmed_body.as_bytes()).await?;
- 
-     // Ensure the email content ends with \r\n.\r\n
-     if !trimmed_body.ends_with("\r\n.\r\n") {
-         println!("Adding final .");
-         stream.write_all(b"\r\n.\r\n").await?;
-     }
- 
-     expect_code(stream, "250").await?;
- 
-     println!("Sending QUIT command");
-     stream.write_all(b"QUIT\r\n").await?;
-     expect_code(stream, "221").await?;
- 
-     Ok(())
-
-*/
 }
-
 
 fn _parse_email_content(content: &str) -> (HashMap<String, String>, String) {
     let mut headers: HashMap<String, String> = HashMap::new();
     let mut lines = content.lines().peekable();
     let mut body = String::new();
     let mut in_body = false;
-
-
 
     while let Some(line) = lines.next() {
         if in_body {
@@ -470,7 +437,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    match send_outgoing_email(&email_content).await {
+    let email = Email {
+        id: Uuid::new_v4().to_string(),
+        from: from.to_string(),
+        to: to.to_string(),
+        subject: subject.to_string(),
+        body: body.to_string(),
+        headers: vec![],
+        flags: vec![],
+        sequence_number: 0,
+        uid: 0,
+        internal_date: Utc::now(),
+        dkim_signature: None,
+    };
+
+    match send_outgoing_email(&email).await {
         Ok(_) => println!("Email sent successfully"),
         Err(e) => eprintln!("Error sending email: {}", e),
     }

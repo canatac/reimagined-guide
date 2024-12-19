@@ -40,7 +40,7 @@ use std::io::{Error as IoError, ErrorKind};
 use std::sync::Arc;
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
-use chrono::{Utc, DateTime};
+use chrono::Utc;
 use log::{info, error, debug};
 use rustls::ServerConfig;
 
@@ -58,8 +58,9 @@ use std::error::Error;
 use std::fmt;
 use constant_time_eq::constant_time_eq;
 
+use simple_smtp_server::entities::Email;
 use simple_smtp_server::smtp_client::{send_outgoing_email, extract_email_address};
-use simple_smtp_server::logic::{Logic, Email as LogicEmail};
+use simple_smtp_server::logic::Logic;
 
 // Custom error type for the main function
 #[derive(Debug)]
@@ -120,20 +121,6 @@ impl AsyncBufRead for StreamType {
     }
 }
 
-// Struct to represent an email
-#[derive(Clone)]
-struct Email {
-    from: String,
-    to: String,
-    subject: String,
-    body: String,
-    dkim_signature: Option<String>,
-    headers: Vec<String>,
-    raw_content: String,
-}
-
-
-
 // Struct to represent the mail server
 struct MailServer {
     mail_dir: String,
@@ -151,52 +138,19 @@ impl MailServer {
     // Store an email in the mail directory
     async fn store_email(&self, email: &CustomEmail) -> std::io::Result<()> {
         let timestamp = Utc::now().format("%Y%m%d%H%M%S");
-        let filename = format!("{}-{}.eml", timestamp, email.to.replace("@", "_at_"));
+        let filename = format!("{}-{}.eml", timestamp, email.email.to.replace("@", "_at_"));
         let path = Path::new(&self.mail_dir).join(filename);
         
         let mut file = tokio::fs::File::create(path).await?;
-        file.write_all(format!("From: {}\r\n", email.from).as_bytes()).await?;
-        file.write_all(format!("To: {}\r\n", email.to).as_bytes()).await?;
-        file.write_all(format!("Subject: {}\r\n\r\n", email.subject).as_bytes()).await?;
-        file.write_all(email.body.as_bytes()).await?;
+        file.write_all(format!("From: {}\r\n", email.email.from).as_bytes()).await?;
+        file.write_all(format!("To: {}\r\n", email.email.to).as_bytes()).await?;
+        file.write_all(format!("Subject: {}\r\n\r\n", email.email.subject).as_bytes()).await?;
+        file.write_all(email.email.body.as_bytes()).await?;
         
         Ok(())
     }
 
-    async fn _forward_email(&self, email: &Email) -> std::io::Result<()> {
-        let mut email_content = String::new();
-
-        // Add DKIM-Signature if present
-        if let Some(dkim_sig) = &email.dkim_signature {
-            email_content.push_str(dkim_sig);
-            email_content.push_str("\r\n");
-        }
-
-        // Add other headers
-        for header in &email.headers {
-            if !header.starts_with("DKIM-Signature:") &&
-               !header.starts_with("From:") &&
-               !header.starts_with("To:") &&
-               !header.starts_with("Subject:") {
-                email_content.push_str(header);
-                email_content.push_str("\r\n");
-            }
-        }
-        // Add From, To, and Subject headers
-        email_content.push_str(&format!("From: {}\r\n", email.from.trim()));
-        email_content.push_str(&format!("To: {}\r\n", email.to.trim()));
-        email_content.push_str(&format!("Subject: {}\r\n", email.subject.trim()));
-
-        // Add an empty line to separate headers from body
-        email_content.push_str("\r\n");
-
-        // Add the email body
-        email_content.push_str(&email.body);
-
-        println!("Forwarding email: {}", email_content);
-        send_outgoing_email(&email_content).await
-
-    }
+    
 }
 
 // Handle TLS client connection
@@ -213,18 +167,9 @@ async fn handle_tls_client(tls_stream: TlsStream<TcpStream>, logic: Arc<Logic>) 
     let mut in_data_mode: bool = false;
 
     let mut current_email = CustomEmail {
-        id: String::new(),
-        from: String::new(),
-        to: String::new(),
-        subject: String::new(),
-        body: String::new(),
-        flags: Vec::new(),
-        sequence_number: 0,
-        uid: 0,
-        internal_date: Utc::now(),
-        dkim_signature: None,
-        headers: Vec::new(),
+        email: Email::new("", "", "", "", ""),
         raw_content: String::new(),
+        dkim_signature: None,
     };
 
     let mail_server = Arc::new(MailServer::new("./emails"));
@@ -248,16 +193,18 @@ async fn handle_tls_client(tls_stream: TlsStream<TcpStream>, logic: Arc<Logic>) 
                     if line.trim() == "." {
                         in_data_mode = false;
                         // Convert to logic's Email struct
-                        let email_to_store = LogicEmail {
-                            id: current_email.id.clone(),
-                            from: current_email.from.clone(),
-                            to: current_email.to.clone(),
-                            subject: current_email.subject.clone(),
-                            body: current_email.body.clone(),
-                            flags: current_email.flags.clone(),
-                            sequence_number: current_email.sequence_number,
-                            uid: current_email.uid,
-                            internal_date: current_email.internal_date,
+                        let email_to_store = Email {
+                            id: current_email.email.id.clone(),
+                            from: current_email.email.from.clone(),
+                            to: current_email.email.to.clone(),
+                            subject: current_email.email.subject.clone(),
+                            body: current_email.email.body.clone(),
+                            headers: current_email.email.headers.clone(),
+                            flags: current_email.email.flags.clone(),
+                            sequence_number: current_email.email.sequence_number,
+                            uid: current_email.email.uid,
+                            internal_date: current_email.email.internal_date,
+                            dkim_signature: current_email.dkim_signature.clone(),
                         };
 
                         // Store the email in MongoDB
@@ -274,30 +221,30 @@ async fn handle_tls_client(tls_stream: TlsStream<TcpStream>, logic: Arc<Logic>) 
                             let trimmed_line = current_email.raw_content.trim();
                             if !trimmed_line.is_empty() {
                                 let line = trimmed_line.to_string();
-                                current_email.headers.push(line.clone());
+                                current_email.email.headers.push((line.clone(), line.clone()));
                                 if trimmed_line.starts_with("DKIM-Signature:") {
                                     current_email.dkim_signature = Some(line);
                                 } else if trimmed_line.starts_with("From:") {
-                                    current_email.from = extract_email_address(trimmed_line, "From:").unwrap_or_default();
+                                    current_email.email.from = extract_email_address(trimmed_line, "From:").unwrap_or_default();
                                 } else if trimmed_line.starts_with("To:") {
-                                    current_email.to = extract_email_address(trimmed_line, "To:").unwrap_or_default();
+                                    current_email.email.to = extract_email_address(trimmed_line, "To:").unwrap_or_default();
                                 } else if trimmed_line.starts_with("Subject:") {
-                                    current_email.subject = trimmed_line.trim_start_matches("Subject:").trim().to_string();
+                                    current_email.email.subject = trimmed_line.trim_start_matches("Subject:").trim().to_string();
                                 }
                             }
                         } else {
                             let trimmed_line = line.trim();
                             if !trimmed_line.is_empty() {
                                 let line = trimmed_line.to_string();
-                                current_email.headers.push(line.clone());
+                                current_email.email.headers.push((line.clone(), line.clone()));
                                 if trimmed_line.starts_with("DKIM-Signature:") {
                                     current_email.dkim_signature = Some(line);
                                 } else if trimmed_line.starts_with("From:") {
-                                    current_email.from = extract_email_address(trimmed_line, "From:").unwrap_or_default();
+                                    current_email.email.from = extract_email_address(trimmed_line, "From:").unwrap_or_default();
                                 } else if trimmed_line.starts_with("To:") {
-                                    current_email.to = extract_email_address(trimmed_line, "To:").unwrap_or_default();
+                                    current_email.email.to = extract_email_address(trimmed_line, "To:").unwrap_or_default();
                                 } else if trimmed_line.starts_with("Subject:") {
-                                    current_email.subject = trimmed_line.trim_start_matches("Subject:").trim().to_string();
+                                    current_email.email.subject = trimmed_line.trim_start_matches("Subject:").trim().to_string();
                                 }
                             }
                             current_email.raw_content.push_str(&line);
@@ -311,7 +258,7 @@ async fn handle_tls_client(tls_stream: TlsStream<TcpStream>, logic: Arc<Logic>) 
                     if line.trim() == "DATA" {
                         in_data_mode = true;
                     } else if line.trim() == "QUIT" {
-                        if let Ok(content) = extract_email_content(&current_email.body) {
+                        if let Ok(content) = extract_email_content(&current_email.email.body) {
                             println!("Extracted email content: {}", content);
                         } else {
                             eprintln!("Error extracting email content");
@@ -344,18 +291,9 @@ async fn handle_plain_client(stream: TcpStream, tls_acceptor: Arc<TlsAcceptor>) 
     let mut in_data_mode = false;
 
     let mut current_email = CustomEmail {
-        id: String::new(),
-        from: String::new(),
-        to: String::new(),
-        subject: String::new(),
-        body: String::new(),
-        flags: Vec::new(),
-        sequence_number: 0,
-        uid: 0,
-        internal_date: Utc::now(),
-        dkim_signature: None,
-        headers: Vec::new(),
+        email: Email::new("", "", "", "", ""),
         raw_content: String::new(),
+        dkim_signature: None,
     };
 
     let mail_server = Arc::new(MailServer::new("./emails"));
@@ -389,7 +327,7 @@ async fn handle_plain_client(stream: TcpStream, tls_acceptor: Arc<TlsAcceptor>) 
                     if buffer.trim() == "." {
                         in_data_mode = false;
                         mail_server.store_email(&current_email).await?;
-                        match send_outgoing_email(&current_email.raw_content).await {
+                        match send_outgoing_email(&current_email.email).await {
                             Ok(_) => {
                                 write_response(&mut stream, "250 OK\r\n").await?;
                             }
@@ -398,48 +336,36 @@ async fn handle_plain_client(stream: TcpStream, tls_acceptor: Arc<TlsAcceptor>) 
                                 write_response(&mut stream, "554 Transaction failed\r\n").await?;
                             }
                         }
-                        /*
-                        match mail_server.forward_email(&current_email).await {
-                            Ok(_) => {
-                                write_response(&mut stream, "250 OK\r\n").await?;
-                            }
-                            Err(e) => {
-                                error!("Failed to forward email: {}", e);
-                                write_response(&mut stream, "554 Transaction failed\r\n").await?;
-                            }
-                        }
-                         */
-                        
                     } else {
                         if current_email.raw_content.is_empty() {
                             current_email.raw_content = buffer;
                             let trimmed_buffer = current_email.raw_content.trim();
                             if !trimmed_buffer.is_empty() {
                                 let line = trimmed_buffer.to_string();
-                                current_email.headers.push(line.clone());
+                                current_email.email.headers.push((line.clone(), line.clone()));
                                 if trimmed_buffer.starts_with("DKIM-Signature:") {
                                     current_email.dkim_signature = Some(line);
                                 } else if trimmed_buffer.starts_with("From:") {
-                                    current_email.from = extract_email_address(trimmed_buffer, "From:").unwrap_or_default();
+                                    current_email.email.from = extract_email_address(trimmed_buffer, "From:").unwrap_or_default();
                                 } else if trimmed_buffer.starts_with("To:") {
-                                    current_email.to = extract_email_address(trimmed_buffer, "To:").unwrap_or_default();
+                                    current_email.email.to = extract_email_address(trimmed_buffer, "To:").unwrap_or_default();
                                 } else if trimmed_buffer.starts_with("Subject:") {
-                                    current_email.subject = trimmed_buffer.trim_start_matches("Subject:").trim().to_string();
+                                    current_email.email.subject = trimmed_buffer.trim_start_matches("Subject:").trim().to_string();
                                 }
                             }
                         } else {
                             let trimmed_buffer = buffer.trim();
                             if !trimmed_buffer.is_empty() {
                                 let line = trimmed_buffer.to_string();
-                                current_email.headers.push(line.clone());
+                                current_email.email.headers.push((line.clone(), line.clone()));
                                 if trimmed_buffer.starts_with("DKIM-Signature:") {
                                     current_email.dkim_signature = Some(line);
                                 } else if trimmed_buffer.starts_with("From:") {
-                                    current_email.from = extract_email_address(trimmed_buffer, "From:").unwrap_or_default();
+                                    current_email.email.from = extract_email_address(trimmed_buffer, "From:").unwrap_or_default();
                                 } else if trimmed_buffer.starts_with("To:") {
-                                    current_email.to = extract_email_address(trimmed_buffer, "To:").unwrap_or_default();
+                                    current_email.email.to = extract_email_address(trimmed_buffer, "To:").unwrap_or_default();
                                 } else if trimmed_buffer.starts_with("Subject:") {
-                                    current_email.subject = trimmed_buffer.trim_start_matches("Subject:").trim().to_string();
+                                    current_email.email.subject = trimmed_buffer.trim_start_matches("Subject:").trim().to_string();
                                 }
                             }
                             current_email.raw_content.push_str(&buffer);
@@ -487,15 +413,15 @@ async fn process_command(command: &str, email: &mut CustomEmail, stream: &mut St
             handle_auth_plain(command).await
         } 
         s if s.starts_with("MAIL FROM:") => {
-            email.from = s.trim_start_matches("MAIL FROM:").trim().to_string();
+            email.email.from = s.trim_start_matches("MAIL FROM:").trim().to_string();
             Ok("250 OK\r\n".to_string())
         } 
         s if s.starts_with("RCPT TO:") => {
-            email.to = s.trim_start_matches("RCPT TO:").trim().to_string();
+            email.email.to = s.trim_start_matches("RCPT TO:").trim().to_string();
             Ok("250 OK\r\n".to_string())
         } 
         s if s.starts_with("SUBJECT:") => {
-            email.subject = s[8..].trim().to_string();
+            email.email.subject = s[8..].trim().to_string();
             Ok("250 OK\r\n".to_string())
         } 
         "DATA" => {
@@ -505,8 +431,8 @@ async fn process_command(command: &str, email: &mut CustomEmail, stream: &mut St
             Ok("250 OK\r\n".to_string())
         } 
         "QUIT" => {
-            if !email.from.is_empty() && !email.to.is_empty() {
-                match extract_email_content(&email.body) {
+            if !email.email.from.is_empty() && !email.email.to.is_empty() {
+                match extract_email_content(&email.email.body) {
                     Ok(content) => {
                         println!("Extracted email content: {}", content);
                     },
@@ -517,18 +443,9 @@ async fn process_command(command: &str, email: &mut CustomEmail, stream: &mut St
         } 
         "RSET" => {
             *email = CustomEmail {
-                id: String::new(),
-                from: String::new(),
-                to: String::new(),
-                subject: String::new(),
-                body: String::new(),
-                flags: Vec::new(),
-                sequence_number: 0,
-                uid: 0,
-                internal_date: Utc::now(),
-                dkim_signature: None,
-                headers: Vec::new(),
+                email: Email::new("", "", "", "", ""),
                 raw_content: String::new(),
+                dkim_signature: None,
             };
              // Reset the email using new() instead of default()
             Ok("250 OK\r\n".to_string())
@@ -736,18 +653,9 @@ async fn main() -> Result<(), MainError> {
 }
 
 struct CustomEmail {
-    id: String,
-    from: String,
-    to: String,
-    subject: String,
-    body: String,
-    flags: Vec<String>,
-    sequence_number: u32,
-    uid: u32,
-    internal_date: DateTime<Utc>,
-    dkim_signature: Option<String>,
-    headers: Vec<String>,
+    email: Email,
     raw_content: String,
+    dkim_signature: Option<String>,
 }
 
 // Function to extract email content
