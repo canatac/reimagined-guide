@@ -92,7 +92,7 @@ fn parse_email(message: &str) -> (HashMap<String, String>, String) {
         println!("Parsed body line: {}", line);
     }
     println!("Parsed body: {}", body);
-    println!("Parsed headers: {}", headers);
+    println!("Parsed headers: {:?}", headers);
     println!("Parsed message: {}", message);
 
     (headers, body)
