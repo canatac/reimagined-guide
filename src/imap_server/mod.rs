@@ -67,25 +67,39 @@ impl ImapServer {
     }
 }
 
-fn parse_email_headers(message: &str) -> HashMap<String, String> {
+fn parse_email(message: &str) -> (HashMap<String, String>, String) {
     let mut headers = HashMap::new();
-    for line in message.lines() {
+    let mut lines = message.lines();
+    let mut body = String::new();
+
+    // Parse headers
+    for line in &mut lines {
+        if line.is_empty() {
+            break; // End of headers
+        }
         if let Some((key, value)) = line.split_once(": ") {
             headers.insert(key.to_string(), value.to_string());
         }
     }
-    headers
+
+    // Parse body
+    for line in lines {
+        body.push_str(line);
+        body.push('\n');
+    }
+
+    (headers, body)
 }
 
 async fn process_imap_command(
     command: &[u8],
     logic: &Arc<Logic>,
-    sessions: &Arc<Mutex<HashMap<String, String>>>, // Track active sessions with user info
-    session_id: &mut Option<String>, // Track session ID for this connection
-    socket: &mut tokio::net::TcpStream, // Add socket as a parameter
+    sessions: &Arc<Mutex<HashMap<String, String>>>,
+    session_id: &mut Option<String>,
+    socket: &mut tokio::net::TcpStream,
 ) -> String {
     let command_str = String::from_utf8_lossy(command);
-    println!("Processing command: {}", command_str.trim()); // Log the command being processed
+    println!("Processing command: {}", command_str.trim());
 
     let command_parts: Vec<&str> = command_str.split_whitespace().collect();
     if command_parts.is_empty() {
@@ -94,7 +108,7 @@ async fn process_imap_command(
 
     let tag = command_parts[0];
     let command_name = command_parts[1].to_uppercase();
-    println!("Command name: {}, Arguments: {:?}", command_name, &command_parts[2..]); // Log command details
+    println!("Command name: {}, Arguments: {:?}", command_name, &command_parts[2..]);
 
     match command_name.as_str() {
         "CAPABILITY" => format!("* CAPABILITY IMAP4rev1 AUTH=PLAIN LOGIN IDLE UIDPLUS MULTIAPPEND\r\n{} OK CAPABILITY completed\r\n", tag),
@@ -432,7 +446,6 @@ async fn process_imap_command(
                 format!("{} NO COPY failed: User not authenticated\r\n", tag)
             }
         }
-        // Add APPEND command
         "APPEND" => {
             if command_parts.len() < 4 {
                 return format!("{} BAD APPEND requires a mailbox name and message\r\n", tag);
@@ -440,11 +453,12 @@ async fn process_imap_command(
             let mailbox = command_parts[2];
             let message_size = command_parts[3].trim_matches(|c| c == '{' || c == '}').parse::<usize>().unwrap_or(0);
 
+            // Lire le contenu du message
             let mut message_content = vec![0; message_size];
             socket.read_exact(&mut message_content).await.unwrap();
             let message_str = String::from_utf8_lossy(&message_content);
 
-            let headers = parse_email_headers(&message_str);
+            let (headers, body) = parse_email(&message_str);
             let to = headers.get("To").unwrap_or(&"unknown".to_string()).clone();
             let from = headers.get("From").unwrap_or(&"unknown".to_string()).clone();
             let subject = headers.get("Subject").unwrap_or(&"No Subject".to_string()).clone();
@@ -452,7 +466,7 @@ async fn process_imap_command(
             if let Some(id) = session_id {
                 let username = sessions.lock().unwrap().get(id).cloned();
                 if let Some(user) = username {
-                    let message = Email::new(&String::from(uuid::Uuid::new_v4()), &user, &to, &subject, &message_str);
+                    let message = Email::new(&String::from(uuid::Uuid::new_v4()), &from, &to, &subject, &body);
 
                     match logic.store_email(&user, mailbox, &message).await {
                         Ok(_) => format!("{} OK APPEND completed\r\n", tag),
