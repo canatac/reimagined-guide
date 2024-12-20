@@ -91,8 +91,10 @@ impl ImapServer {
             // We are expecting the message content
             let mut message_content = vec![0; self.message_size];
             println!("message_content: {:?}", message_content);
-            match socket.read_exact(&mut message_content).await {
-                Ok(_) => {
+            // read the command variable
+
+            //match socket.read_exact(&mut message_content).await {
+                //Ok(_) => {
                     let message_str = String::from_utf8_lossy(&message_content);
                     println!("Received message content: {}", message_str);
 
@@ -120,12 +122,12 @@ impl ImapServer {
                     } else {
                         format!("NO APPEND failed: User not authenticated\r\n")
                     }
-                }
-                Err(e) => {
-                    eprintln!("Error reading message content: {:?}", e);
-                    format!("NO APPEND failed: Could not read message content\r\n")
-                }
-            }
+                //}
+                //Err(e) => {
+                //    eprintln!("Error reading message content: {:?}", e);
+                //    format!("NO APPEND failed: Could not read message content\r\n")
+                //}
+            //}
         } else {
             // Process regular commands
             let command_parts: Vec<&str> = command_str.split_whitespace().collect();
