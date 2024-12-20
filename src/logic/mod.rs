@@ -350,36 +350,12 @@ impl Logic {
     pub async fn create_mailbox(&self, username: &str, mailbox: &str) -> Result<()> {
         #[cfg(not(test))]
         {
-            println!("Creating mailbox: {}", mailbox);
             let database_name = std::env::var("MONGODB_DATABASE").expect("MONGODB_DATABASE must be set");
             let collection = self.client.database(&database_name).collection::<Mailbox>("mailboxes");
 
-            // Standard mailboxes to ensure exist
-            let standard_mailboxes = vec!["INBOX", "SENT", "DRAFTS", "ARCHIVE", "TRASH"];
-
-            for &mailbox_name in &standard_mailboxes {
-                println!("Checking mailbox: {}", mailbox_name);
-                let mailbox_filter = doc! { "name": mailbox_name, "user_id": username };
-                if collection.find_one(mailbox_filter.clone(), None).await?.is_none() {
-                    println!("Creating mailbox: {}", mailbox_name);
-                    let new_mailbox = Mailbox {
-                        name: mailbox.to_string(),
-                        flags: vec![],
-                        exists: 0,
-                        recent: 0,
-                        unseen: 0,
-                        permanent_flags: vec![String::from("\\*")],
-                        uid_validity: 1,
-                        uid_next: 1,
-                        user_id: username.to_string(),
-                    };
-                    collection.insert_one(new_mailbox, None).await?;
-                }
-            }
-
-            // Create the specific mailbox if it doesn't exist
-            let specific_mailbox_filter = doc! { "name": mailbox, "user_id": username };
-            if collection.find_one(specific_mailbox_filter.clone(), None).await?.is_none() {
+            // Vérifiez si la boîte aux lettres existe déjà
+            let mailbox_filter = doc! { "name": mailbox, "user_id": username };
+            if collection.find_one(mailbox_filter.clone(), None).await?.is_none() {
                 println!("Creating mailbox: {}", mailbox);
                 let new_mailbox = Mailbox {
                     name: mailbox.to_string(),
@@ -393,12 +369,15 @@ impl Logic {
                     user_id: username.to_string(),
                 };
                 collection.insert_one(new_mailbox, None).await?;
+                println!("Mailbox created: {}", mailbox);
+            } else {
+                println!("Mailbox already exists: {}", mailbox);
             }
             Ok(())
         }
         #[cfg(test)]
         {
-            //For test, we need to return an empty result
+            // Pour les tests, nous devons retourner un résultat vide
             Ok(())
         }
     }

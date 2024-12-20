@@ -55,7 +55,7 @@ impl ImapServer {
                         }
                     };
 
-                    let response = process_imap_command(&buffer[..n], &logic, &sessions, &mut session_id).await;
+                    let response = process_imap_command(&buffer[..n], &logic, &sessions, &mut session_id, &mut socket).await;
                     println!("Response: {}", response);
                     if let Err(e) = socket.write_all(response.as_bytes()).await {
                         eprintln!("Failed to write to socket; err = {:?}", e);
@@ -67,11 +67,22 @@ impl ImapServer {
     }
 }
 
+fn parse_email_headers(message: &str) -> HashMap<String, String> {
+    let mut headers = HashMap::new();
+    for line in message.lines() {
+        if let Some((key, value)) = line.split_once(": ") {
+            headers.insert(key.to_string(), value.to_string());
+        }
+    }
+    headers
+}
+
 async fn process_imap_command(
     command: &[u8],
     logic: &Arc<Logic>,
     sessions: &Arc<Mutex<HashMap<String, String>>>, // Track active sessions with user info
     session_id: &mut Option<String>, // Track session ID for this connection
+    socket: &mut tokio::net::TcpStream, // Add socket as a parameter
 ) -> String {
     let command_str = String::from_utf8_lossy(command);
     println!("Processing command: {}", command_str.trim()); // Log the command being processed
@@ -423,18 +434,25 @@ async fn process_imap_command(
         }
         // Add APPEND command
         "APPEND" => {
-
             if command_parts.len() < 4 {
                 return format!("{} BAD APPEND requires a mailbox name and message\r\n", tag);
             }
-            let mailbox = command_parts[2]; 
-            //let message = command_parts[3..].join(" ");
-            
+            let mailbox = command_parts[2];
+            let message_size = command_parts[3].trim_matches(|c| c == '{' || c == '}').parse::<usize>().unwrap_or(0);
+
+            let mut message_content = vec![0; message_size];
+            socket.read_exact(&mut message_content).await.unwrap();
+            let message_str = String::from_utf8_lossy(&message_content);
+
+            let headers = parse_email_headers(&message_str);
+            let to = headers.get("To").unwrap_or(&"unknown".to_string()).clone();
+            let from = headers.get("From").unwrap_or(&"unknown".to_string()).clone();
+            let subject = headers.get("Subject").unwrap_or(&"No Subject".to_string()).clone();
+
             if let Some(id) = session_id {
                 let username = sessions.lock().unwrap().get(id).cloned();
-
                 if let Some(user) = username {
-                    let message = Email::new(&String::from(uuid::Uuid::new_v4()), &user, "to@test.com", "Test Subject", "Test Body");
+                    let message = Email::new(&String::from(uuid::Uuid::new_v4()), &user, &to, &subject, &message_str);
 
                     match logic.store_email(&user, mailbox, &message).await {
                         Ok(_) => format!("{} OK APPEND completed\r\n", tag),
