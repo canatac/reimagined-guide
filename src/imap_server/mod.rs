@@ -450,7 +450,7 @@ async fn process_imap_command(
             if command_parts.len() < 4 {
                 return format!("{} BAD APPEND requires a mailbox name and message\r\n", tag);
             }
-            let mailbox = command_parts[2];
+            let mailbox = command_parts[2].trim_matches('"');
             let message_size = command_parts[3].trim_matches(|c| c == '{' || c == '}').parse::<usize>().unwrap_or(0);
 
             // Lire le contenu du message
