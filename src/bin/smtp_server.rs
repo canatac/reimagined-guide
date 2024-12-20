@@ -61,6 +61,7 @@ use constant_time_eq::constant_time_eq;
 use simple_smtp_server::entities::Email;
 use simple_smtp_server::smtp_client::{send_outgoing_email, extract_email_address};
 use simple_smtp_server::logic::Logic;
+use simple_smtp_server::session::SessionManager;
 
 // Custom error type for the main function
 #[derive(Debug)]
@@ -154,7 +155,7 @@ impl MailServer {
 }
 
 // Handle TLS client connection
-async fn handle_tls_client(tls_stream: TlsStream<TcpStream>, logic: Arc<Logic>) -> std::io::Result<()> {
+async fn handle_tls_client(tls_stream: TlsStream<TcpStream>, logic: Arc<Logic>, session_manager: Arc<SessionManager>) -> std::io::Result<()> {
     info!("TLS connection established");
     let peer_addr = tls_stream.get_ref().0.peer_addr()?;
     
@@ -209,12 +210,22 @@ async fn handle_tls_client(tls_stream: TlsStream<TcpStream>, logic: Arc<Logic>) 
                         };
 
                         // Store the email in MongoDB
-                        if let Err(e) = logic.store_email(&email_to_store).await {
-                            eprintln!("Failed to store email in MongoDB: {}", e);
-                            write_response(&mut stream, "554 Transaction failed\r\n").await?;
+                        if let Some(session_id) = session_manager.get_session_id() {
+                            if let Some(mailbox) = session_manager.get_mailbox(&session_id) {
+                                if let Err(e) = logic.store_email(&session_id, &mailbox, &email_to_store).await {
+                                    eprintln!("Failed to store email in MongoDB: {}", e);
+                                    write_response(&mut stream, "554 Transaction failed\r\n").await?;
+                                } else {
+                                    println!("Email stored successfully in MongoDB");
+                                    write_response(&mut stream, "250 OK\r\n").await?;
+                                }
+                            } else {
+                                eprintln!("Mailbox not found for session ID: {}", session_id);
+                                write_response(&mut stream, "554 Transaction failed\r\n").await?;
+                            }
                         } else {
-                            println!("Email stored successfully in MongoDB");
-                            write_response(&mut stream, "250 OK\r\n").await?;
+                            eprintln!("Session ID not found");
+                            write_response(&mut stream, "554 Transaction failed\r\n").await?;
                         }
                     } else {
                         if !in_body {
@@ -243,7 +254,7 @@ async fn handle_tls_client(tls_stream: TlsStream<TcpStream>, logic: Arc<Logic>) 
                         }
                     }
                 } else {
-                    let response = process_command(&line, &mut current_email, &mut stream).await?;
+                    let response = process_command(&line, &mut current_email, &mut stream, logic.clone(), session_manager.clone()).await?;
                     println!("Response: {}", response);
                     write_response(&mut stream, &response).await?;
 
@@ -270,7 +281,7 @@ async fn handle_tls_client(tls_stream: TlsStream<TcpStream>, logic: Arc<Logic>) 
 }
 
 // Handle plain client connection
-async fn handle_plain_client(stream: TcpStream, tls_acceptor: Arc<TlsAcceptor>) -> std::io::Result<()> {
+async fn handle_plain_client(stream: TcpStream, tls_acceptor: Arc<TlsAcceptor>, logic: Arc<Logic>, session_manager: Arc<SessionManager>) -> std::io::Result<()> {
     let peer_addr = stream.peer_addr()?;
     info!("New plain connection from: {}", peer_addr);
     let mut stream = StreamType::Plain(tokio::io::BufReader::new(stream));
@@ -281,6 +292,7 @@ async fn handle_plain_client(stream: TcpStream, tls_acceptor: Arc<TlsAcceptor>) 
     write_response(&mut stream, &greeting).await?;
 
     let mut in_data_mode = false;
+    let mut in_body = false; // Indicateur pour savoir si nous sommes dans le corps de l'email
 
     let mut current_email = CustomEmail {
         email: Email::new("", "", "", "", ""),
@@ -316,6 +328,7 @@ async fn handle_plain_client(stream: TcpStream, tls_acceptor: Arc<TlsAcceptor>) 
                     continue;
                 }
                 if in_data_mode {
+                    println!("In in_data_mode");
                     if buffer.trim() == "." {
                         in_data_mode = false;
                         mail_server.store_email(&current_email).await?;
@@ -329,50 +342,40 @@ async fn handle_plain_client(stream: TcpStream, tls_acceptor: Arc<TlsAcceptor>) 
                             }
                         }
                     } else {
-                        if current_email.raw_content.is_empty() {
-                            current_email.raw_content = buffer;
-                            let trimmed_buffer = current_email.raw_content.trim();
-                            if !trimmed_buffer.is_empty() {
-                                let line = trimmed_buffer.to_string();
-                                current_email.email.headers.push((line.clone(), line.clone()));
-                                if trimmed_buffer.starts_with("DKIM-Signature:") {
-                                    current_email.dkim_signature = Some(line);
-                                } else if trimmed_buffer.starts_with("From:") {
-                                    current_email.email.from = extract_email_address(trimmed_buffer, "From:").unwrap_or_default();
-                                } else if trimmed_buffer.starts_with("To:") {
-                                    current_email.email.to = extract_email_address(trimmed_buffer, "To:").unwrap_or_default();
-                                } else if trimmed_buffer.starts_with("Subject:") {
-                                    current_email.email.subject = trimmed_buffer.trim_start_matches("Subject:").trim().to_string();
+                        if !in_body {
+                            if buffer.trim().is_empty() {
+                                in_body = true; // Ligne vide détectée, commencez à capturer le corps
+                            } else {
+                                // Traitez les en-têtes
+                                let trimmed_buffer = buffer.trim();
+                                if !trimmed_buffer.is_empty() {
+                                    let line = trimmed_buffer.to_string();
+                                    current_email.email.headers.push((line.clone(), line.clone()));
+                                    if trimmed_buffer.starts_with("DKIM-Signature:") {
+                                        current_email.dkim_signature = Some(line);
+                                    } else if trimmed_buffer.starts_with("From:") {
+                                        current_email.email.from = extract_email_address(trimmed_buffer, "From:").unwrap_or_default();
+                                    } else if trimmed_buffer.starts_with("To:") {
+                                        current_email.email.to = extract_email_address(trimmed_buffer, "To:").unwrap_or_default();
+                                    } else if trimmed_buffer.starts_with("Subject:") {
+                                        current_email.email.subject = trimmed_buffer.trim_start_matches("Subject:").trim().to_string();
+                                    }
                                 }
                             }
                         } else {
-                            let trimmed_buffer = buffer.trim();
-                            if !trimmed_buffer.is_empty() {
-                                let line = trimmed_buffer.to_string();
-                                current_email.email.headers.push((line.clone(), line.clone()));
-                                if trimmed_buffer.starts_with("DKIM-Signature:") {
-                                    current_email.dkim_signature = Some(line);
-                                } else if trimmed_buffer.starts_with("From:") {
-                                    current_email.email.from = extract_email_address(trimmed_buffer, "From:").unwrap_or_default();
-                                } else if trimmed_buffer.starts_with("To:") {
-                                    current_email.email.to = extract_email_address(trimmed_buffer, "To:").unwrap_or_default();
-                                } else if trimmed_buffer.starts_with("Subject:") {
-                                    current_email.email.subject = trimmed_buffer.trim_start_matches("Subject:").trim().to_string();
-                                }
-                            }
-                            current_email.raw_content.push_str(&buffer);
+                            // Ajoutez la ligne au corps de l'email
+                            current_email.email.body.push_str(&buffer);
                         }
                     }
                 } else {
-                    let response = process_command(&buffer, &mut current_email, &mut stream).await?;
+                    let response = process_command(&buffer, &mut current_email, &mut stream, logic.clone(), session_manager.clone()).await?;
                     println!("Response: {}", response);
                     write_response(&mut stream, &response).await?;
                     
                     if buffer.trim() == "DATA" {
                         in_data_mode = true;
                     } else if buffer.trim() == "QUIT" {
-                    
-                    write_response(&mut stream, "221 Bye\r\n").await?;
+                        write_response(&mut stream, "221 Bye\r\n").await?;
                         break;
                     }
                 }
@@ -388,7 +391,7 @@ async fn handle_plain_client(stream: TcpStream, tls_acceptor: Arc<TlsAcceptor>) 
 }
 
 // Process SMTP commands
-async fn process_command(command: &str, email: &mut CustomEmail, stream: &mut StreamType) -> std::io::Result<String> {
+async fn process_command(command: &str, email: &mut CustomEmail, stream: &mut StreamType, logic: Arc<Logic>, session_manager: Arc<SessionManager>) -> std::io::Result<String> {
     // Implement your SMTP command processing logic here
     // This is a basic example and should be expanded based on your needs
 
@@ -399,7 +402,7 @@ async fn process_command(command: &str, email: &mut CustomEmail, stream: &mut St
             Ok("250-mail.misfits.ai Hello\r\n250-STARTTLS\r\n250-AUTH LOGIN PLAIN\r\n250 OK\r\n".to_string())
         } 
         s if s.starts_with("AUTH LOGIN") => {
-            handle_auth_login(stream).await
+            handle_auth_login(stream, logic.clone(), session_manager.clone()).await
         } 
         s if s.starts_with("AUTH PLAIN") => {
             handle_auth_plain(command).await
@@ -467,8 +470,8 @@ async fn process_command(command: &str, email: &mut CustomEmail, stream: &mut St
 }
 
 // Handle AUTH LOGIN command
-async fn handle_auth_login(stream: &mut StreamType) -> std::io::Result<String> {
-    write_response(stream, "334 VXNlcm5hbWU6\r\n").await?; // Base64 for "Username:"
+async fn handle_auth_login(stream: &mut StreamType, logic: Arc<Logic>, session_manager: Arc<SessionManager>) -> std::io::Result<String> {
+    write_response(stream, "334 VXNlcm5hbWU6\r\n").await?; // Base64 pour "Username:"
     let mut username = String::new();
     stream.read_line(&mut username).await?;
     let username = username.trim_end().as_bytes().to_vec();
@@ -480,10 +483,17 @@ async fn handle_auth_login(stream: &mut StreamType) -> std::io::Result<String> {
     let password = password.trim_end().as_bytes().to_vec();
     debug!("Received password: {}", String::from_utf8_lossy(&password));
 
-    if check_credentials(&username, &password) {
-        Ok("235 Authentication successful\r\n".to_string())
-    } else {
-        Ok("535 Authentication failed\r\n".to_string())
+    let username = String::from_utf8_lossy(&username).to_string();
+    let password = String::from_utf8_lossy(&password).to_string();
+
+    match logic.authenticate_user(&username, &password).await {
+        Ok(Some(user)) => {
+            let session_id = session_manager.create_session(&username);
+            session_manager.set_mailbox(&session_id, &user.mailbox);
+            Ok(format!("235 Authentication successful, session ID: {}\r\n", session_id))
+        }
+        Ok(None) => Ok("535 Authentication failed\r\n".to_string()),
+        Err(_) => Ok("535 Authentication failed\r\n".to_string()),
     }
 }
 
@@ -603,6 +613,7 @@ async fn main() -> Result<(), MainError> {
 
     let client = Arc::new(mongodb::Client::with_uri_str(&client_uri).await.unwrap());
     let logic = Arc::new(Logic::new(client));
+    let session_manager = Arc::new(SessionManager::new());
 
     loop {
         tokio::select! {
@@ -612,9 +623,10 @@ async fn main() -> Result<(), MainError> {
                     info!("New TLS client connected from {}", peer_addr);
                     let acceptor = tls_acceptor.clone();
                     let logic_clone = logic.clone(); // Clone the Arc before moving into the closure
+                    let session_manager_clone = session_manager.clone(); // Clone the Arc before moving into the closure
                     tokio::spawn(async move {
                         let tls_stream = acceptor.accept(stream).await.unwrap();
-                        if let Err(e) = handle_tls_client(tls_stream, logic_clone).await {
+                        if let Err(e) = handle_tls_client(tls_stream, logic_clone, session_manager_clone).await {
                             error!("Error handling plain client {}: {}", peer_addr, e);
                         } else {
                             info!("Plain client session completed successfully");
@@ -628,8 +640,10 @@ async fn main() -> Result<(), MainError> {
                 if let Ok((stream, peer_addr)) = result {
                     info!("New plain client connected from {}", peer_addr);
                     let acceptor = tls_acceptor.clone();
+                    let logic_clone = logic.clone(); // Clone the Arc before moving into the closure
+                    let session_manager_clone = session_manager.clone(); // Clone the Arc before moving into the closure
                     tokio::spawn(async move {
-                        if let Err(e) = handle_plain_client(stream, acceptor).await {
+                        if let Err(e) = handle_plain_client(stream, acceptor, logic_clone, session_manager_clone).await {
                             error!("Error handling plain client {}: {}", peer_addr, e);
                         } else {
                             info!("Plain client session completed successfully");

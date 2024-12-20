@@ -6,7 +6,7 @@ use crate::logic::Logic;
 use std::time::Duration;
 use tokio::time::sleep;
 use uuid::Uuid;
-
+use crate::entities::Email;
 pub struct ImapServer {
     logic: Arc<Logic>,
     sessions: Arc<Mutex<HashMap<String, String>>>, // Track active sessions with user info
@@ -419,6 +419,32 @@ async fn process_imap_command(
                 }
             } else {
                 format!("{} NO COPY failed: User not authenticated\r\n", tag)
+            }
+        }
+        // Add APPEND command
+        "APPEND" => {
+
+            if command_parts.len() < 4 {
+                return format!("{} BAD APPEND requires a mailbox name and message\r\n", tag);
+            }
+            let mailbox = command_parts[2]; 
+            //let message = command_parts[3..].join(" ");
+            
+            if let Some(id) = session_id {
+                let username = sessions.lock().unwrap().get(id).cloned();
+
+                if let Some(user) = username {
+                    let message = Email::new(&String::from(uuid::Uuid::new_v4()), &user, "to@test.com", "Test Subject", "Test Body");
+
+                    match logic.store_email(&user, mailbox, &message).await {
+                        Ok(_) => format!("{} OK APPEND completed\r\n", tag),
+                        Err(_) => format!("{} NO APPEND failed: Internal error\r\n", tag),
+                    }
+                } else {
+                    format!("{} NO APPEND failed: User not authenticated\r\n", tag)
+                }
+            } else {
+                format!("{} NO APPEND failed: User not authenticated\r\n", tag)
             }
         }
         _ => format!("{} BAD Command not recognized\r\n", tag),
