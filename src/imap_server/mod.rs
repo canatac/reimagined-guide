@@ -84,7 +84,9 @@ impl ImapServer {
     ) -> String {
         let command_str = String::from_utf8_lossy(command);
         println!("Processing command: {}", command_str.trim());
-
+        println!("expecting_message: {}", self.expecting_message);
+        println!("message_size: {}", self.message_size);
+        println!("mailbox: {}", self.mailbox);
         if self.expecting_message {
             // We are expecting the message content
             let mut message_content = vec![0; self.message_size];
