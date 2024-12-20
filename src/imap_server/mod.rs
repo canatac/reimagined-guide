@@ -11,6 +11,7 @@ use crate::entities::Email;
 pub struct ImapServer {
     logic: Arc<Logic>,
     sessions: Arc<Mutex<HashMap<String, String>>>, // Track active sessions with user info
+    tag: String,
     expecting_message: bool, // Flag to indicate if we are expecting a message
     message_size: usize,     // Store the expected message size
     mailbox: String,         // Store the mailbox name
@@ -21,6 +22,7 @@ impl ImapServer {
         ImapServer {
             logic,
             sessions: Arc::new(Mutex::new(HashMap::new())),
+            tag: String::new(),
             expecting_message: false,
             message_size: 0,
             mailbox: String::new(),
@@ -89,45 +91,33 @@ impl ImapServer {
         println!("mailbox: {}", self.mailbox);
         if self.expecting_message {
             // We are expecting the message content
-            //let mut message_content = vec![0; self.message_size];
-            //println!("message_content: {:?}", message_content);
-            // read the command variable
+            let message_str = String::from_utf8_lossy(&command);
+            println!("Received message content: {}", message_str);
 
-            //match socket.read_exact(&mut message_content).await {
-                //Ok(_) => {
-                    let message_str = String::from_utf8_lossy(&command);
-                    println!("Received message content: {}", message_str);
+            // Traiter le contenu du message
+            let (headers, body) = parse_email(&message_str);
+            let to = headers.get("To").unwrap_or(&"unknown".to_string()).clone();
+            let from = headers.get("From").unwrap_or(&"unknown".to_string()).clone();
+            let subject = headers.get("Subject").unwrap_or(&"No Subject".to_string()).clone();
 
-                    // Traiter le contenu du message
-                    let (headers, body) = parse_email(&message_str);
-                    let to = headers.get("To").unwrap_or(&"unknown".to_string()).clone();
-                    let from = headers.get("From").unwrap_or(&"unknown".to_string()).clone();
-                    let subject = headers.get("Subject").unwrap_or(&"No Subject".to_string()).clone();
+            if let Some(id) = session_id {
+                let username = sessions.lock().unwrap().get(id).cloned();
+                if let Some(user) = username {
+                    let message = Email::new(&String::from(uuid::Uuid::new_v4()), &from, &to, &subject, &body);
 
-                    if let Some(id) = session_id {
-                        let username = sessions.lock().unwrap().get(id).cloned();
-                        if let Some(user) = username {
-                            let message = Email::new(&String::from(uuid::Uuid::new_v4()), &from, &to, &subject, &body);
-
-                            match self.logic.store_email(&user, &self.mailbox, &message).await {
-                                Ok(_) => {
-                                    self.expecting_message = false; // Reset the flag
-                                    format!("OK APPEND completed\r\n")
-                                }
-                                Err(_) => format!("NO APPEND failed: Internal error\r\n"),
-                            }
-                        } else {
-                            format!("NO APPEND failed: User not authenticated\r\n")
+                    match self.logic.store_email(&user, &self.mailbox, &message).await {
+                        Ok(_) => {
+                            self.expecting_message = false; // Reset the flag
+                            return format!("{} OK APPEND completed\r\n", self.tag);
                         }
-                    } else {
-                        format!("NO APPEND failed: User not authenticated\r\n")
+                        Err(_) => return format!("NO APPEND failed: Internal error\r\n"),
                     }
-                //}
-                //Err(e) => {
-                //    eprintln!("Error reading message content: {:?}", e);
-                //    format!("NO APPEND failed: Could not read message content\r\n")
-                //}
-            //}
+                } else {
+                    return format!("NO APPEND failed: User not authenticated\r\n");
+                }
+            } else {
+                return format!("NO APPEND failed: User not authenticated\r\n");
+            }
         } else {
             // Process regular commands
             let command_parts: Vec<&str> = command_str.split_whitespace().collect();
@@ -151,10 +141,10 @@ impl ImapServer {
                     if self.message_size == 0 {
                         return format!("{} BAD APPEND failed: Message size is zero\r\n", tag);
                     }
-
+                    self.tag = tag.to_string();
                     self.expecting_message = true; // Set the flag to expect message content
                     
-                    format!("{} OK APPEND command received, waiting for message content\r\n", tag)
+                    return format!("{} OK APPEND command received, waiting for message content\r\n", tag);
                 }
                 "CAPABILITY" => format!("* CAPABILITY IMAP4rev1 AUTH=PLAIN LOGIN IDLE UIDPLUS MULTIAPPEND\r\n{} OK CAPABILITY completed\r\n", tag),
                 "NOOP" => format!("{} OK NOOP completed\r\n", tag),
@@ -538,7 +528,7 @@ impl ImapServer {
                         }
                     }
                 }
-                _ => format!("{} BAD Command not recognized\r\n", tag),
+                _ => return format!("{} BAD Command not recognized\r\n", tag),
             }
         }
     }
@@ -584,6 +574,7 @@ impl Clone for ImapServer {
             expecting_message: self.expecting_message,
             message_size: self.message_size,
             mailbox: self.mailbox.clone(),
+            tag: self.tag.clone(),
         }
     }
 }
