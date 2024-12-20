@@ -22,7 +22,7 @@ async fn main() -> std::io::Result<()> {
     );
     
     let logic = Arc::new(Logic::new(client));
-    let server = ImapServer::new(logic);
+    let mut server = ImapServer::new(logic);
     let imap_server_address = env::var("IMAP_SERVER").expect("IMAP_SERVER must be set");
     server.run(&imap_server_address).await.unwrap();
 

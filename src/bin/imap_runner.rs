@@ -34,7 +34,7 @@ async fn main() -> std::io::Result<()> {
         warp::serve(api).run(([0, 0, 0, 0], api_port.parse::<u16>().unwrap())).await;
     });
 
-    let imap_server = ImapServer::new(logic);
+    let mut imap_server = ImapServer::new(logic);
     let imap_server_address = env::var("IMAP_SERVER").expect("IMAP_SERVER must be set");
     imap_server.run(&imap_server_address).await?;
 
