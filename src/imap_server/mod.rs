@@ -63,6 +63,7 @@ impl ImapServer {
                         }
                     };
 
+                    println!("expecting_message: {}", server_clone.expecting_message);
                     let response = server_clone.process_imap_command(&buffer[..n], &sessions, &mut session_id, &mut socket).await;
                     println!("Response: {}", response);
                     if let Err(e) = socket.write_all(response.as_bytes()).await {
