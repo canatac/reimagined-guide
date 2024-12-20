@@ -454,12 +454,12 @@ async fn process_imap_command(
             }
         }
         "APPEND" => {
-            if command_parts.len() < 4 {
+            if command_parts.len() < 5 {
                 return format!("{} BAD APPEND requires a mailbox name and message\r\n", tag);
             }
             println!("Command parts: {:?}", command_parts);
             let mailbox = command_parts[2].trim_matches('"');
-            let message_size = command_parts[3].trim_matches(|c| c == '{' || c == '}').parse::<usize>().unwrap_or(0);
+            let message_size = command_parts[4].trim_matches(|c| c == '{' || c == '}').parse::<usize>().unwrap_or(0);
 
             if message_size == 0 {
                 return format!("{} BAD APPEND failed: Message size is zero\r\n", tag);
