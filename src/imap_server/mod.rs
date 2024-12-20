@@ -457,33 +457,41 @@ async fn process_imap_command(
             if command_parts.len() < 4 {
                 return format!("{} BAD APPEND requires a mailbox name and message\r\n", tag);
             }
+            println!("Command parts: {:?}", command_parts);
             let mailbox = command_parts[2].trim_matches('"');
             let message_size = command_parts[3].trim_matches(|c| c == '{' || c == '}').parse::<usize>().unwrap_or(0);
-            println!("Message size: {}", message_size);
+
+            if message_size == 0 {
+                return format!("{} BAD APPEND failed: Message size is zero\r\n", tag);
+            }
+
             // Lire le contenu du message
             let mut message_content = vec![0; message_size];
-            socket.read_exact(&mut message_content).await.unwrap();
-            let message_str = String::from_utf8_lossy(&message_content);
-            println!("Message: {}", message_str);
-            let (headers, body) = parse_email(&message_str);
-            let to = headers.get("To").unwrap_or(&"unknown".to_string()).clone();
-            let from = headers.get("From").unwrap_or(&"unknown".to_string()).clone();
-            let subject = headers.get("Subject").unwrap_or(&"No Subject".to_string()).clone();
+            match socket.read_exact(&mut message_content).await {
+                Ok(_) => {
+                    let message_str = String::from_utf8_lossy(&message_content);
+                    let (headers, body) = parse_email(&message_str);
+                    let to = headers.get("To").unwrap_or(&"unknown".to_string()).clone();
+                    let from = headers.get("From").unwrap_or(&"unknown".to_string()).clone();
+                    let subject = headers.get("Subject").unwrap_or(&"No Subject".to_string()).clone();
 
-            if let Some(id) = session_id {
-                let username = sessions.lock().unwrap().get(id).cloned();
-                if let Some(user) = username {
-                    let message = Email::new(&String::from(uuid::Uuid::new_v4()), &from, &to, &subject, &body);
+                    if let Some(id) = session_id {
+                        let username = sessions.lock().unwrap().get(id).cloned();
+                        if let Some(user) = username {
+                            let message = Email::new(&String::from(uuid::Uuid::new_v4()), &from, &to, &subject, &body);
 
-                    match logic.store_email(&user, mailbox, &message).await {
-                        Ok(_) => format!("{} OK APPEND completed\r\n", tag),
-                        Err(_) => format!("{} NO APPEND failed: Internal error\r\n", tag),
+                            match logic.store_email(&user, mailbox, &message).await {
+                                Ok(_) => format!("{} OK APPEND completed\r\n", tag),
+                                Err(_) => format!("{} NO APPEND failed: Internal error\r\n", tag),
+                            }
+                        } else {
+                            format!("{} NO APPEND failed: User not authenticated\r\n", tag)
+                        }
+                    } else {
+                        format!("{} NO APPEND failed: User not authenticated\r\n", tag)
                     }
-                } else {
-                    format!("{} NO APPEND failed: User not authenticated\r\n", tag)
                 }
-            } else {
-                format!("{} NO APPEND failed: User not authenticated\r\n", tag)
+                Err(_) => format!("{} NO APPEND failed: Could not read message content\r\n", tag),
             }
         }
         _ => format!("{} BAD Command not recognized\r\n", tag),
