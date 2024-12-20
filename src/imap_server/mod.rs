@@ -45,7 +45,8 @@ impl ImapServer {
                             return;
                         }
                         Ok(n) => {
-                            println!("Read {} bytes from socket", n);
+                            let command = String::from_utf8_lossy(&buffer[..n]);
+                            println!("Received command: {}", command.trim()); // Log the received command
                             n
                         }
                         Err(e) => {
@@ -73,21 +74,20 @@ async fn process_imap_command(
     session_id: &mut Option<String>, // Track session ID for this connection
 ) -> String {
     let command_str = String::from_utf8_lossy(command);
-    let command_parts: Vec<&str> = command_str.trim().split_whitespace().collect();
-    if command_parts.len() < 2 {
-        return "BAD Invalid command format\r\n".to_string();
+    println!("Processing command: {}", command_str.trim()); // Log the command being processed
+
+    let command_parts: Vec<&str> = command_str.split_whitespace().collect();
+    if command_parts.is_empty() {
+        return "BAD Command not recognized\r\n".to_string();
     }
 
     let tag = command_parts[0];
-    let cmd = command_parts[1].to_uppercase();
+    let command_name = command_parts[1].to_uppercase();
+    println!("Command name: {}, Arguments: {:?}", command_name, &command_parts[2..]); // Log command details
 
-    match cmd.as_str() {
-        "CAPABILITY" => {
-            format!("* CAPABILITY IMAP4rev1 AUTH=PLAIN LOGIN IDLE UIDPLUS MULTIAPPEND\r\n{} OK CAPABILITY completed\r\n", tag)
-        }
-        "NOOP" => {
-            format!("{} OK NOOP completed\r\n", tag)
-        }
+    match command_name.as_str() {
+        "CAPABILITY" => format!("* CAPABILITY IMAP4rev1 AUTH=PLAIN LOGIN IDLE UIDPLUS MULTIAPPEND\r\n{} OK CAPABILITY completed\r\n", tag),
+        "NOOP" => format!("{} OK NOOP completed\r\n", tag),
         "LOGOUT" => {
             // Invalidate the session
             if let Some(id) = session_id.take() {
