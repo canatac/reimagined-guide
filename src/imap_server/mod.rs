@@ -68,17 +68,20 @@ impl ImapServer {
 }
 
 fn parse_email(message: &str) -> (HashMap<String, String>, String) {
+    println!("Parsing email: {}", message);
     let mut headers = HashMap::new();
     let mut lines = message.lines();
     let mut body = String::new();
 
     // Parse headers
     for line in &mut lines {
+        println!("Parsing line: {}", line);
         if line.is_empty() {
             break; // End of headers
         }
         if let Some((key, value)) = line.split_once(": ") {
             headers.insert(key.to_string(), value.to_string());
+            println!("Parsed header: {} -> {}", key, value);
         }
     }
 
@@ -86,7 +89,11 @@ fn parse_email(message: &str) -> (HashMap<String, String>, String) {
     for line in lines {
         body.push_str(line);
         body.push('\n');
+        println!("Parsed body line: {}", line);
     }
+    println!("Parsed body: {}", body);
+    println!("Parsed headers: {}", headers);
+    println!("Parsed message: {}", message);
 
     (headers, body)
 }
@@ -452,12 +459,12 @@ async fn process_imap_command(
             }
             let mailbox = command_parts[2].trim_matches('"');
             let message_size = command_parts[3].trim_matches(|c| c == '{' || c == '}').parse::<usize>().unwrap_or(0);
-
+            println!("Message size: {}", message_size);
             // Lire le contenu du message
             let mut message_content = vec![0; message_size];
             socket.read_exact(&mut message_content).await.unwrap();
             let message_str = String::from_utf8_lossy(&message_content);
-
+            println!("Message: {}", message_str);
             let (headers, body) = parse_email(&message_str);
             let to = headers.get("To").unwrap_or(&"unknown".to_string()).clone();
             let from = headers.get("From").unwrap_or(&"unknown".to_string()).clone();
