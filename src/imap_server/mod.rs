@@ -89,13 +89,13 @@ impl ImapServer {
         println!("mailbox: {}", self.mailbox);
         if self.expecting_message {
             // We are expecting the message content
-            let mut message_content = vec![0; self.message_size];
-            println!("message_content: {:?}", message_content);
+            //let mut message_content = vec![0; self.message_size];
+            //println!("message_content: {:?}", message_content);
             // read the command variable
 
             //match socket.read_exact(&mut message_content).await {
                 //Ok(_) => {
-                    let message_str = String::from_utf8_lossy(&message_content);
+                    let message_str = String::from_utf8_lossy(&command);
                     println!("Received message content: {}", message_str);
 
                     // Traiter le contenu du message
