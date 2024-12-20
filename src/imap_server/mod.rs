@@ -467,6 +467,8 @@ async fn process_imap_command(
 
             // Lire le contenu du message
             let mut message_content = vec![0; message_size];
+            println!("Reading message content of size: {}", message_size);
+            println!("Message content: {:?}", message_content);
             match socket.read_exact(&mut message_content).await {
                 Ok(_) => {
                     let message_str = String::from_utf8_lossy(&message_content);
@@ -491,7 +493,10 @@ async fn process_imap_command(
                         format!("{} NO APPEND failed: User not authenticated\r\n", tag)
                     }
                 }
-                Err(_) => format!("{} NO APPEND failed: Could not read message content\r\n", tag),
+                Err(e) => {
+                    eprintln!("Error reading message content: {:?}", e);
+                    format!("{} NO APPEND failed: Could not read message content\r\n", tag)
+                }
             }
         }
         _ => format!("{} BAD Command not recognized\r\n", tag),
