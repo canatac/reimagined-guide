@@ -465,6 +465,9 @@ async fn process_imap_command(
                 return format!("{} BAD APPEND failed: Message size is zero\r\n", tag);
             }
 
+            // Ajoutez un délai pour attendre le contenu du message
+            sleep(Duration::from_millis(5000)).await;
+
             // Lire le contenu du message
             let mut message_content = vec![0; message_size];
             println!("Reading message content of size: {}", message_size);
