@@ -208,7 +208,6 @@ async fn handle_tls_client(tls_stream: TlsStream<TcpStream>, logic: Arc<Logic>, 
                             internal_date: current_email.email.internal_date,
                             dkim_signature: current_email.dkim_signature.clone(),
                         };
-
                         // Store the email in MongoDB
                         if let Some(session_id) = session_manager.get_session_id() {
                             if let Some(mailbox) = session_manager.get_mailbox(&session_id) {

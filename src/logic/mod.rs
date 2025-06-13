@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use futures_util::TryStreamExt;
 use mongodb::error::Error;
-use chrono::{DateTime, Utc};
+use chrono::{Utc};
 use crate::entities::Email;
 use mongodb::bson;
 
