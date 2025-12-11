@@ -208,23 +208,37 @@ async fn handle_tls_client(tls_stream: TlsStream<TcpStream>, logic: Arc<Logic>, 
                             internal_date: current_email.email.internal_date,
                             dkim_signature: current_email.dkim_signature.clone(),
                         };
-                        // Store the email in MongoDB
-                        if let Some(session_id) = session_manager.get_session_id() {
-                            if let Some(mailbox) = session_manager.get_mailbox(&session_id) {
-                                if let Err(e) = logic.store_email(&session_id, &mailbox, &email_to_store).await {
-                                    eprintln!("Failed to store email in MongoDB: {}", e);
-                                    write_response(&mut stream, "554 Transaction failed\r\n").await?;
+                        // Check storage preference
+                        let use_mongodb = env::var("USE_MONGODB").unwrap_or_else(|_| "true".to_string()) == "true";
+
+                        if use_mongodb {
+                            // Store the email in MongoDB
+                            if let Some(session_id) = session_manager.get_session_id() {
+                                if let Some(mailbox) = session_manager.get_mailbox(&session_id) {
+                                    if let Err(e) = logic.store_email(&session_id, &mailbox, &email_to_store).await {
+                                        eprintln!("Failed to store email in MongoDB: {}", e);
+                                        write_response(&mut stream, "554 Transaction failed\r\n").await?;
+                                    } else {
+                                        println!("Email stored successfully in MongoDB");
+                                        write_response(&mut stream, "250 OK\r\n").await?;
+                                    }
                                 } else {
-                                    println!("Email stored successfully in MongoDB");
-                                    write_response(&mut stream, "250 OK\r\n").await?;
+                                    eprintln!("Mailbox not found for session ID: {}", session_id);
+                                    write_response(&mut stream, "554 Transaction failed\r\n").await?;
                                 }
                             } else {
-                                eprintln!("Mailbox not found for session ID: {}", session_id);
+                                eprintln!("Session ID not found");
                                 write_response(&mut stream, "554 Transaction failed\r\n").await?;
                             }
                         } else {
-                            eprintln!("Session ID not found");
-                            write_response(&mut stream, "554 Transaction failed\r\n").await?;
+                            // Store locally
+                            if let Err(e) = mail_server.store_email(&current_email).await {
+                                eprintln!("Failed to store email locally: {}", e);
+                                write_response(&mut stream, "451 Local error in processing\r\n").await?;
+                            } else {
+                                println!("Email stored successfully locally");
+                                write_response(&mut stream, "250 OK\r\n").await?;
+                            }
                         }
                     } else {
                         if !in_body {

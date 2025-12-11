@@ -1,5 +1,5 @@
 # Stage 1: Builder
-FROM rust:1.70 AS builder
+FROM rust:1.82 AS builder
 
 ARG USER=default_user
 ARG UID=10001
@@ -18,11 +18,11 @@ USER ${USER}
 # Copy the application source
 COPY --chown=${USER}:${USER} . .
 
-# Set Rust to nightly and build all binaries
-# rustup override set nightly is used because the original Dockerfile had it.
-# If specific nightly features are not strictly needed, consider removing this for stability.
-RUN rustup override set nightly && \
-    cargo build --release --bins
+# Set build parallelism to low to avoid OOM kills
+ENV CARGO_BUILD_JOBS=2
+
+# Build all binaries using stable Rust
+RUN cargo build --release --bins
 
 # Stage 2: Final image
 FROM debian:bullseye-slim
