@@ -1,0 +1,6 @@
+target/
+.git/
+test-smtp
+*.md
+.env
+docker-compose*.yml

@@ -1,0 +1,43 @@
+# Configuration de production
+# Utilisation: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+services:
+  smtp-server:
+    environment:
+      # Configuration de production - les variables .env doivent être définies
+      - SMTP_TLS_ADDR=${SMTP_TLS_ADDR}
+      - SMTP_PLAIN_ADDR=${SMTP_PLAIN_ADDR}
+      - CERT_PATH=/app/certs/${CERT_PATH}
+      - KEY_PATH=/app/certs/${KEY_PATH}
+      - SMTP_USERNAME=${SMTP_USERNAME}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - RUST_LOG=${RUST_LOG:-info}
+    restart: always
+    # Ajout de labels pour le monitoring
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.smtp.rule=Host(`mail.yourdomain.com`)"
+
+  email-api:
+    environment:
+      - API_SERVER_ADDR=${API_SERVER_ADDR}
+      - FULLCHAIN_PATH=/app/certs/${FULLCHAIN_PATH}
+      - PRIVKEY_PATH=/app/certs/${PRIVKEY_PATH}
+      - SMTP_USERNAME=${SMTP_USERNAME}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - RUST_LOG=${RUST_LOG:-info}
+    restart: always
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.api.rule=Host(`api.yourdomain.com`)"
+
+  imap-server:
+    environment:
+      - IMAP_SERVER=${IMAP_SERVER}
+      - IMAP_SERVER_API_PORT=${IMAP_SERVER_API_PORT}
+      - MONGODB_USERNAME=${MONGODB_USERNAME}
+      - MONGODB_PASSWORD=${MONGODB_PASSWORD}
+      - MONGODB_CLUSTER_URL=${MONGODB_CLUSTER_URL}
+      - MONGODB_APP_NAME=${MONGODB_APP_NAME}
+      - RUST_LOG=${RUST_LOG:-info}
+    restart: always 

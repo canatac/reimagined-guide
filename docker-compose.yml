@@ -1,0 +1,70 @@
+
+services:
+  # SMTP Server
+  smtp-server:
+    build: .
+    container_name: smtp-server
+    ports:
+      - "25:25"      # Standard SMTP
+      - "8025:8025"  # Plain SMTP
+      - "8465:8465"  # TLS SMTP
+    volumes:
+      - ./emails:/app/emails
+      - ./certs:/app/certs
+    environment:
+      - SMTP_TLS_ADDR=${SMTP_TLS_ADDR}
+      - SMTP_PLAIN_ADDR=${SMTP_PLAIN_ADDR}
+      - CERT_PATH=/app/certs/${CERT_PATH}
+      - KEY_PATH=/app/certs/${KEY_PATH}
+      - SMTP_USERNAME=${SMTP_USERNAME}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - RUST_LOG=${RUST_LOG}
+    command: ["smtp_server"]
+    restart: unless-stopped
+
+  # Email API Server
+  email-api:
+    build: .
+    container_name: email-api
+    ports:
+      - "8000:8000"  # HTTP API
+      - "8443:8443"  # HTTPS API
+    volumes:
+      - ./certs:/app/certs
+    environment:
+      - API_SERVER_ADDR=${API_SERVER_ADDR}
+      - FULLCHAIN_PATH=/app/certs/${FULLCHAIN_PATH}
+      - PRIVKEY_PATH=/app/certs/${PRIVKEY_PATH}
+      - SMTP_USERNAME=${SMTP_USERNAME}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - RUST_LOG=${RUST_LOG}
+    command: ["email_api"]
+    restart: unless-stopped
+    depends_on:
+      - smtp-server
+
+  # IMAP Server
+  imap-server:
+    build: .
+    container_name: imap-server
+    ports:
+      - "143:143"    # IMAP
+      - "993:993"    # IMAPS
+      - "8080:8080"  # IMAP API
+    volumes:
+      - ./emails:/app/emails
+    environment:
+      - IMAP_SERVER=${IMAP_SERVER}
+      - IMAP_SERVER_API_PORT=${IMAP_SERVER_API_PORT}
+      - MONGODB_USERNAME=${MONGODB_USERNAME}
+      - MONGODB_PASSWORD=${MONGODB_PASSWORD}
+      - MONGODB_CLUSTER_URL=${MONGODB_CLUSTER_URL}
+      - MONGODB_APP_NAME=${MONGODB_APP_NAME}
+      - RUST_LOG=${RUST_LOG}
+    command: ["imap_server"]
+    restart: unless-stopped
+    depends_on:
+      - smtp-server
+
+volumes:
+  emails: 
