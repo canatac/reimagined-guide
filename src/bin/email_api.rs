@@ -52,7 +52,7 @@ use chrono::Utc;
 use simple_smtp_server::smtp_client::send_outgoing_email;
 
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
-struct EmailRequest {
+pub struct EmailRequest {
     from: String,
     to: String,
     subject: String,
