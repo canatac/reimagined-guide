@@ -53,7 +53,7 @@ Contains all the Rust source code for the project.
 
 - **`bin/`**: Holds binary executable entry points.
   - **`email_api.rs`**: Implements the email API functionality.
-  - **`smtp_client.rs`**: Contains the SMTP client implementation.
+  - **`client.rs`**: Contains the SMTP client CLI entry point.
   - **`smtp_server.rs`**: Houses the main SMTP server implementation.
 - **`test-smtp.rs`**: Contains SMTP testing functionality.
 
