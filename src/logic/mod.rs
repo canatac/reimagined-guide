@@ -59,7 +59,7 @@ impl Logic {
             let collection = self.client.database(&database_name).collection::<User>(&collection_name);
 
             // Insert the user
-            collection.insert_one(new_user, None).await?;
+            collection.insert_one(new_user).await?;
 
             // Standard mailboxes to create
             let standard_mailboxes = vec!["INBOX", "SENT", "DRAFTS", "ARCHIVE", "TRASH"];
@@ -67,7 +67,7 @@ impl Logic {
 
             for &mailbox_name in &standard_mailboxes {
                 let mailbox_filter = doc! { "name": mailbox_name, "user_id": username };
-                if mailbox_collection.find_one(mailbox_filter.clone(), None).await?.is_none() {
+                if mailbox_collection.find_one(mailbox_filter.clone()).await?.is_none() {
                     let mailbox = Mailbox {
                         name: mailbox_name.to_string(),
                         flags: vec![],
@@ -79,7 +79,7 @@ impl Logic {
                         uid_next: 1,
                         user_id: username.to_string(),
                     };
-                    mailbox_collection.insert_one(mailbox, None).await?;
+                    mailbox_collection.insert_one(mailbox).await?;
                 }
             }
             Ok(())
@@ -101,7 +101,7 @@ impl Logic {
                 "username": username, 
                 "password": password 
             };
-            let user = collection.find_one(filter, None).await?;
+            let user = collection.find_one(filter).await?;
             if let Some(user) = user {
                 format!("{} OK LOGIN completed\r\n","A000");
                 Ok(Some(user))
@@ -122,7 +122,7 @@ impl Logic {
             let database_name = std::env::var("MONGODB_DATABASE").expect("MONGODB_DATABASE must be set");
             let collection = self.client.database(&database_name).collection::<Email>("emails");
             let filter = doc! { "user_id": username, "mailbox": mailbox };
-            let cursor = collection.find(filter, None).await?;
+            let cursor = collection.find(filter).await?;
             cursor.try_collect().await
         }
         #[cfg(test)]
@@ -139,7 +139,7 @@ impl Logic {
             let database_name = std::env::var("MONGODB_DATABASE").expect("MONGODB_DATABASE must be set");
             let collection = self.client.database(&database_name).collection::<Email>("emails");
             let filter = doc! { "user_id": username, "id": email_id };
-            collection.find_one(filter, None).await
+            collection.find_one(filter).await
         }
         #[cfg(test)]
         {
@@ -156,7 +156,7 @@ impl Logic {
             let collection = self.client.database(&database_name).collection::<Email>("emails");
             let filter = doc! { "user_id": username, "id": email_id };
             let update = doc! { "$addToSet": { "flags": flag } };
-            collection.update_one(filter, update, None).await?;
+            collection.update_one(filter, update).await?;
             Ok(())
         }
         #[cfg(test)]
@@ -172,7 +172,7 @@ impl Logic {
             let database_name = std::env::var("MONGODB_DATABASE").expect("MONGODB_DATABASE must be set");
             let collection = self.client.database(&database_name).collection::<Email>("emails");
             let filter = doc! { "user_id": username, "id": email_id };
-            collection.delete_one(filter, None).await?;
+            collection.delete_one(filter).await?;
             Ok(())
         }
         #[cfg(test)]
@@ -189,9 +189,9 @@ impl Logic {
             let archive_collection = self.client.database(&database_name).collection::<Email>("archive");
 
             let filter = doc! { "user_id": username, "id": email_id };
-            if let Some(document) = collection.find_one(filter.clone(), None).await? {
-                archive_collection.insert_one(document, None).await?;
-                collection.delete_one(filter, None).await?;
+            if let Some(document) = collection.find_one(filter.clone()).await? {
+                archive_collection.insert_one(document).await?;
+                collection.delete_one(filter).await?;
                 Ok(())
             } else {
                 Err(Error::from(std::io::Error::new(
@@ -213,7 +213,7 @@ impl Logic {
             let collection = self.client.database(&database_name).collection::<Mailbox>("mailboxes");
 
             let filter = doc! { "user_id": username, "name": mailbox };
-            if let Some(mailbox) = collection.find_one(filter, None).await? {
+            if let Some(mailbox) = collection.find_one(filter).await? {
                 Ok(mailbox)
             } else {
                 Err(Error::from(std::io::Error::new(
@@ -251,7 +251,7 @@ impl Logic {
                 _ => doc! { "user_id": username },
             };
 
-            let mut cursor = collection.find(filter, None).await?;
+            let mut cursor = collection.find(filter).await?;
             let mut sequence_numbers = Vec::new();
             while let Some(email) = cursor.try_next().await? {
                 sequence_numbers.push(email.sequence_number);
@@ -273,14 +273,14 @@ impl Logic {
             let collection = self.client.database(&database_name).collection::<Email>("emails");
 
             let filter = doc! { "user_id": username, "flags": "\\Deleted" };
-            let mut cursor = collection.find(filter.clone(), None).await?;
+            let mut cursor = collection.find(filter.clone()).await?;
             let mut deleted_sequence_numbers = Vec::new();
 
             while let Some(email) = cursor.try_next().await? {
                 deleted_sequence_numbers.push(email.sequence_number);
             }
 
-            collection.delete_many(filter, None).await?;
+            collection.delete_many(filter).await?;
             Ok(deleted_sequence_numbers)
         }
         #[cfg(test)]
@@ -296,9 +296,9 @@ impl Logic {
             let collection = self.client.database(&database_name).collection::<Email>("emails");
 
             let filter = doc! { "user_id": username, "sequence_number": sequence_set.parse::<u32>().unwrap_or(0) };
-            if let Some(mut email) = collection.find_one(filter, None).await? {
+            if let Some(mut email) = collection.find_one(filter).await? {
                 email.id = format!("{}_{}", email.id, Utc::now().timestamp());
-                collection.insert_one(email, None).await?;
+                collection.insert_one(email).await?;
             }
             Ok(())
         }
@@ -321,7 +321,7 @@ impl Logic {
                 _ => doc! { "$set": { "flags": flags } },
             };
 
-            collection.update_one(filter, update, None).await?;
+            collection.update_one(filter, update).await?;
             Ok(())
         }
         #[cfg(test)]
@@ -355,7 +355,7 @@ impl Logic {
 
             // Vérifiez si la boîte aux lettres existe déjà
             let mailbox_filter = doc! { "name": mailbox, "user_id": username };
-            if collection.find_one(mailbox_filter.clone(), None).await?.is_none() {
+            if collection.find_one(mailbox_filter.clone()).await?.is_none() {
                 println!("Creating mailbox: {}", mailbox);
                 let new_mailbox = Mailbox {
                     name: mailbox.to_string(),
@@ -368,7 +368,7 @@ impl Logic {
                     uid_next: 1,
                     user_id: username.to_string(),
                 };
-                collection.insert_one(new_mailbox, None).await?;
+                collection.insert_one(new_mailbox).await?;
                 println!("Mailbox created: {}", mailbox);
             } else {
                 println!("Mailbox already exists: {}", mailbox);
@@ -389,7 +389,7 @@ impl Logic {
             let collection = self.client.database(&database_name).collection::<Mailbox>("mailboxes");
 
             let filter = doc! { "user_id": username, "name": mailbox };
-            collection.delete_one(filter, None).await?;
+            collection.delete_one(filter).await?;
 
             Ok(())
         }
@@ -408,7 +408,7 @@ impl Logic {
 
             let filter = doc! { "user_id": username, "name": old_name };
             let update = doc! { "$set": { "name": new_name } };
-            collection.update_one(filter, update, None).await?;
+            collection.update_one(filter, update).await?;
             Ok(())
         }
         #[cfg(test)]
@@ -426,7 +426,7 @@ impl Logic {
 
             let filter = doc! { "user_id": username, "mailbox": mailbox };
             let update = doc! { "$set": { "subscribed": true } };
-            collection.update_one(filter, update, None).await?;
+            collection.update_one(filter, update).await?;
             Ok(())
         }
         #[cfg(test)]
@@ -444,7 +444,7 @@ impl Logic {
 
             let filter = doc! { "user_id": username, "mailbox": mailbox };
             let update = doc! { "$set": { "subscribed": false } };
-            collection.update_one(filter, update, None).await?;
+            collection.update_one(filter, update).await?;
             Ok(())
         }
         #[cfg(test)]
@@ -461,7 +461,7 @@ impl Logic {
             let collection = self.client.database(&database_name).collection::<User>("subscriptions");
 
             let filter = doc! { "user_id": username, "subscribed": true };
-            let mut cursor = collection.find(filter, None).await?;
+            let mut cursor = collection.find(filter).await?;
             let mut mailboxes = Vec::new();
 
             while let Some(subscription) = cursor.try_next().await? {
@@ -513,7 +513,7 @@ impl Logic {
             document.insert("user_id", username);
             document.insert("mailbox", mailbox);
             // Insert the document into the collection
-            collection.insert_one(document, None).await?;
+            collection.insert_one(document).await?;
             Ok(())
         }
         #[cfg(test)]
@@ -533,7 +533,7 @@ impl Logic {
                 "name": { "$regex": format!("^{}.*{}", reference, mailbox) }
             };
 
-            let cursor = collection.find(filter, None).await?;
+            let cursor = collection.find(filter).await?;
             let mailboxes: Vec<String> = cursor.map_ok(|doc| doc.name).try_collect().await?;
             Ok(mailboxes)
         }
