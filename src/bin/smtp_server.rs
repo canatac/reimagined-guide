@@ -616,13 +616,24 @@ async fn main() -> Result<(), MainError> {
     info!("Plain Server listening on {}", plain_addr);
 
     // Initialisation du client MongoDB
-    let client_uri = format!(
-        "mongodb+srv://{}:{}@{}/?retryWrites=true&w=majority&appName={}",
-        env::var("MONGODB_USERNAME").expect("MONGODB_USERNAME must be set"),
-        env::var("MONGODB_PASSWORD").expect("MONGODB_PASSWORD must be set"),
-        env::var("MONGODB_CLUSTER_URL").expect("MONGODB_CLUSTER_URL must be set"),
-        env::var("MONGODB_APP_NAME").expect("MONGODB_APP_NAME must be set")
-    );
+    let cluster_url = env::var("MONGODB_CLUSTER_URL").expect("MONGODB_CLUSTER_URL must be set");
+    let mongodb_username = env::var("MONGODB_USERNAME").expect("MONGODB_USERNAME must be set");
+    let mongodb_password = env::var("MONGODB_PASSWORD").expect("MONGODB_PASSWORD must be set");
+    let mongodb_app_name = env::var("MONGODB_APP_NAME").unwrap_or_else(|_| "mailserver".to_string());
+
+    let client_uri = if cluster_url.contains(".mongodb.net") {
+        // MongoDB Atlas (SRV)
+        format!(
+            "mongodb+srv://{}:{}@{}/?retryWrites=true&w=majority&appName={}",
+            mongodb_username, mongodb_password, cluster_url, mongodb_app_name
+        )
+    } else {
+        // MongoDB local ou auto-hébergé
+        format!(
+            "mongodb://{}:{}@{}/?authSource=admin&appName={}",
+            mongodb_username, mongodb_password, cluster_url, mongodb_app_name
+        )
+    };
 
     let client = Arc::new(mongodb::Client::with_uri_str(&client_uri).await.unwrap());
     let logic = Arc::new(Logic::new(client));
