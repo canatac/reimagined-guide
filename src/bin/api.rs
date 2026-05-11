@@ -2,11 +2,9 @@ use simple_smtp_server::logic::Logic;
 use warp::Filter;
 use std::sync::Arc;
 use warp::reject::Reject;
-use dotenv::dotenv;
 use simple_smtp_server::logic::User;
 use warp::http::StatusCode;
-
-
+use dotenv::dotenv;
 use std::env;
 use simple_smtp_server::logic::LogicTrait;
 use serde::{Deserialize, Serialize};
@@ -170,6 +168,7 @@ fn with_logic(logic: Arc<Logic>) -> impl Filter<Extract = (Arc<Logic>,), Error =
     warp::any().map(move || logic.clone())
 }
 
+#[allow(dead_code)]
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialisation de l'environnement
