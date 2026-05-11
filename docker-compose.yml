@@ -1,5 +1,25 @@
 
 services:
+  # MongoDB
+  mongodb:
+    image: mongo:7
+    container_name: mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGODB_USERNAME}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGODB_PASSWORD}
+      - MONGO_INITDB_DATABASE=${MONGODB_DATABASE:-mailserver}
+    volumes:
+      - mongo_data:/data/db
+      - ./scripts/init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   # SMTP Server
   smtp-server:
     build: .
@@ -18,9 +38,18 @@ services:
       - KEY_PATH=/app/certs/${KEY_PATH}
       - SMTP_USERNAME=${SMTP_USERNAME}
       - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - MONGODB_USERNAME=${MONGODB_USERNAME}
+      - MONGODB_PASSWORD=${MONGODB_PASSWORD}
+      - MONGODB_CLUSTER_URL=${MONGODB_CLUSTER_URL:-mongodb}
+      - MONGODB_APP_NAME=${MONGODB_APP_NAME:-mailserver}
+      - MONGODB_DATABASE=${MONGODB_DATABASE:-mailserver}
+      - USE_MONGODB=${USE_MONGODB:-true}
       - RUST_LOG=${RUST_LOG}
     command: ["smtp_server"]
     restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
 
   # Email API Server
   email-api:
@@ -58,13 +87,17 @@ services:
       - IMAP_SERVER_API_PORT=${IMAP_SERVER_API_PORT}
       - MONGODB_USERNAME=${MONGODB_USERNAME}
       - MONGODB_PASSWORD=${MONGODB_PASSWORD}
-      - MONGODB_CLUSTER_URL=${MONGODB_CLUSTER_URL}
-      - MONGODB_APP_NAME=${MONGODB_APP_NAME}
+      - MONGODB_CLUSTER_URL=${MONGODB_CLUSTER_URL:-mongodb}
+      - MONGODB_APP_NAME=${MONGODB_APP_NAME:-mailserver}
+      - MONGODB_DATABASE=${MONGODB_DATABASE:-mailserver}
+      - USE_MONGODB=${USE_MONGODB:-true}
       - RUST_LOG=${RUST_LOG}
     command: ["imap_server"]
     restart: unless-stopped
     depends_on:
-      - smtp-server
+      mongodb:
+        condition: service_healthy
 
 volumes:
-  emails: 
+  emails:      # Stockage local des emails
+  mongo_data:  # Persistance des données MongoDB

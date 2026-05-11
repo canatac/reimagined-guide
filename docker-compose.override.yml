@@ -12,6 +12,12 @@ services:
       - KEY_PATH=/app/certs/${KEY_PATH:-localhost.key}
       - SMTP_USERNAME=${SMTP_USERNAME:-admin}
       - SMTP_PASSWORD=${SMTP_PASSWORD:-password123}
+      - MONGODB_USERNAME=${MONGODB_USERNAME:-admin}
+      - MONGODB_PASSWORD=${MONGODB_PASSWORD:-password123}
+      - MONGODB_CLUSTER_URL=${MONGODB_CLUSTER_URL:-mongodb}
+      - MONGODB_APP_NAME=${MONGODB_APP_NAME:-mailserver}
+      - MONGODB_DATABASE=${MONGODB_DATABASE:-mailserver}
+      - USE_MONGODB=${USE_MONGODB:-true}
       - RUST_LOG=${RUST_LOG:-debug}
 
   email-api:
@@ -27,8 +33,9 @@ services:
     environment:
       - IMAP_SERVER=${IMAP_SERVER:-0.0.0.0:143}
       - IMAP_SERVER_API_PORT=${IMAP_SERVER_API_PORT:-8080}
-      - MONGODB_USERNAME=${MONGODB_USERNAME:-}
-      - MONGODB_PASSWORD=${MONGODB_PASSWORD:-}
-      - MONGODB_CLUSTER_URL=${MONGODB_CLUSTER_URL:-}
+      - MONGODB_USERNAME=${MONGODB_USERNAME:-admin}
+      - MONGODB_PASSWORD=${MONGODB_PASSWORD:-password123}
+      - MONGODB_CLUSTER_URL=${MONGODB_CLUSTER_URL:-mongodb}
       - MONGODB_APP_NAME=${MONGODB_APP_NAME:-mailserver}
-      - RUST_LOG=${RUST_LOG:-debug} 
+      - MONGODB_DATABASE=${MONGODB_DATABASE:-mailserver}
+      - RUST_LOG=${RUST_LOG:-debug}
