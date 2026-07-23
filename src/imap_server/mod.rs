@@ -42,7 +42,7 @@ impl ImapServer {
                 eprintln!("Failed to send greeting; err = {:?}", e);
                 return Ok(());
             }
-            let logic = self.logic.clone();
+            let _logic = self.logic.clone();
             let sessions = self.sessions.clone();
             let mut server_clone = self.clone(); // Clone the server state
             tokio::spawn(async move {
@@ -479,103 +479,32 @@ impl ImapServer {
                         format!("{} NO COPY failed: User not authenticated\r\n", tag)
                     }
                 }
-                "APPEND" => {
-                    if command_parts.len() < 5 {
-                        return format!("{} BAD APPEND requires a mailbox name and message\r\n", tag);
-                    }
-                    println!("Command parts: {:?}", command_parts);
-                    let mailbox = command_parts[2].trim_matches('"');
-                    let message_size = command_parts[4].trim_matches(|c| c == '{' || c == '}').parse::<usize>().unwrap_or(0);
-
-                    if message_size == 0 {
-                        return format!("{} BAD APPEND failed: Message size is zero\r\n", tag);
-                    }
-
-                    // Ajoutez un délai pour attendre le contenu du message
-                    //sleep(Duration::from_millis(5000)).await;
-
-                    // Lire le contenu du message
-                    let mut message_content = vec![0; message_size];
-                    println!("Reading message content of size: {}", message_size);
-                    println!("Message content: {:?}", message_content);
-                    match socket.read_exact(&mut message_content).await {
-                        Ok(_) => {
-                            let message_str = String::from_utf8_lossy(&message_content);
-                            let (headers, body) = parse_email(&message_str);
-                            let to = headers.get("To").unwrap_or(&"unknown".to_string()).clone();
-                            let from = headers.get("From").unwrap_or(&"unknown".to_string()).clone();
-                            let subject = headers.get("Subject").unwrap_or(&"No Subject".to_string()).clone();
-
-                            if let Some(id) = session_id {
-                                let username = sessions.lock().unwrap().get(id).cloned();
-                                if let Some(user) = username {
-                                    let message = Email::new(&String::from(uuid::Uuid::new_v4()), &from, &to, &subject, &body);
-
-                                    match self.logic.store_email(&user, mailbox, &message).await {
-                                        Ok(_) => format!("{} OK APPEND completed\r\n", tag),
-                                        Err(_) => format!("{} NO APPEND failed: Internal error\r\n", tag),
-                                    }
-                                } else {
-                                    format!("{} NO APPEND failed: User not authenticated\r\n", tag)
-                                }
-                            } else {
-                                format!("{} NO APPEND failed: User not authenticated\r\n", tag)
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("Error reading message content: {:?}", e);
-                            format!("{} NO APPEND failed: Could not read message content\r\n", tag)
-                        }
-                    }
-                }
-                _ => return format!("{} BAD Command not recognized\r\n", tag),
+                _ => format!("{} BAD Command not recognized\r\n", tag),
             }
         }
     }
 }
 
-fn parse_email(message: &str) -> (HashMap<String, String>, String) {
-    println!("Parsing email: {}", message);
-    let mut headers = HashMap::new();
-    let mut lines = message.lines();
+fn parse_email(email_content: &str) -> (std::collections::HashMap<String, String>, String) {
+    let mut headers = std::collections::HashMap::new();
     let mut body = String::new();
+    let mut lines = email_content.lines();
+    let mut in_body = false;
 
-    // Parse headers
-    for line in &mut lines {
-        println!("Parsing line: {}", line);
-        if line.is_empty() {
-            break; // End of headers
-        }
-        if let Some((key, value)) = line.split_once(": ") {
-            headers.insert(key.to_string(), value.to_string());
-            println!("Parsed header: {} -> {}", key, value);
-        }
-    }
-
-    // Parse body
     for line in lines {
-        body.push_str(line);
-        body.push('\n');
-        println!("Parsed body line: {}", line);
+        if line.trim().is_empty() {
+            in_body = true;
+            continue;
+        }
+        if !in_body {
+            if let Some((key, value)) = line.split_once(':') {
+                headers.insert(key.trim().to_string(), value.trim().to_string());
+            }
+        } else {
+            body.push_str(line);
+            body.push_str("\n");
+        }
     }
-    println!("Parsed body: {}", body);
-    println!("Parsed headers: {:?}", headers);
-    println!("Parsed message: {}", message);
 
     (headers, body)
 }
-
-// Implement Clone for ImapServer if needed
-impl Clone for ImapServer {
-    fn clone(&self) -> Self {
-        ImapServer {
-            logic: self.logic.clone(),
-            sessions: self.sessions.clone(),
-            expecting_message: self.expecting_message,
-            message_size: self.message_size,
-            mailbox: self.mailbox.clone(),
-            tag: self.tag.clone(),
-        }
-    }
-}
-

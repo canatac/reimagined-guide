@@ -289,7 +289,7 @@ impl Logic {
         }
     }
 
-    pub async fn copy_messages(&self, username: &str, sequence_set: &str, target_mailbox: &str) -> Result<()> {
+    pub async fn copy_messages(&self, username: &str, sequence_set: &str, _target_mailbox: &str) -> Result<()> {
         #[cfg(not(test))]
         {
             let database_name = std::env::var("MONGODB_DATABASE").expect("MONGODB_DATABASE must be set");
@@ -454,7 +454,7 @@ impl Logic {
         }
     }
 
-    pub async fn list_subscribed_mailboxes(&self, username: &str, reference: &str, pattern: &str) -> Result<Vec<String>> {
+    pub async fn list_subscribed_mailboxes(&self, username: &str, _reference: &str, _pattern: &str) -> Result<Vec<String>> {
         #[cfg(not(test))]
         {
             let database_name = std::env::var("MONGODB_DATABASE").expect("MONGODB_DATABASE must be set");
