@@ -137,9 +137,10 @@ pub async fn send_outgoing_email(email: &Email) -> std::io::Result<()> {
         let mut root_store = RootCertStore::empty();
         
         // Load native root certificates
-        #[allow(clippy::unnecessary_literal_unwrap)]
-        for cert in load_native_certs() {
-            root_store.add_parsable_certificates([CertificateDer::from(cert.0)]);
+        if let Ok(certs) = load_native_certs() {
+            for cert in certs {
+                root_store.add_parsable_certificates([CertificateDer::from(cert.0)]);
+            }
         }
 
         // Add your misfits.ai certificate
