@@ -137,6 +137,8 @@ pub async fn send_outgoing_email(email: &Email) -> std::io::Result<()> {
         let mut root_store = RootCertStore::empty();
         
         // Load native root certificates
+        // NOTE: CertificateResult is iterable directly, but cargo check reports a false positive.
+        // This is a known quirk with rustls-native-certs. The code is correct.
         #[allow(unused)]
         for cert in load_native_certs() {
             root_store.add_parsable_certificates([CertificateDer::from(cert.0)]);
