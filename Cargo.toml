@@ -31,12 +31,12 @@ openssl = "0.10.66"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 tokio = { version = "1.53.1", features = ["full", "tracing"] }
-tokio-rustls = "0.26.4"
-rustls = { version = "0.23.42", default-features = false, features = ["std"] }
+tokio-rustls = "0.26.0"
+rustls = { version = "0.23.12", default-features = false, features = ["std"] }
 webpki-roots = "1.0.9"
 trust-dns-resolver = "0.23.2"
 clap = "4.6.4"
-reqwest = { version = "0.12.28", features = ["json"] }
+reqwest = { version = "0.13.4", features = ["json"] }
 actix-cors = "0.7.0"
 
 log = "0.4.33"
@@ -56,9 +56,9 @@ tempfile = "3.13.0"
 lazy_static = "1.4.0"
 constant_time_eq = "0.3.1"
 
-mongodb = "=3.2.5"
+mongodb = "3.8.0"
 futures-util = "0.3.31"
-warp = "0.3.7"
+warp = "0.4.3"
 
 chrono = { version = "0.4.38", features = ["serde"] }
 async-trait = "0.1.83"
