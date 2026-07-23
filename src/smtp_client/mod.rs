@@ -32,7 +32,6 @@ use tokio_rustls::client::TlsStream;
 use tokio::io::{AsyncWriteExt, AsyncReadExt};
 use trust_dns_resolver::config::{ResolverConfig, ResolverOpts};
 use trust_dns_resolver::TokioAsyncResolver;
-
 use tokio_rustls::TlsConnector;
 use tokio::time::timeout;
 use std::time::Duration;
@@ -138,9 +137,8 @@ pub async fn send_outgoing_email(email: &Email) -> std::io::Result<()> {
         let mut root_store = RootCertStore::empty();
         
         // Load native root certificates
-        let certs = rustls_native_certs::load_native_certs().expect("Failed to load native certificates");
-        for cert in certs {
-            root_store.add_parsable_certificates([CertificateDer::from(cert)]);
+        for cert in load_native_certs().map_err(|e| IoError::new(ErrorKind::Other, e))? {
+            root_store.add_parsable_certificates([CertificateDer::from(cert.0)]);
         }
 
         // Add your misfits.ai certificate
@@ -362,3 +360,21 @@ fn _format_email_address(addr: &str) -> String {
         addr.to_string()
     }
 }
+
+fn _validate_email_content(content: &str) -> Result<(), String> {
+    let lines: Vec<&str> = content.lines().collect();
+    if !lines[0].starts_with("From: <") || !lines[0].ends_with(">") {
+        return Err("Invalid From header".to_string());
+    }
+    if !lines[1].starts_with("To: <") || !lines[1].ends_with(">") {
+        return Err("Invalid To header".to_string());
+    }
+    if !lines[2].starts_with("Subject: ") {
+        return Err("Invalid Subject header".to_string());
+    }
+    if lines[3] != "" {
+        return Err("Missing blank line after headers".to_string());
+    }
+    Ok(())
+}
+
