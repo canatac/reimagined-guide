@@ -7,7 +7,7 @@ This project aims to create a robust, secure, and efficient SMTP server implemen
 
 ### 1.2 Key Features
 - Support for both plain text and TLS-encrypted connections
-- Asynchronous I/O operations using Tokio
+- Synchronous I/O operations (simplified architecture)
 - SMTP protocol compliance
 - Basic authentication mechanisms (AUTH LOGIN and AUTH PLAIN)
 - Email storage in a local directory
@@ -15,7 +15,7 @@ This project aims to create a robust, secure, and efficient SMTP server implemen
 
 ### 1.3 Technology Stack
 - Rust programming language
-- Tokio for asynchronous runtime
+
 - Rustls for TLS implementation
 - Base64 for encoding/decoding
 - Chrono for timestamp generation
@@ -25,7 +25,7 @@ This project aims to create a robust, secure, and efficient SMTP server implemen
 ## 2. System Architecture
 
 ### 2.1 High-Level Overview
-The SMTP server is built as a multi-threaded application that listens on two ports: one for plain text connections and another for TLS connections. It uses Tokio for asynchronous I/O operations, allowing it to handle multiple client connections efficiently.
+The SMTP server is built as a multi-threaded synchronous application that listens on two ports: one for plain text connections and another for TLS connections. It uses a minimal architecture without async/await, simplifying deployment and maintenance.
 
 ### 2.2 Component Diagram
 
@@ -114,11 +114,9 @@ This structure organizes the project into logical components, separating concern
 
 #### 3.1.1 TLS and Plain Text Connections
 The server uses two separate TCP listeners: one for TLS connections and one for plain text. The TLS listener uses Rustls for secure connections, while the plain text listener allows for unencrypted communication.
+#### 3.1.2 Synchronous I/O
 
-#### 3.1.2 Asynchronous I/O with Tokio
-Tokio is used to handle asynchronous I/O operations, allowing the server to handle multiple connections concurrently without blocking.
-
-#### 3.1.3 SMTP Protocol Handling
+The server now uses synchronous I/O operations, removing the dependency on Tokio. This simplifies the codebase and aligns with the project's preference for minimal, tested solutions.
 The server implements basic SMTP commands such as HELO/EHLO, MAIL FROM, RCPT TO, DATA, and QUIT. It processes these commands in the `process_command` function.
 
 ### 3.2 Email Processing
@@ -145,7 +143,7 @@ Errors are logged using the `log` crate, with different severity levels for vari
 
 
 ### 3.6 Concurrency and Performance
-The server utilizes Tokio's async runtime to handle multiple connections concurrently, improving overall performance and scalability.
+The server uses a thread-per-connection model for concurrency, ensuring predictable performance and simplified debugging.
 
 ## 4. Configuration
 
@@ -166,7 +164,9 @@ The server listens on two ports: one for TLS connections and one for plain text.
 - `SMTP_PASSWORD`: Password for authentication
 
 ### 4.3 Certificates and Keys
-The server requires a valid TLS certificate and private key for secure connections. These should be obtained from a trusted certificate authority and placed in a secure location on the server.
+For production deployments, it is recommended to use `stunnel` for TLS termination instead of embedding TLS directly in the server code. This simplifies the server architecture and improves security.
+
+If you choose to use embedded TLS, obtain certificates from a trusted certificate authority and place them in a secure location on the server.
 
 ## 5. Deployment
 
@@ -262,6 +262,13 @@ To update the server, pull the latest changes from the repository and rebuild. E
 - TLS: Transport Layer Security
 - AUTH LOGIN: An SMTP authentication method using base64-encoded credentials
 - AUTH PLAIN: An SMTP authentication method using a single base64-encoded string
+
+## 15. Changelog
+
+### 2026-07-23
+- **Upgrade dependencies** to latest versions (commit `e23858c`).
+- **Refactor SMTP server** to synchronous code (removes Tokio dependency).
+- **Update TLS configuration** to use `stunnel` for TLS termination (recommended for production).
 
 ## 14. References and Resources
 - [Rust Documentation](https://doc.rust-lang.org/book/)
