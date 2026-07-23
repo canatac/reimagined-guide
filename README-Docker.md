@@ -283,6 +283,59 @@ netstat -tlnp | grep -E ':(25|8025|8465|8000|8443|143|993)'
 nmap -p 25,8025,8465,8000,8443,143,993 localhost
 ```
 
+## 🗄️ Déploiement local (sans MongoDB Atlas)
+
+Le projet inclut un container MongoDB local qui démarre automatiquement avec `docker-compose up`. Aucun compte MongoDB Atlas n'est nécessaire.
+
+### Différence entre mode Atlas et mode local
+
+| Variable `MONGODB_CLUSTER_URL` | Mode utilisé | URI générée |
+|---|---|---|
+| Contient `.mongodb.net` (ex: `cluster0.abc.mongodb.net`) | **Atlas** | `mongodb+srv://...` |
+| Valeur simple (ex: `mongodb`) | **Local** | `mongodb://...` avec `authSource=admin` |
+
+### Démarrage rapide (100% local)
+
+```bash
+# 1. Copier le fichier de configuration
+cp env.example .env
+
+# 2. Générer les certificats auto-signés
+mkdir -p certs
+openssl req -x509 -newkey rsa:2048 -keyout certs/localhost.key -out certs/localhost.crt \
+  -days 365 -nodes -subj "/CN=localhost"
+cp certs/localhost.crt certs/fullchain.pem
+cp certs/localhost.key certs/privkey.pem
+
+# 3. Démarrer tous les services (MongoDB inclus)
+docker-compose up --build
+```
+
+MongoDB démarrera automatiquement, sera initialisé avec les collections et index nécessaires, et les serveurs SMTP/IMAP s'y connecteront sans aucune configuration Atlas.
+
+### Variables d'environnement MongoDB
+
+```bash
+# Pour MongoDB local (défaut dans env.example)
+MONGODB_USERNAME=admin
+MONGODB_PASSWORD=password123
+MONGODB_CLUSTER_URL=mongodb        # Nom du service Docker
+MONGODB_APP_NAME=mailserver
+MONGODB_DATABASE=mailserver
+
+# Pour MongoDB Atlas
+MONGODB_CLUSTER_URL=cluster0.abc.mongodb.net  # Format Atlas → utilise mongodb+srv://
+```
+
+### Collections créées automatiquement
+
+Le script `scripts/init-mongo.js` est exécuté au premier démarrage du container MongoDB et crée :
+- `users` — comptes utilisateurs (index unique sur `username`)
+- `emails` — emails reçus avec flags IMAP
+- `mailboxes` — boîtes aux lettres IMAP (index unique sur `user_id + name`)
+- `subscriptions` — abonnements aux mailboxes
+- `archive` — emails archivés
+
 ## 🔧 Dépannage
 
 ### Problèmes courants
@@ -315,7 +368,17 @@ sudo systemctl stop postfix  # si postfix utilise le port 25
 ```
 
 #### 4. Problèmes de MongoDB
-Si vous n'utilisez pas MongoDB, commentez les variables MongoDB dans le `.env` ou utilisez une base de données locale.
+```bash
+# Vérifier l'état du container MongoDB
+docker-compose logs mongodb
+
+# Vérifier que MongoDB est healthy
+docker-compose ps mongodb
+
+# Pour utiliser MongoDB Atlas à la place du container local,
+# modifier MONGODB_CLUSTER_URL dans .env :
+# MONGODB_CLUSTER_URL=your_cluster.mongodb.net
+```
 
 ### Commandes utiles
 

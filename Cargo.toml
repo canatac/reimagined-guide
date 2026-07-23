@@ -3,6 +3,8 @@ name = "simple-smtp-server"
 version = "0.2.0"
 authors = ["Your Name <your.email@example.com>"]
 edition = "2021"
+autobins = false
+
 [[bin]]
 name = "smtp_server"
 path = "src/bin/smtp_server.rs"
@@ -14,6 +16,10 @@ path = "src/bin/email_api.rs"
 [[bin]]
 name = "imap_server"
 path = "src/bin/imap_server.rs"
+
+[[bin]]
+name = "client"
+path = "src/bin/client.rs"
 
 [lib]
 name = "simple_smtp_server"
@@ -50,9 +56,9 @@ tempfile = "3.13.0"
 lazy_static = "1.4.0"
 constant_time_eq = "0.3.1"
 
-futures-util = "0.3.33"
-bson = "2.11.0"
-mongodb = { version = "3.1.0", features = ["sync"] }
+mongodb = "=3.2.5"
+futures-util = "0.3.31"
+warp = "0.3.7"
 
 chrono = { version = "0.4.38", features = ["serde"] }
 async-trait = "0.1.83"

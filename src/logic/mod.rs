@@ -1,14 +1,12 @@
-use serde::{Serialize, Deserialize};
+use mongodb::{Client, bson::doc, error::Result};
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use chrono::Utc;
-use crate::entities::Email;
-use std::error::Error;
-use bson::doc;
-use mongodb::Client;
 use futures_util::TryStreamExt;
+use mongodb::error::Error;
+use chrono::{Utc};
+use crate::entities::Email;
+use mongodb::bson;
 
-
-type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync>>;
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct User {
     pub username: String,
@@ -125,7 +123,7 @@ impl Logic {
             let collection = self.client.database(&database_name).collection::<Email>("emails");
             let filter = doc! { "user_id": username, "mailbox": mailbox };
             let cursor = collection.find(filter).await?;
-            cursor.try_collect::<Vec<_>>().await.map_err(|e| Box::<dyn std::error::Error + Send + Sync>::from(e))
+            cursor.try_collect().await
         }
         #[cfg(test)]
         {
@@ -141,7 +139,7 @@ impl Logic {
             let database_name = std::env::var("MONGODB_DATABASE").expect("MONGODB_DATABASE must be set");
             let collection = self.client.database(&database_name).collection::<Email>("emails");
             let filter = doc! { "user_id": username, "id": email_id };
-            collection.find_one(filter).await.map_err(|e| Box::<dyn std::error::Error + Send + Sync>::from(e))
+            collection.find_one(filter).await
         }
         #[cfg(test)]
         {
@@ -191,12 +189,12 @@ impl Logic {
             let archive_collection = self.client.database(&database_name).collection::<Email>("archive");
 
             let filter = doc! { "user_id": username, "id": email_id };
-            if let Some(document) = collection.find_one(filter.clone()).await.map_err(|e| Box::<dyn std::error::Error + Send + Sync>::from(e))? {
+            if let Some(document) = collection.find_one(filter.clone()).await? {
                 archive_collection.insert_one(document).await?;
                 collection.delete_one(filter).await?;
                 Ok(())
             } else {
-                Err(Box::<dyn std::error::Error>::from(std::io::Error::new(
+                Err(Error::from(std::io::Error::new(
                     std::io::ErrorKind::NotFound,
                     "Email not found",
                 )))
@@ -215,10 +213,10 @@ impl Logic {
             let collection = self.client.database(&database_name).collection::<Mailbox>("mailboxes");
 
             let filter = doc! { "user_id": username, "name": mailbox };
-            if let Some(mailbox) = collection.find_one(filter).await.map_err(|e| Box::<dyn std::error::Error + Send + Sync>::from(e))? {
+            if let Some(mailbox) = collection.find_one(filter).await? {
                 Ok(mailbox)
             } else {
-                Err(Box::<dyn std::error::Error>::from(std::io::Error::new(
+                Err(Error::from(std::io::Error::new(
                     std::io::ErrorKind::NotFound,
                     "Mailbox not found",
                 )))
@@ -275,7 +273,7 @@ impl Logic {
             let collection = self.client.database(&database_name).collection::<Email>("emails");
 
             let filter = doc! { "user_id": username, "flags": "\\Deleted" };
-            let mut cursor = collection.find(filter.clone(), None).await?;
+            let mut cursor = collection.find(filter.clone()).await?;
             let mut deleted_sequence_numbers = Vec::new();
 
             while let Some(email) = cursor.try_next().await? {
@@ -298,9 +296,9 @@ impl Logic {
             let collection = self.client.database(&database_name).collection::<Email>("emails");
 
             let filter = doc! { "user_id": username, "sequence_number": sequence_set.parse::<u32>().unwrap_or(0) };
-            if let Some(mut email) = collection.find_one(filter, None).await? {
+            if let Some(mut email) = collection.find_one(filter).await? {
                 email.id = format!("{}_{}", email.id, Utc::now().timestamp());
-                collection.insert_one(email, None).await?;
+                collection.insert_one(email).await?;
             }
             Ok(())
         }
@@ -357,7 +355,7 @@ impl Logic {
 
             // Vérifiez si la boîte aux lettres existe déjà
             let mailbox_filter = doc! { "name": mailbox, "user_id": username };
-            if collection.find_one(mailbox_filter.clone()).await.map_err(|e| Box::<dyn std::error::Error + Send + Sync>::from(e))?.is_none() {
+            if collection.find_one(mailbox_filter.clone()).await?.is_none() {
                 println!("Creating mailbox: {}", mailbox);
                 let new_mailbox = Mailbox {
                     name: mailbox.to_string(),
