@@ -10,6 +10,10 @@ Key features:
 - Supports basic authentication (AUTH LOGIN and AUTH PLAIN)
 - Stores received emails in a local directory
 
+Known Issues:
+- **DATA command handling**: The server closes the connection unexpectedly after receiving email data.
+  This is a known bug and should be fixed in a future update.
+
 Usage:
 To run the SMTP server, use the following command from the project root:
     cargo run --bin smtp_server
