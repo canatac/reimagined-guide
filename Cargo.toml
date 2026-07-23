@@ -1,8 +1,8 @@
 [package]
 name = "simple-smtp-server"
 version = "0.2.0"
+authors = ["Your Name <your.email@example.com>"]
 edition = "2021"
-
 [[bin]]
 name = "smtp_server"
 path = "src/bin/smtp_server.rs"
@@ -20,44 +20,43 @@ name = "simple_smtp_server"
 path = "src/lib.rs"
 
 [dependencies]
-actix-web = { version = "4.3", features = ["openssl"] }
-openssl = "0.10"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-tokio = { version = "1", features = ["full", "tracing"] }
-tokio-rustls = "0.26.0"
-rustls = { version = "0.23.5", default-features = false, features = ["std"] }
-webpki-roots = "0.25.2"
+actix-web = { version = "4.11.0", features = ["openssl"] }
+openssl = "0.10.66"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+tokio = { version = "1.53.1", features = ["full", "tracing"] }
+tokio-rustls = "0.26.4"
+rustls = { version = "0.23.42", default-features = false, features = ["std"] }
+webpki-roots = "1.0.9"
 trust-dns-resolver = "0.23.2"
-clap = "3.0"
-reqwest = { version = "0.11", features = ["json"] }
+clap = "4.6.4"
+reqwest = { version = "0.12.28", features = ["json"] }
 actix-cors = "0.7.0"
 
-log = "0.4.22"
-env_logger = "0.11.5"
-rustls-native-certs = "0.6.2"
+log = "0.4.33"
+env_logger = "0.11.11"
+rustls-native-certs = "0.8.4"
 
-rustls-pemfile = "2.0"
-tracing = "0.1"
-tracing-subscriber = "0.3"
-console-subscriber = "0.1.5"
+rustls-pemfile = "2.0.0"
+tracing = "0.1.44"
+tracing-subscriber = "0.3.18"
+console-subscriber = "0.1.10"
 dotenv = "0.15.0"
 base64 = "0.22.1"
 mailparse = "0.15.0"
 lettre = "0.11.8"
 pem = "3.0.4"
-tempfile = "3.2"
+tempfile = "3.13.0"
 lazy_static = "1.4.0"
-constant_time_eq = "0.3.1" 
+constant_time_eq = "0.3.1"
 
-mongodb = { version = "2.0", features = ["tokio-runtime"] }
-futures-util = "0.3.31"
-warp = "0.3.7"
+futures-util = "0.3.33"
+bson = "2.11.0"
+mongodb = { version = "3.1.0", features = ["sync"] }
 
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { version = "0.4.38", features = ["serde"] }
 async-trait = "0.1.83"
-jsonwebtoken = "7.2"
-uuid = "1.11.0"
+uuid = { version = "1.11.0", features = ["v4"] }
 
 [dev-dependencies]
 mockall = "0.11.0"

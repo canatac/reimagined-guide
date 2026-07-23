@@ -32,7 +32,8 @@ use tokio_rustls::client::TlsStream;
 use tokio::io::{AsyncWriteExt, AsyncReadExt};
 use trust_dns_resolver::config::{ResolverConfig, ResolverOpts};
 use trust_dns_resolver::TokioAsyncResolver;
-use clap::{App, Arg};
+use clap::{Arg, Command};
+use clap::value_parser;
 use tokio_rustls::TlsConnector;
 use tokio::time::timeout;
 use std::time::Duration;
@@ -141,8 +142,9 @@ pub async fn send_outgoing_email(email: &Email) -> std::io::Result<()> {
         let mut root_store = RootCertStore::empty();
         
         // Load native root certificates
-        for cert in load_native_certs().map_err(|e| IoError::new(ErrorKind::Other, e))? {
-            root_store.add_parsable_certificates([CertificateDer::from(cert.0)]);
+        let certs = rustls_native_certs::load_native_certs().expect("Failed to load native certificates");
+        for cert in certs {
+            root_store.add_parsable_certificates([CertificateDer::from(cert)]);
         }
 
         // Add your misfits.ai certificate
@@ -384,48 +386,46 @@ fn _validate_email_content(content: &str) -> Result<(), String> {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-
     dotenv().ok();
 
-    let matches = App::new("Email Sender")
+    let matches = Command::new("Email Sender")
         .version("1.0")
         .author("Your Name")
         .about("Sends emails via SMTP")
-        .arg(Arg::with_name("from")
+        .arg(Arg::new("from")
             .short('f')
             .long("from")
             .value_name("FROM")
             .help("Sets the sender email address")
             .required(true)
-            .takes_value(true))
-        .arg(Arg::with_name("to")
+            .value_parser(value_parser!(String)))
+        .arg(Arg::new("to")
             .short('t')
             .long("to")
             .value_name("TO")
             .help("Sets the recipient email address")
             .required(true)
-            .takes_value(true))
-        .arg(Arg::with_name("subject")
+            .value_parser(value_parser!(String)))
+        .arg(Arg::new("subject")
             .short('s')
             .long("subject")
             .value_name("SUBJECT")
             .help("Sets the email subject")
             .required(true)
-            .takes_value(true))
-        .arg(Arg::with_name("body")
+            .value_parser(value_parser!(String)))
+        .arg(Arg::new("body")
             .short('b')
             .long("body")
             .value_name("BODY")
             .help("Sets the email body")
             .required(true)
-            .takes_value(true))
+            .value_parser(value_parser!(String)))
         .get_matches();
 
-    let from = matches.value_of("from").unwrap();
-    let to = matches.value_of("to").unwrap();
-    let subject = matches.value_of("subject").unwrap();
-    let body = matches.value_of("body").unwrap();
-
+    let from = matches.get_one::<String>("from").unwrap();
+    let to = matches.get_one::<String>("to").unwrap();
+    let subject = matches.get_one::<String>("subject").unwrap();
+    let body = matches.get_one::<String>("body").unwrap();
     // Create the email content
     let email_content = format!(
         "From: {}\r\nTo: {}\r\nSubject: {}\r\n\r\n{}",
