@@ -1,17 +1,17 @@
-# Rust SMTP Server Documentation
+# Rust SMTP/IMAP Server Documentation
 
 ## 1. Introduction
 
 ### 1.1 Purpose of the Project
-This project implements a **robust, secure, and efficient SMTP server** in Rust. It supports:
+This project implements **robust, secure, and efficient SMTP and IMAP servers** in Rust. It supports:
 - **Plain text and TLS-encrypted connections** (with `stunnel` recommended for production).
 - **MongoDB and local file storage** for emails (configurable via `USE_MONGODB`).
 - **Async I/O** (Tokio-based) for high concurrency.
-- **SMTP authentication** (AUTH LOGIN and AUTH PLAIN).
+- **SMTP/IMAP authentication** (AUTH LOGIN and AUTH PLAIN).
 - **DKIM signature handling** (optional).
 
 ### 1.2 Key Features
-- **Async SMTP server** (Tokio runtime) for high performance.
+- **Async SMTP/IMAP servers** (Tokio runtime) for high performance.
 - **MongoDB integration** (Atlas or local Docker Compose).
 - **TLS support** (Rustls) with configurable certificates.
 - **Authentication** (AUTH LOGIN/PLAIN) with environment variables.
@@ -32,7 +32,7 @@ This project implements a **robust, secure, and efficient SMTP server** in Rust.
 
 ## 2. Recent Updates (2026-07-23)
 - **MongoDB integration**: Added support for MongoDB (Atlas or local Docker Compose). Toggle via `USE_MONGODB=true/false`.
-- **Async SMTP server**: Refactored to use Tokio for async I/O (improves concurrency).
+- **Async SMTP/IMAP servers**: Refactored to use Tokio for async I/O (improves concurrency).
 - **Dependency updates**: Addressed GitHub vulnerabilities (updated `mongodb`, `rustls`, `reqwest`, `warp`).
 - **DKIM support**: Added optional DKIM signature handling.
 - **Docker Compose**: Added `mongodb` service and health checks.
@@ -43,16 +43,16 @@ This project implements a **robust, secure, and efficient SMTP server** in Rust.
 ## 3. System Architecture
 
 ### 3.1 High-Level Overview
-The SMTP server is built as an **async application** (Tokio) that listens on two ports:
-- **TLS port** (default: `8465`) for secure connections.
-- **Plain text port** (default: `8025`) for unencrypted connections (supports STARTTLS).
+The project consists of **two async servers** (Tokio-based):
+- **SMTP Server**: Listens on ports `8025` (plain) and `8465` (TLS).
+- **IMAP Server**: Listens on port `143` (plain) and `993` (TLS).
 
 ### 3.2 Component Diagram
-![SMTP Server Component Diagram](./img/2024-09-09-084653.svg)
+![SMTP/IMAP Server Component Diagram](./img/2024-09-09-084653.svg)
 
 **Components:**
-1. **TLS Listener**: Handles incoming TLS connections (port `8465`).
-2. **Plain Text Listener**: Handles plain text connections (port `8025`).
+1. **TLS Listener**: Handles incoming TLS connections (SMTP: `8465`, IMAP: `993`).
+2. **Plain Text Listener**: Handles plain text connections (SMTP: `8025`, IMAP: `143`).
 3. **Connection Handler**: Manages incoming connections (async).
 4. **Auth Handler**: Implements AUTH LOGIN and AUTH PLAIN.
 5. **Email Processor**: Parses and processes emails (with DKIM support).
@@ -62,8 +62,8 @@ The SMTP server is built as an **async application** (Tokio) that listens on two
 ### 3.3 Data Flow
 1. Client connects (plain text or TLS).
 2. Server authenticates (if required).
-3. Client sends email data.
-4. Server processes and stores the email (MongoDB or local).
+3. Client sends/retrieves email data.
+4. Server processes and stores/retrieves the email (MongoDB or local).
 5. Server sends confirmation to the client.
 
 ### 3.4 Security Considerations
@@ -78,16 +78,16 @@ The SMTP server is built as an **async application** (Tokio) that listens on two
 
 ### `src/`
 - **`bin/`**: Binary entry points.
-  - `smtp_server.rs`: Main SMTP server (async, Tokio).
+  - `smtp_server.rs`: **Async SMTP server** (Tokio, Rustls).
   - `email_api.rs`: Email API server (Warp).
-  - `imap_server.rs`: IMAP server (optional).
+  - `imap_server.rs`: **Async IMAP server** (Tokio, MongoDB).
   - `client.rs`: SMTP client CLI.
 - **`logic/`**: Core business logic (MongoDB, email processing).
 - **`smtp_client/`**: SMTP client library (async, Rustls).
-- **`imap_server/`**: IMAP server implementation (optional).
+- **`imap_server/`**: IMAP server implementation (async, Tokio).
 
 ### Other Files
-- **`docker-compose.yml`**: Docker Compose for MongoDB and SMTP server.
+- **`docker-compose.yml`**: Docker Compose for MongoDB, SMTP, and IMAP servers.
 - **`docker-compose.override.yml`**: Development overrides.
 - **`env.example`**: Environment variable template.
 - **`scripts/init-mongo.js`**: MongoDB initialization script.
@@ -107,6 +107,10 @@ CERT_PATH=localhost.crt
 KEY_PATH=localhost.key
 SMTP_USERNAME=admin
 SMTP_PASSWORD=password123
+
+# IMAP Server
+IMAP_SERVER=0.0.0.0:143
+IMAP_TLS_ADDR=0.0.0.0:993
 
 # MongoDB (local or Atlas)
 MONGODB_USERNAME=admin
@@ -138,7 +142,7 @@ RUST_LOG=debug
 ### 6.1 System Requirements
 - **Rust 1.70+** (2021 edition).
 - **Docker** (for MongoDB).
-- **Network access** for SMTP ports (`8025`, `8465`).
+- **Network access** for SMTP (`8025`, `8465`) and IMAP (`143`, `993`).
 
 ### 6.2 Installation
 ```bash
@@ -152,12 +156,13 @@ cp env.example .env
 
 # Build and run
 cargo build --release
-cargo run --bin smtp_server
+cargo run --bin smtp_server &  # Async SMTP Server
+cargo run --bin imap_server &  # Async IMAP Server
 ```
 
 ### 6.3 Docker Compose
 ```bash
-# Start MongoDB and SMTP server
+# Start MongoDB, SMTP, and IMAP servers
 docker compose up -d
 ```
 
@@ -175,11 +180,18 @@ swaks --to recipient@example.com --from test@example.com --server localhost:8025
 docker compose exec mongodb mongosh --eval "use mailserver; db.emails.find().pretty()"
 ```
 
+### 7.3 Test IMAP Server
+```bash
+telnet localhost 143
+# or
+openssl s_client -connect localhost:993 -crlf
+```
+
 ---
 
 ## 8. Security Best Practices
 - **Use `stunnel` for TLS** in production (simpler and more secure).
-- **Rotate credentials** regularly (MongoDB, SMTP auth).
+- **Rotate credentials** regularly (MongoDB, SMTP/IMAP auth).
 - **Enable DKIM** for email signing (optional).
 - **Monitor logs** for suspicious activity.
 
@@ -190,13 +202,14 @@ docker compose exec mongodb mongosh --eval "use mailserver; db.emails.find().pre
 |-------|----------|
 | **MongoDB connection failed** | Check `MONGODB_CLUSTER_URL` and credentials. |
 | **TLS handshake failed** | Verify `CERT_PATH` and `KEY_PATH` in `.env`. |
-| **Authentication failed** | Check `SMTP_USERNAME` and `SMTP_PASSWORD`. |
-| **Port already in use** | Change `SMTP_TLS_ADDR` or `SMTP_PLAIN_ADDR`. |
+| **Authentication failed** | Check `SMTP_USERNAME`/`IMAP_USERNAME` and passwords. |
+| **Port already in use** | Change `SMTP_TLS_ADDR`, `SMTP_PLAIN_ADDR`, or `IMAP_SERVER`. |
+| **IMAP Server not responding** | Check `IMAP_SERVER` in `.env` and MongoDB connection. |
 
 ---
 
 ## 10. Future Enhancements
-- **IMAP server** (in progress).
+- **IMAP server improvements** (full RFC compliance).
 - **Spam filtering** (Rspamd integration).
 - **Web UI** for email management.
 
@@ -206,5 +219,6 @@ docker compose exec mongodb mongosh --eval "use mailserver; db.emails.find().pre
 - [Rust Documentation](https://doc.rust-lang.org/book/)
 - [Tokio Documentation](https://tokio.rs/docs/overview/)
 - [SMTP RFC](https://tools.ietf.org/html/rfc5321)
+- [IMAP RFC](https://tools.ietf.org/html/rfc3501)
 - [MongoDB Rust Driver](https://docs.rs/mongodb/latest/mongodb/)
 - [Rustls Documentation](https://docs.rs/rustls/)
