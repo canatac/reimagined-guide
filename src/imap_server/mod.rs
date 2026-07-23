@@ -8,6 +8,7 @@ use tokio::time::sleep;
 use uuid::Uuid;
 use crate::entities::Email;
 
+#[derive(Clone)]
 pub struct ImapServer {
     logic: Arc<Logic>,
     sessions: Arc<Mutex<HashMap<String, String>>>, // Track active sessions with user info
@@ -82,7 +83,7 @@ impl ImapServer {
         command: &[u8],
         sessions: &Arc<Mutex<HashMap<String, String>>>,
         session_id: &mut Option<String>,
-        socket: &mut tokio::net::TcpStream,
+        _socket: &mut tokio::net::TcpStream,
     ) -> String {
         let command_str = String::from_utf8_lossy(command);
         println!("Processing command: {}", command_str.trim());
@@ -488,7 +489,7 @@ impl ImapServer {
 fn parse_email(email_content: &str) -> (std::collections::HashMap<String, String>, String) {
     let mut headers = std::collections::HashMap::new();
     let mut body = String::new();
-    let mut lines = email_content.lines();
+    let lines = email_content.lines();
     let mut in_body = false;
 
     for line in lines {

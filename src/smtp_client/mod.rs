@@ -137,11 +137,9 @@ pub async fn send_outgoing_email(email: &Email) -> std::io::Result<()> {
         let mut root_store = RootCertStore::empty();
         
         // Load native root certificates
-        // NOTE: CertificateResult is iterable directly, but cargo check reports a false positive.
-        // Load native root certificates
-        #[allow(unused)]
-        for cert in load_native_certs().unwrap_or_default() {
-            root_store.add_parsable_certificates([CertificateDer::from(cert.0)]);
+        // CertificateResult.certs is Vec<CertificateDer<'static>>; errors are ignored here.
+        for cert in load_native_certs().certs {
+            root_store.add_parsable_certificates([cert]);
         }
 
         // Add your misfits.ai certificate
