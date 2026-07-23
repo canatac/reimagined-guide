@@ -2,6 +2,7 @@
 name = "simple-smtp-server"
 version = "0.2.0"
 edition = "2021"
+autobins = false
 
 [[bin]]
 name = "smtp_server"
@@ -14,6 +15,10 @@ path = "src/bin/email_api.rs"
 [[bin]]
 name = "imap_server"
 path = "src/bin/imap_server.rs"
+
+[[bin]]
+name = "client"
+path = "src/bin/client.rs"
 
 [lib]
 name = "simple_smtp_server"
@@ -50,7 +55,7 @@ tempfile = "3.2"
 lazy_static = "1.4.0"
 constant_time_eq = "0.3.1" 
 
-mongodb = { version = "2.0", features = ["tokio-runtime"] }
+mongodb = "=3.2.5"
 futures-util = "0.3.31"
 warp = "0.3.7"
 
