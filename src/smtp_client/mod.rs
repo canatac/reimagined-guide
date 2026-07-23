@@ -137,7 +137,8 @@ pub async fn send_outgoing_email(email: &Email) -> std::io::Result<()> {
         let mut root_store = RootCertStore::empty();
         
         // Load native root certificates
-        for cert in load_native_certs().map_err(|e| IoError::new(ErrorKind::Other, e))? {
+        #[allow(clippy::unnecessary_literal_unwrap)]
+        for cert in load_native_certs() {
             root_store.add_parsable_certificates([CertificateDer::from(cert.0)]);
         }
 
