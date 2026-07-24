@@ -58,8 +58,7 @@ jobs:
           access-key: ${{ secrets.SCW_ACCESS_KEY }}
           secret-key: ${{ secrets.SCW_SECRET_KEY }}
           default-project-id: ${{ secrets.SCW_DEFAULT_PROJECT_ID }}
-          default-region: fr-par
-          default-zone: fr-par-1
+          default-organization-id: ${{ secrets.SCW_DEFAULT_ORGANIZATION_ID }}
           save-config: true
           export-config: true
 
@@ -98,8 +97,7 @@ jobs:
           access-key: ${{ secrets.SCW_ACCESS_KEY }}
           secret-key: ${{ secrets.SCW_SECRET_KEY }}
           default-project-id: ${{ secrets.SCW_DEFAULT_PROJECT_ID }}
-          default-region: fr-par
-          default-zone: fr-par-1
+          default-organization-id: ${{ secrets.SCW_DEFAULT_ORGANIZATION_ID }}
           save-config: true
           export-config: true
 
