@@ -25,7 +25,7 @@ ENV CARGO_BUILD_JOBS=2
 RUN cargo build --release --bins
 
 # Stage 2: Final image
-FROM debian:bullseye-slim
+FROM debian:bookworm-slim
 
 ARG USER=default_user
 ARG UID=10001

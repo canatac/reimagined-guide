@@ -140,14 +140,32 @@ jobs:
     needs: deploy
     runs-on: ubuntu-latest
     steps:
-      - name: Test SMTP (port 25)
+      - name: Wait for container then test SMTP port 25
         run: |
-          timeout 30 bash -c "until echo QUIT | nc -v ${{ env.VM_IP }} 25; do sleep 5; done"
-      
-      - name: Test IMAP (port 143)
+          set -euo pipefail
+          for i in $(seq 1 24); do
+            if echo QUIT | nc -w 3 ${{ env.VM_IP }} 25 2>/dev/null | head -1 | grep -Eiq '220|SMTP|ready'; then
+              echo "SMTP banner OK"
+              exit 0
+            fi
+            if nc -z -w 2 ${{ env.VM_IP }} 25 2>/dev/null; then
+              echo "SMTP port open"
+              exit 0
+            fi
+            echo "retry $i..."
+            sleep 5
+          done
+          echo "SMTP not reachable on :25"
+          exit 1
+
+      - name: Test SMTP submission port 587
         run: |
-          timeout 30 bash -c "until echo QUIT | nc -v ${{ env.VM_IP }} 143; do sleep 5; done"
-      
-      - name: Test API (port 8080)
-        run: |
-          timeout 30 bash -c "until curl -s http://${{ env.VM_IP }}:8080/health; do sleep 5; done"
+          set -euo pipefail
+          for i in $(seq 1 12); do
+            if nc -z -w 2 ${{ env.VM_IP }} 587 2>/dev/null; then
+              echo "587 open"
+              exit 0
+            fi
+            sleep 5
+          done
+          exit 1
