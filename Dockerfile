@@ -49,14 +49,27 @@ COPY --from=builder /app/target/release/imap_server /usr/local/bin/imap_server
 
 # Create DKIM directory and copy keys (if they exist)
 RUN mkdir -p /app/dkim/
-COPY --chown=${USER}:${USER} dkim-private.pem /app/dkim/ 2>/dev/null || true
-COPY --chown=${USER}:${USER} dkim-public.pem /app/dkim/ 2>/dev/null || true
 
 # Application directory and persistent data volume
 RUN mkdir -p /app/emails && chown -R ${USER}:${USER} /app/emails
 VOLUME /app/emails 
 # The original VOLUME was /data. The README mentions emails are stored in "./emails"
 # Let's use /app/emails for clarity, assuming this is the intended data volume.
+
+# Self-signed certs for staging TLS listeners (override with real certs in prod)
+USER root
+RUN openssl req -x509 -newkey rsa:2048 -nodes       -keyout /app/localhost.key -out /app/localhost.crt -days 365       -subj "/CN=mail.misfits.ai"     && chown ${USER}:${USER} /app/localhost.key /app/localhost.crt     && mkdir -p /app/emails /app/dkim     && chown -R ${USER}:${USER} /app/emails /app/dkim
+USER ${USER}
+WORKDIR /app
+
+ENV USE_MONGODB=false \
+    SMTP_PLAIN_ADDR=0.0.0.0:8025 \
+    SMTP_TLS_ADDR=0.0.0.0:8465 \
+    CERT_PATH=/app/localhost.crt \
+    KEY_PATH=/app/localhost.key \
+    SMTP_USERNAME=admin \
+    SMTP_PASSWORD=changeme \
+    RUST_LOG=info
 
 USER ${USER}
 WORKDIR /app

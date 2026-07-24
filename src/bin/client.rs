@@ -1,5 +1,5 @@
 use chrono::Utc;
-use clap::{App, Arg};
+use clap::{Arg, Command};
 use dotenv::dotenv;
 use simple_smtp_server::entities::Email;
 use simple_smtp_server::smtp_client::send_outgoing_email;
@@ -26,52 +26,48 @@ fn validate_email_content(content: &str) -> Result<(), String> {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv().ok();
 
-    let matches = App::new("Email Sender")
+    let matches = Command::new("Email Sender")
         .version("1.0")
         .author("Your Name")
         .about("Sends emails via SMTP")
         .arg(
-            Arg::with_name("from")
+            Arg::new("from")
                 .short('f')
                 .long("from")
                 .value_name("FROM")
                 .help("Sets the sender email address")
-                .required(true)
-                .takes_value(true),
+                .required(true),
         )
         .arg(
-            Arg::with_name("to")
+            Arg::new("to")
                 .short('t')
                 .long("to")
                 .value_name("TO")
                 .help("Sets the recipient email address")
-                .required(true)
-                .takes_value(true),
+                .required(true),
         )
         .arg(
-            Arg::with_name("subject")
+            Arg::new("subject")
                 .short('s')
                 .long("subject")
                 .value_name("SUBJECT")
                 .help("Sets the email subject")
-                .required(true)
-                .takes_value(true),
+                .required(true),
         )
         .arg(
-            Arg::with_name("body")
+            Arg::new("body")
                 .short('b')
                 .long("body")
                 .value_name("BODY")
                 .help("Sets the email body")
-                .required(true)
-                .takes_value(true),
+                .required(true),
         )
         .get_matches();
 
-    let from = matches.value_of("from").unwrap();
-    let to = matches.value_of("to").unwrap();
-    let subject = matches.value_of("subject").unwrap();
-    let body = matches.value_of("body").unwrap();
+    let from = matches.get_one::<String>("from").unwrap();
+    let to = matches.get_one::<String>("to").unwrap();
+    let subject = matches.get_one::<String>("subject").unwrap();
+    let body = matches.get_one::<String>("body").unwrap();
 
     let email_content = format!(
         "From: {}\r\nTo: {}\r\nSubject: {}\r\n\r\n{}",

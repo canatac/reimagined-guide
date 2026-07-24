@@ -304,7 +304,7 @@ impl Logic {
         }
         #[cfg(test)]
         {
-            self.client.copy_messages(sequence_set, target_mailbox).await
+            self.client.copy_messages(sequence_set, _target_mailbox).await
         }
     }
 
@@ -472,7 +472,7 @@ impl Logic {
         }
         #[cfg(test)]
         {
-            self.client.list_subscribed_mailboxes(username, reference, pattern).await
+            self.client.list_subscribed_mailboxes(username, _reference, _pattern).await
         }
     }
 

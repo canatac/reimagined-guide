@@ -213,7 +213,7 @@ async fn handle_tls_client(tls_stream: TlsStream<TcpStream>, logic: Arc<Logic>, 
                             dkim_signature: current_email.dkim_signature.clone(),
                         };
                         // Check storage preference
-                        let use_mongodb = env::var("USE_MONGODB").unwrap_or_else(|_| "true".to_string()) == "true";
+                        let use_mongodb = env::var("USE_MONGODB").unwrap_or_else(|_| "false".to_string()) == "true";
 
                         if use_mongodb {
                             // Store the email in MongoDB
@@ -619,24 +619,28 @@ async fn main() -> Result<(), MainError> {
     info!("TLS Server listening on {}", tls_addr);
     info!("Plain Server listening on {}", plain_addr);
 
-    // Initialisation du client MongoDB
-    let cluster_url = env::var("MONGODB_CLUSTER_URL").expect("MONGODB_CLUSTER_URL must be set");
-    let mongodb_username = env::var("MONGODB_USERNAME").expect("MONGODB_USERNAME must be set");
-    let mongodb_password = env::var("MONGODB_PASSWORD").expect("MONGODB_PASSWORD must be set");
-    let mongodb_app_name = env::var("MONGODB_APP_NAME").unwrap_or_else(|_| "mailserver".to_string());
-
-    let client_uri = if cluster_url.contains(".mongodb.net") {
-        // MongoDB Atlas (SRV)
-        format!(
-            "mongodb+srv://{}:{}@{}/?retryWrites=true&w=majority&appName={}",
-            mongodb_username, mongodb_password, cluster_url, mongodb_app_name
-        )
+    // MongoDB is optional (filesystem storage is the default for staging).
+    // Client creation is lazy; a dummy URI is enough when USE_MONGODB=false.
+    let use_mongodb = env::var("USE_MONGODB").unwrap_or_else(|_| "false".to_string()) == "true";
+    let client_uri = if use_mongodb {
+        let cluster_url = env::var("MONGODB_CLUSTER_URL").expect("MONGODB_CLUSTER_URL must be set");
+        let mongodb_username = env::var("MONGODB_USERNAME").expect("MONGODB_USERNAME must be set");
+        let mongodb_password = env::var("MONGODB_PASSWORD").expect("MONGODB_PASSWORD must be set");
+        let mongodb_app_name = env::var("MONGODB_APP_NAME").unwrap_or_else(|_| "mailserver".to_string());
+        if cluster_url.contains(".mongodb.net") {
+            format!(
+                "mongodb+srv://{}:{}@{}/?retryWrites=true&w=majority&appName={}",
+                mongodb_username, mongodb_password, cluster_url, mongodb_app_name
+            )
+        } else {
+            format!(
+                "mongodb://{}:{}@{}/?authSource=admin&appName={}",
+                mongodb_username, mongodb_password, cluster_url, mongodb_app_name
+            )
+        }
     } else {
-        // MongoDB local ou auto-hébergé
-        format!(
-            "mongodb://{}:{}@{}/?authSource=admin&appName={}",
-            mongodb_username, mongodb_password, cluster_url, mongodb_app_name
-        )
+        info!("USE_MONGODB=false — using local filesystem email storage");
+        "mongodb://127.0.0.1:27017".to_string()
     };
 
     let client = Arc::new(mongodb::Client::with_uri_str(&client_uri).await.unwrap());
