@@ -32,7 +32,7 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 tokio = { version = "1.53.1", features = ["full", "tracing"] }
 tokio-rustls = "0.26.0"
-rustls = { version = "0.23.12", default-features = false, features = ["std"] }
+rustls = { version = "0.23.12", default-features = false, features = ["std", "aws-lc-rs"] }
 webpki-roots = "1.0.9"
 trust-dns-resolver = "0.23.2"
 clap = "4.6.4"
