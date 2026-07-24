@@ -1,0 +1,123 @@
+name: CI/CD Pipeline for SMTP Rust (Scaleway)
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  SCW_REGION: fr-par
+  REGISTRY_ENDPOINT: rg.fr-par.scw.cloud
+  REGISTRY_NAMESPACE: ${{ secrets.REGISTRY_NAME }}
+  VM_IP: ${{ secrets.VM_IP }}
+  IMAGE_NAME: smtp-server
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      
+      - name: Run tests
+        run: cargo test --verbose
+
+  build:
+    name: Build and push to Scaleway Registry
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Install and configure Scaleway CLI
+        uses: scaleway/action-scw@v0
+        with:
+          access-key: ${{ secrets.SCW_ACCESS_KEY }}
+          secret-key: ${{ secrets.SCW_SECRET_KEY }}
+          default-project-id: ${{ secrets.SCW_DEFAULT_PROJECT_ID }}
+          default-region: fr-par
+          default-zone: fr-par-1
+          save-config: true
+          export-config: true
+
+      - name: Login to Scaleway Container Registry
+        run: scw registry login program=docker region=fr-par
+
+      - name: Build and push image
+        env:
+          IMAGE_REPO: ${{ env.REGISTRY_ENDPOINT }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.IMAGE_NAME }}
+        run: |
+          set -euo pipefail
+          docker build \
+            -t "$IMAGE_REPO:${{ github.sha }}" \
+            -t "$IMAGE_REPO:latest" \
+            .
+          docker push "$IMAGE_REPO:${{ github.sha }}"
+          docker push "$IMAGE_REPO:latest"
+
+  deploy:
+    name: Deploy to VM
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Install SSH key
+        uses: shimataro/ssh-key-action@v2
+        with:
+          key: ${{ secrets.VM_SSH_KEY }}
+          known_hosts: ${{ secrets.VM_KNOWN_HOSTS }}
+      
+      - name: Deploy to VM
+        run: |
+          ssh -o StrictHostKeyChecking=no ubuntu@${{ env.VM_IP }} "\
+            docker stop smtp-server || true && \
+            docker rm smtp-server || true && \
+            scw registry login program=docker region=fr-par && \
+            docker pull ${{ env.REGISTRY_ENDPOINT }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.IMAGE_NAME }}:latest && \
+            docker run -d --name smtp-server --restart unless-stopped \
+              -p 25:25 -p 587:587 -p 143:143 -p 8080:8080 \
+              -v /home/ubuntu/smtp-config:/config \
+              ${{ env.REGISTRY_ENDPOINT }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.IMAGE_NAME }}:latest \
+            "
+
+  test-availability:
+    name: Test Service Availability
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Test SMTP (port 25)
+        run: |
+          timeout 30 bash -c "until echo QUIT | nc -v ${{ env.VM_IP }} 25; do sleep 5; done"
+      
+      - name: Test IMAP (port 143)
+        run: |
+          timeout 30 bash -c "until echo QUIT | nc -v ${{ env.VM_IP }} 143; do sleep 5; done"
+      
+      - name: Test API (port 8080)
+        run: |
+          timeout 30 bash -c "until curl -s http://${{ env.VM_IP }}:8080/health; do sleep 5; done"

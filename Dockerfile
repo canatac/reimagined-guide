@@ -47,6 +47,11 @@ COPY --from=builder /app/target/release/smtp_server /usr/local/bin/smtp_server
 COPY --from=builder /app/target/release/email_api /usr/local/bin/email_api
 COPY --from=builder /app/target/release/imap_server /usr/local/bin/imap_server
 
+# Create DKIM directory and copy keys (if they exist)
+RUN mkdir -p /app/dkim/
+COPY --chown=${USER}:${USER} dkim-private.pem /app/dkim/ 2>/dev/null || true
+COPY --chown=${USER}:${USER} dkim-public.pem /app/dkim/ 2>/dev/null || true
+
 # Application directory and persistent data volume
 RUN mkdir -p /app/emails && chown -R ${USER}:${USER} /app/emails
 VOLUME /app/emails 
