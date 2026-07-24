@@ -585,6 +585,11 @@ async fn main() -> Result<(), MainError> {
     // Load environment variables from .env file
     dotenv().ok();
 
+    // rustls 0.23 requires an explicit process-level CryptoProvider
+    rustls::crypto::aws_lc_rs::default_provider()
+        .install_default()
+        .expect("failed to install rustls CryptoProvider");
+
     // Initialize logger
     env_logger::Builder::new()
         .filter_level(log::LevelFilter::Debug)
