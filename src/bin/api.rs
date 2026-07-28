@@ -237,6 +237,7 @@ mod tests {
         let logic: Arc<dyn LogicTrait> = Arc::new(mock_logic);
 
         let user = User {
+            id: None,
             username: "testuser".to_string(),
             password: "password".to_string(),
             mailbox: "testmailbox".to_string(),

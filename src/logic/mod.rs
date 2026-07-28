@@ -55,6 +55,7 @@ impl Logic {
 
     pub async fn create_user(&self, username: &str, password: &str, mailbox: &str) -> Result<()> {
         let new_user = User {
+            id: None,
             username: username.to_string(),
             password: password.to_string(),
             mailbox: mailbox.to_string(),
@@ -633,6 +634,7 @@ mod tests {
             .with(eq("testuser"), eq("password"))
             .times(1)
             .returning(|_, _| Ok(Some(User {
+                id: None,
                 username: "testuser".to_string(),
                 password: "password".to_string(),
                 mailbox: "testmailbox".to_string(),
