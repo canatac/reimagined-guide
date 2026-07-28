@@ -7,9 +7,6 @@
 #   docker compose -f docker-compose.deploy.yml --env-file .env.deploy up -d
 
 services:
-  # ----------------------------------------------------------
-  # MongoDB (persistance des emails)
-  # ----------------------------------------------------------
   mongodb:
     image: mongo:7-jammy
     container_name: mongodb
@@ -31,9 +28,6 @@ services:
     networks:
       - mailnet
 
-  # ----------------------------------------------------------
-  # SMTP Server (Rust) - image from Scaleway Container Registry
-  # ----------------------------------------------------------
   smtp-server:
     image: ${SCW_REGISTRY_ENDPOINT}/smtp-server:latest
     container_name: smtp-server
@@ -58,6 +52,7 @@ services:
       - MONGODB_CLUSTER_URL=mongodb:27017
       - MONGODB_APP_NAME=${MONGODB_APP_NAME:-mailserver}
       - MONGODB_DATABASE=${MONGODB_DATABASE:-mailserver}
+      - MONGODB_COLLECTION=${MONGODB_COLLECTION:-emails}
       - USE_MONGODB=${USE_MONGODB:-true}
       - RUST_LOG=${RUST_LOG:-info}
     command: ["smtp_server"]
@@ -67,9 +62,6 @@ services:
     networks:
       - mailnet
 
-  # ----------------------------------------------------------
-  # Email API (Rust) - same image, different command
-  # ----------------------------------------------------------
   email-api:
     image: ${SCW_REGISTRY_ENDPOINT}/smtp-server:latest
     container_name: email-api
@@ -85,6 +77,14 @@ services:
       - PRIVKEY_PATH=/app/certs/${PRIVKEY_PATH}
       - SMTP_USERNAME=${SMTP_USERNAME}
       - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - MONGODB_USERNAME=${MONGODB_USERNAME}
+      - MONGODB_PASSWORD=${MONGODB_PASSWORD}
+      - MONGODB_CLUSTER_URL=mongodb:27017
+      - MONGODB_APP_NAME=${MONGODB_APP_NAME:-mailserver}
+      - MONGODB_DATABASE=${MONGODB_DATABASE:-mailserver}
+      - MONGODB_COLLECTION=${MONGODB_COLLECTION:-emails}
+      - USE_MONGODB=${USE_MONGODB:-true}
+      - DKIM_SERVICE_URL=http://dkim-service:3000/sign
       - RUST_LOG=${RUST_LOG:-info}
     command: ["email_api"]
     depends_on:
@@ -92,9 +92,6 @@ services:
     networks:
       - mailnet
 
-  # ----------------------------------------------------------
-  # IMAP Server (Rust) - same image, different command
-  # ----------------------------------------------------------
   imap-server:
     image: ${SCW_REGISTRY_ENDPOINT}/smtp-server:latest
     container_name: imap-server
@@ -113,6 +110,7 @@ services:
       - MONGODB_CLUSTER_URL=mongodb:27017
       - MONGODB_APP_NAME=${MONGODB_APP_NAME:-mailserver}
       - MONGODB_DATABASE=${MONGODB_DATABASE:-mailserver}
+      - MONGODB_COLLECTION=${MONGODB_COLLECTION:-emails}
       - USE_MONGODB=${USE_MONGODB:-true}
       - RUST_LOG=${RUST_LOG:-info}
     command: ["imap_server"]
@@ -122,9 +120,6 @@ services:
     networks:
       - mailnet
 
-  # ----------------------------------------------------------
-  # DKIM Service (Node.js 22) - image from Scaleway Container Registry
-  # ----------------------------------------------------------
   dkim-service:
     image: ${SCW_REGISTRY_ENDPOINT}/dkim-service:latest
     container_name: dkim-service
@@ -142,7 +137,7 @@ services:
       - SMTP_PASS=${SMTP_PASSWORD}
       - DOMAIN_NAME=${DOMAIN_NAME}
       - KEY_SELECTOR=${KEY_SELECTOR:-default}
-      - PRIVATE_KEY_PATH=/app/dkim/dkim-private.pem
+      - PRIVATE_KEY_PATH=dkim/dkim-private.pem
     depends_on:
       - smtp-server
     networks:

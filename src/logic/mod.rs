@@ -516,10 +516,19 @@ impl Logic {
             let database_name = std::env::var("MONGODB_DATABASE").expect("MONGODB_DATABASE must be set");
             let collection = self.client.database(&database_name).collection::<mongodb::bson::Document>("emails");
             
+            // Count existing emails to generate sequence_number and uid
+            let count = collection.count_documents(doc! {"user_id": username, "mailbox": mailbox}).await?;
+            let sequence_number = (count + 1) as u32;
+            let uid = (count + 1) as u32;
+            
             // Serialize the Email struct into a BSON document
             let mut document = bson::to_document(email)?;
             document.insert("user_id", username);
             document.insert("mailbox", mailbox);
+            document.insert("sequence_number", sequence_number as i64);
+            document.insert("uid", uid as i64);
+            // Store internal_date as BSON datetime
+            document.insert("internal_date", mongodb::bson::DateTime::from_chrono_utc(email.internal_date));
             // Insert the document into the collection
             collection.insert_one(document).await?;
             Ok(())
