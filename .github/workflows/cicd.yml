@@ -97,12 +97,9 @@ jobs:
         with:
           export-env: true
         env:
-          # Format: ENV_VAR_NAME=op://<vault>/<item>/<field>
-          # À adapter selon l'organisation du vault 1Password
-          SCW_SECRET_KEY: op://smtp-project/scaleway/secret-key
-          SCW_REGISTRY_ENDPOINT: op://smtp-project/scaleway/registry-endpoint
-          VM_SSH_KEY: op://smtp-project/vm/ssh-private-key
-          VM_KNOWN_HOSTS: op://smtp-project/vm/known-hosts
+          # SSH key from 1Password (SSH key item with dedicated fields)
+          VM_SSH_KEY: op://hermes/ssh-hermes-smtp/private-key
+          VM_KNOWN_HOSTS: op://hermes/ssh-hermes-smtp/notesPlain
 
       - name: Install SSH key
         uses: shimataro/ssh-key-action@v2
@@ -123,13 +120,13 @@ jobs:
             cd /home/ubuntu
 
             # Login to Scaleway Container Registry on the VM
-            echo "${{ env.SCW_SECRET_KEY }}" | docker login \
-              ${{ env.SCW_REGISTRY_ENDPOINT }} \
+            echo "${{ secrets.SCW_SECRET_KEY }}" | docker login \
+              ${{ secrets.SCW_REGISTRY_ENDPOINT }} \
               -u nologin --password-stdin
 
             # Pull latest images from Scaleway Container Registry
-            docker pull ${{ env.SCW_REGISTRY_ENDPOINT }}/smtp-server:latest
-            docker pull ${{ env.SCW_REGISTRY_ENDPOINT }}/dkim-service:latest
+            docker pull ${{ secrets.SCW_REGISTRY_ENDPOINT }}/smtp-server:latest
+            docker pull ${{ secrets.SCW_REGISTRY_ENDPOINT }}/dkim-service:latest
 
             # Deploy with unified compose
             docker compose -f docker-compose.deploy.yml --env-file .env.deploy up -d --remove-orphans
