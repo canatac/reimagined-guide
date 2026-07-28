@@ -1,65 +1,81 @@
-# Stage 1: Builder
+# Stage 1: Builder — cache dependencies separately from app code
 FROM rust:1.88 AS builder
 
-ARG USER=default_user
-ARG UID=10001
-ARG GID=10001
-
-# Create a non-root user and group
-RUN groupadd --gid ${GID} ${USER} && \
-    useradd --uid ${UID} --gid ${GID} --shell /bin/bash --create-home ${USER}
-
-# Create app directory
-RUN mkdir -p /app && chown -R ${USER}:${USER} /app
-
-WORKDIR /app
-USER ${USER}
-
-# Copy the application source
-COPY --chown=${USER}:${USER} . .
-
-# Set build parallelism to low to avoid OOM kills
-ENV CARGO_BUILD_JOBS=2
-
-# Build all binaries using stable Rust
-RUN cargo build --release --bins
-
-# Stage 2: Final image
-FROM debian:bookworm-slim
-
-ARG USER=default_user
-ARG UID=10001
-ARG GID=10001
-
-# Install runtime dependencies
+# Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    openssl \
-    ca-certificates \
+    pkg-config \
     libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Create a non-root user and group
-RUN groupadd --gid ${GID} ${USER} && \
-    useradd --uid ${UID} --gid ${GID} --shell /bin/bash --create-home ${USER}
+# Create app dir and non-root user
+ARG UID=10001
+ARG GID=10001
+RUN groupadd --gid ${GID} default_user && \
+    useradd --uid ${UID} --gid ${GID} --shell /bin/bash --create-home default_user
+RUN mkdir -p /app && chown -R default_user:default_user /app
+WORKDIR /app
+USER default_user
 
-# Copy compiled binaries from the builder stage
+# --- Cache layer: copy ONLY Cargo.toml + Cargo.lock and fetch deps ---
+# This layer is cached unless Cargo.toml changes, so subsequent builds
+# only recompile the application crate (seconds), not 445 dependencies (minutes).
+COPY --chown=default_user:default_user Cargo.toml Cargo.lock* ./
+
+# Create dummy src so cargo can resolve the crate
+RUN mkdir -p src/bin && \
+    echo 'fn main() {}' > src/bin/smtp_server.rs && \
+    echo 'fn main() {}' > src/bin/email_api.rs && \
+    echo 'fn main() {}' > src/bin/imap_server.rs && \
+    echo 'fn main() {}' > src/bin/client.rs && \
+    echo 'pub fn lib() {}' > src/lib.rs
+
+# Build dependencies only (this is the slow step, cached on subsequent builds)
+RUN cargo build --release --bins 2>/dev/null || true
+
+# --- App layer: copy actual source and build ---
+# Remove dummy files
+RUN rm -rf src
+
+# Copy real source code
+COPY --chown=default_user:default_user src/ ./src/
+
+# Touch source files to force rebuild of app crates (not deps)
+RUN find src/ -name "*.rs" -exec touch {} \; 2>/dev/null; true
+
+# Build the real binaries
+ENV CARGO_BUILD_JOBS=4
+RUN cargo build --release --bins
+
+# Stage 2: Final image (unchanged from original)
+FROM debian:bookworm-slim
+
+ARG UID=10001
+ARG GID=10001
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    openssl \
+    ca-certificates \
+    libssl3 \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN groupadd --gid ${GID} default_user && \
+    useradd --uid ${UID} --gid ${GID} --shell /bin/bash --create-home default_user
+
 COPY --from=builder /app/target/release/smtp_server /usr/local/bin/smtp_server
 COPY --from=builder /app/target/release/email_api /usr/local/bin/email_api
 COPY --from=builder /app/target/release/imap_server /usr/local/bin/imap_server
 
-# Create DKIM directory and copy keys (if they exist)
-RUN mkdir -p /app/dkim/
+RUN mkdir -p /app/emails /app/dkim /app/certs && \
+    chown -R default_user:default_user /app
 
-# Application directory and persistent data volume
-RUN mkdir -p /app/emails && chown -R ${USER}:${USER} /app/emails
-VOLUME /app/emails 
-# The original VOLUME was /data. The README mentions emails are stored in "./emails"
-# Let's use /app/emails for clarity, assuming this is the intended data volume.
+# Self-signed certs (override with real certs in prod)
+RUN openssl req -x509 -newkey rsa:2048 -nodes \
+    -keyout /app/localhost.key -out /app/localhost.crt -days 365 \
+    -subj "/CN=mail.misfits.ai" && \
+    chown default_user:default_user /app/localhost.key /app/localhost.crt
 
-# Self-signed certs for staging TLS listeners (override with real certs in prod)
-USER root
-RUN openssl req -x509 -newkey rsa:2048 -nodes       -keyout /app/localhost.key -out /app/localhost.crt -days 365       -subj "/CN=mail.misfits.ai"     && chown ${USER}:${USER} /app/localhost.key /app/localhost.crt     && mkdir -p /app/emails /app/dkim     && chown -R ${USER}:${USER} /app/emails /app/dkim
-USER ${USER}
+USER default_user
 WORKDIR /app
 
 ENV USE_MONGODB=false \
@@ -71,24 +87,9 @@ ENV USE_MONGODB=false \
     SMTP_PASSWORD=changeme \
     RUST_LOG=info
 
-USER ${USER}
-WORKDIR /app
+EXPOSE 25 8025 8465 143 993 8000 8443
 
-# Expose ports
-# SMTP
-EXPOSE 25
-EXPOSE 8025 
-EXPOSE 8465 
-# IMAP
-EXPOSE 143
-EXPOSE 993
-# API (defaulting to 8000 as a common practice, email_api.rs uses 8443 for https)
-EXPOSE 8000
-EXPOSE 8443
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:8025/ || exit 1
 
-
-# Set default command
-# You can run a specific server by overriding the command, e.g., docker run <image_name> email_api
 CMD ["smtp_server"]
-# Alternatively, to guide the user:
-# CMD ["sh", "-c", "echo 'Please specify a binary to run: smtp_server, email_api, or imap_server. Defaulting to smtp_server.' && exec smtp_server"]

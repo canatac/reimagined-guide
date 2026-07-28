@@ -3,4 +3,14 @@ target/
 test-smtp
 *.md
 .env
+.env.*
 docker-compose*.yml
+Dockerfile*
+.github/
+.vscode/
+.devcontainer/
+img/
+infra/
+scripts/
+prepare-deploy-machine.sh
+setup-secrets.sh
