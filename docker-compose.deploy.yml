@@ -11,7 +11,7 @@ services:
   # MongoDB (persistance des emails)
   # ----------------------------------------------------------
   mongodb:
-    image: mongo:7
+    image: mongo:7-jammy
     container_name: mongodb
     restart: always
     ports:
