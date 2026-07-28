@@ -118,6 +118,9 @@ jobs:
             set -euo pipefail
             cd /home/debian
 
+            # Clean up old images to free disk space (VM has limited storage)
+            sudo docker system prune -af --filter "until=1h" 2>/dev/null || true
+
             # Login to Scaleway Container Registry on the VM
             echo "${{ secrets.SCW_SECRET_KEY }}" | sudo docker login \
               ${{ secrets.SCW_REGISTRY_ENDPOINT }} \
