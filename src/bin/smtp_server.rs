@@ -218,8 +218,10 @@ async fn handle_tls_client(tls_stream: TlsStream<TcpStream>, logic: Arc<Logic>, 
                         if use_mongodb {
                             // Store the email in MongoDB
                             if let Some(session_id) = session_manager.get_session_id() {
-                                if let Some(mailbox) = session_manager.get_mailbox(&session_id) {
-                                    if let Err(e) = logic.store_email(&session_id, &mailbox, &email_to_store).await {
+                                let username = session_manager.get_username(&session_id);
+                                let mailbox = session_manager.get_mailbox(&session_id);
+                                if let (Some(user), Some(mbox)) = (username, mailbox) {
+                                    if let Err(e) = logic.store_email(&user, &mbox, &email_to_store).await {
                                         eprintln!("Failed to store email in MongoDB: {}", e);
                                         write_response(&mut stream, "554 Transaction failed\r\n").await?;
                                     } else {
@@ -227,7 +229,7 @@ async fn handle_tls_client(tls_stream: TlsStream<TcpStream>, logic: Arc<Logic>, 
                                         write_response(&mut stream, "250 OK\r\n").await?;
                                     }
                                 } else {
-                                    eprintln!("Mailbox not found for session ID: {}", session_id);
+                                    eprintln!("Mailbox or username not found for session ID: {}", session_id);
                                     write_response(&mut stream, "554 Transaction failed\r\n").await?;
                                 }
                             } else {
@@ -422,7 +424,7 @@ async fn process_command(command: &str, email: &mut CustomEmail, stream: &mut St
             handle_auth_login(stream, logic.clone(), session_manager.clone()).await
         } 
         s if s.starts_with("AUTH PLAIN") => {
-            handle_auth_plain(command).await
+            handle_auth_plain(command, session_manager.clone()).await
         } 
         s if s.starts_with("MAIL FROM:") => {
             email.email.from = s.trim_start_matches("MAIL FROM:").trim().to_string();
@@ -515,7 +517,7 @@ async fn handle_auth_login(stream: &mut StreamType, logic: Arc<Logic>, session_m
 }
 
 // Handle AUTH PLAIN command
-async fn handle_auth_plain(command: &str) -> std::io::Result<String> {
+async fn handle_auth_plain(command: &str, session_manager: Arc<SessionManager>) -> std::io::Result<String> {
     let auth_data = command.split_whitespace().nth(2).unwrap_or("");
     let decoded = general_purpose::STANDARD.decode(auth_data).unwrap();
     let parts: Vec<&[u8]> = decoded.split(|&b| b == 0).collect();
@@ -528,6 +530,9 @@ async fn handle_auth_plain(command: &str) -> std::io::Result<String> {
     let password = parts[2];
 
     if check_credentials(username, password) {
+        let username_str = String::from_utf8_lossy(username).to_string();
+        let session_id = session_manager.create_session(&username_str);
+        session_manager.set_mailbox(&session_id, "INBOX");
         Ok("235 Authentication successful\r\n".to_string())
     } else {
         Ok("535 Authentication failed\r\n".to_string())

@@ -9,9 +9,16 @@ use mongodb::bson;
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct User {
+    #[serde(rename = "_id", skip_serializing, skip_deserializing)]
+    pub id: Option<mongodb::bson::oid::ObjectId>,
     pub username: String,
     pub password: String,
+    #[serde(default = "default_mailbox")]
     pub mailbox: String,
+}
+
+fn default_mailbox() -> String {
+    "INBOX".to_string()
 }
 
 
