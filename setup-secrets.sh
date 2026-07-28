@@ -20,15 +20,13 @@ SSH_KEY=$(cat $SSH_KEY_PATH)
 KNOWN_HOSTS=$(ssh-keyscan $VM_IP 2>/dev/null)
 
 # Demander les credentials Scaleway
-read -p "Scaleway Access Key: " SCW_ACCESS_KEY
-read -p "Scaleway Secret Key: " SCW_SECRET_KEY
+read -p "Scaleway Secret Key (API key): " SCW_SECRET_KEY
 read -p "Scaleway Default Project ID: " SCW_DEFAULT_PROJECT_ID
 
 # Configurer les secrets GitHub
 echo "Configuration des secrets GitHub pour $REPO..."
 
 echo "$SCW_REGISTRY_ENDPOINT" | gh secret set SCW_REGISTRY_ENDPOINT --repo $REPO --app actions
-echo "$SCW_ACCESS_KEY" | gh secret set SCW_ACCESS_KEY --repo $REPO --app actions
 echo "$SCW_SECRET_KEY" | gh secret set SCW_SECRET_KEY --repo $REPO --app actions
 echo "$VM_IP" | gh secret set VM_IP --repo $REPO --app actions
 echo "$SSH_KEY" | gh secret set VM_SSH_KEY --repo $REPO --app actions
@@ -38,4 +36,4 @@ echo "$SCW_DEFAULT_PROJECT_ID" | gh secret set SCW_DEFAULT_PROJECT_ID --repo $RE
 echo "✅ Secrets configurés avec succès !"
 echo ""
 echo "📌 Secrets à configurer également sur le repo studious-octo-rotary-phone :"
-echo "   SCW_REGISTRY_ENDPOINT, SCW_ACCESS_KEY, SCW_SECRET_KEY"
+echo "   SCW_REGISTRY_ENDPOINT, SCW_SECRET_KEY"

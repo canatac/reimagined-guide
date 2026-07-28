@@ -18,11 +18,10 @@ sudo chmod +x /usr/local/bin/docker-compose
 
 # Configurer le login Scaleway Container Registry
 SCW_REGISTRY_ENDPOINT="${SCW_REGISTRY_ENDPOINT}"
-SCW_ACCESS_KEY="${SCW_ACCESS_KEY}"
 SCW_SECRET_KEY="${SCW_SECRET_KEY}"
 
 echo "Logging into Scaleway Container Registry $SCW_REGISTRY_ENDPOINT..."
-echo $SCW_SECRET_KEY | docker login $SCW_REGISTRY_ENDPOINT -u $SCW_ACCESS_KEY --password-stdin
+echo $SCW_SECRET_KEY | docker login $SCW_REGISTRY_ENDPOINT -u nologin --password-stdin
 
 # Créer le répertoire pour les configs
 mkdir -p /home/smtpadmin/smtp-config
