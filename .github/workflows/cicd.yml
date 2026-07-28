@@ -110,13 +110,13 @@ jobs:
         run: |
           scp -o StrictHostKeyChecking=no \
             docker-compose.deploy.yml \
-            ubuntu@${{ env.VM_IP }}:/home/ubuntu/docker-compose.deploy.yml
+            debian@${{ secrets.VM_IP }}:/home/debian/docker-compose.deploy.yml
 
       - name: Pull images & deploy
         run: |
-          ssh -o StrictHostKeyChecking=no ubuntu@${{ env.VM_IP }} << 'REMOTE'
+          ssh -o StrictHostKeyChecking=no debian@${{ secrets.VM_IP }} << 'REMOTE'
             set -euo pipefail
-            cd /home/ubuntu
+            cd /home/debian
 
             # Login to Scaleway Container Registry on the VM
             echo "${{ secrets.SCW_SECRET_KEY }}" | docker login \
@@ -139,7 +139,7 @@ jobs:
         run: |
           set -euo pipefail
           for i in $(seq 1 12); do
-            if nc -z -w 3 ${{ env.VM_IP }} 25 2>/dev/null; then
+            if nc -z -w 3 ${{ secrets.VM_IP }} 25 2>/dev/null; then
               echo "SMTP port 25 open"
               exit 0
             fi
@@ -153,7 +153,7 @@ jobs:
         run: |
           set -euo pipefail
           for i in $(seq 1 12); do
-            if curl -sf http://${{ env.VM_IP }}:3000/health 2>/dev/null | grep -q "ok"; then
+            if curl -sf http://${{ secrets.VM_IP }}:3000/health 2>/dev/null | grep -q "ok"; then
               echo "DKIM health check OK"
               exit 0
             fi
