@@ -44,6 +44,7 @@ use std::fs::{File, create_dir_all};
 use std::io::{Write, BufRead, BufReader};
 use std::path::Path;
 use dotenv::dotenv;
+use mongodb::bson;
 use std::env;
 use reqwest;
 use simple_smtp_server::entities::Email;
@@ -203,7 +204,7 @@ async fn send_email_handler(
                         flags: vec![],
                         sequence_number: 0,
                         uid: 0,
-                        internal_date: Utc::now(),
+                        internal_date: bson::DateTime::from_millis(Utc::now().timestamp_millis()),
                         dkim_signature: Some(dkim_result["dkimSignature"].as_str().unwrap_or("").to_string()),
                     };
 

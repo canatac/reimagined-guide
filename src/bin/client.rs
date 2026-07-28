@@ -89,7 +89,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         flags: vec![],
         sequence_number: 0,
         uid: 0,
-        internal_date: Utc::now(),
+        internal_date: bson::DateTime::from_millis(Utc::now().timestamp_millis()),
         dkim_signature: None,
     };
 
