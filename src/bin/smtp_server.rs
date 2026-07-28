@@ -350,14 +350,52 @@ async fn handle_plain_client(stream: TcpStream, tls_acceptor: Arc<TlsAcceptor>, 
                     println!("In in_data_mode");
                     if buffer.trim() == "." {
                         in_data_mode = false;
-                        mail_server.store_email(&current_email).await?;
-                        match send_outgoing_email(&current_email.email).await {
-                            Ok(_) => {
-                                write_response(&mut stream, "250 OK\r\n").await?;
-                            }
-                            Err(e) => {
-                                error!("Failed to forward email: {}", e);
+                        let use_mongodb = env::var("USE_MONGODB").unwrap_or_else(|_| "false".to_string()) == "true";
+                        if use_mongodb {
+                            // Store in MongoDB
+                            if let Some(session_id) = session_manager.get_session_id() {
+                                let username = session_manager.get_username(&session_id);
+                                let mailbox = session_manager.get_mailbox(&session_id);
+                                if let (Some(user), Some(mbox)) = (username, mailbox) {
+                                    let email_to_store = Email {
+                                        id: current_email.email.id.clone(),
+                                        from: current_email.email.from.clone(),
+                                        to: current_email.email.to.clone(),
+                                        subject: current_email.email.subject.clone(),
+                                        body: current_email.email.body.clone(),
+                                        headers: current_email.email.headers.clone(),
+                                        flags: current_email.email.flags.clone(),
+                                        sequence_number: current_email.email.sequence_number,
+                                        uid: current_email.email.uid,
+                                        internal_date: current_email.email.internal_date,
+                                        dkim_signature: current_email.dkim_signature.clone(),
+                                    };
+                                    if let Err(e) = logic.store_email(&user, &mbox, &email_to_store).await {
+                                        eprintln!("Failed to store email in MongoDB: {}", e);
+                                        write_response(&mut stream, "554 Transaction failed\r\n").await?;
+                                    } else {
+                                        println!("Email stored successfully in MongoDB");
+                                        write_response(&mut stream, "250 OK\r\n").await?;
+                                    }
+                                } else {
+                                    eprintln!("Mailbox or username not found for session");
+                                    write_response(&mut stream, "554 Transaction failed\r\n").await?;
+                                }
+                            } else {
+                                eprintln!("Session ID not found");
                                 write_response(&mut stream, "554 Transaction failed\r\n").await?;
+                            }
+                        } else {
+                            // Store locally + attempt forward
+                            mail_server.store_email(&current_email).await?;
+                            match send_outgoing_email(&current_email.email).await {
+                                Ok(_) => {
+                                    write_response(&mut stream, "250 OK\r\n").await?;
+                                }
+                                Err(e) => {
+                                    error!("Failed to forward email: {}", e);
+                                    write_response(&mut stream, "250 OK (stored locally, forwarding deferred)\r\n").await?;
+                                }
                             }
                         }
                     } else {
