@@ -1,6 +1,6 @@
 # docker-compose.deploy.yml
 # Déploiement unifié sur la VM Scaleway
-# 5 services : smtp-server, email-api, imap-server, mongodb, dkim-service
+# 6 services : smtp-server, email-api, imap-server, mongodb, dkim-service, misfits-web
 # Images pulled from Scaleway Container Registry
 #
 # Usage sur la VM :
@@ -145,6 +145,25 @@ services:
       - PRIVATE_KEY_PATH=/app/dkim/dkim-private.pem
     depends_on:
       - smtp-server
+    networks:
+      - mailnet
+
+  # ----------------------------------------------------------
+  # Frontend (Next.js 15) - misfits.ai Mail
+  # ----------------------------------------------------------
+  misfits-web:
+    image: ${SCW_REGISTRY_ENDPOINT}/misfits-web:latest
+    container_name: misfits-web
+    restart: always
+    ports:
+      - "3001:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXT_TELEMETRY_DISABLED=1
+      - BACKEND_URL=http://imap-server:8080
+    depends_on:
+      - imap-server
+      - email-api
     networks:
       - mailnet
 
