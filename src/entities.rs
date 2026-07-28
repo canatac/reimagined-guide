@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use chrono::{DateTime, Utc};
+use mongodb::bson;
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct Email {
@@ -12,7 +12,7 @@ pub struct Email {
     pub flags: Vec<String>,
     pub sequence_number: u32,
     pub uid: u32,
-    pub internal_date: DateTime<Utc>,
+    pub internal_date: bson::DateTime,
     pub dkim_signature: Option<String>,
 }
 
@@ -28,8 +28,8 @@ impl Email {
             flags: Vec::new(),
             sequence_number: 0,
             uid: 0,
-            internal_date: Utc::now(),
+            internal_date: bson::DateTime::from_millis(chrono::Utc::now().timestamp_millis()),
             dkim_signature: None,
         }
     }
-} 
+}
