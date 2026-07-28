@@ -1,0 +1,157 @@
+# docker-compose.deploy.yml
+# Déploiement unifié sur la VM Scaleway
+# 5 services : smtp-server, email-api, imap-server, mongodb, dkim-service
+# Images pulled from Azure Container Registry
+#
+# Usage sur la VM :
+#   docker compose -f docker-compose.deploy.yml --env-file .env.deploy up -d
+
+services:
+  # ----------------------------------------------------------
+  # MongoDB (persistance des emails)
+  # ----------------------------------------------------------
+  mongodb:
+    image: mongo:7
+    container_name: mongodb
+    restart: always
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGODB_USERNAME}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGODB_PASSWORD}
+      - MONGO_INITDB_DATABASE=${MONGODB_DATABASE:-mailserver}
+    volumes:
+      - mongo_data:/data/db
+      - ./init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - mailnet
+
+  # ----------------------------------------------------------
+  # SMTP Server (Rust) - image from Azure ACR
+  # ----------------------------------------------------------
+  smtp-server:
+    image: ${ACR_LOGIN_SERVER}/smtp-server:latest
+    container_name: smtp-server
+    restart: always
+    ports:
+      - "25:25"
+      - "8025:8025"
+      - "8465:8465"
+    volumes:
+      - ./emails:/app/emails
+      - ./certs:/app/certs
+      - ./dkim:/app/dkim
+    environment:
+      - SMTP_TLS_ADDR=${SMTP_TLS_ADDR}
+      - SMTP_PLAIN_ADDR=${SMTP_PLAIN_ADDR}
+      - CERT_PATH=/app/certs/${CERT_PATH}
+      - KEY_PATH=/app/certs/${KEY_PATH}
+      - SMTP_USERNAME=${SMTP_USERNAME}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - MONGODB_USERNAME=${MONGODB_USERNAME}
+      - MONGODB_PASSWORD=${MONGODB_PASSWORD}
+      - MONGODB_CLUSTER_URL=mongodb:27017
+      - MONGODB_APP_NAME=${MONGODB_APP_NAME:-mailserver}
+      - MONGODB_DATABASE=${MONGODB_DATABASE:-mailserver}
+      - USE_MONGODB=${USE_MONGODB:-true}
+      - RUST_LOG=${RUST_LOG:-info}
+    command: ["smtp_server"]
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - mailnet
+
+  # ----------------------------------------------------------
+  # Email API (Rust) - same image, different command
+  # ----------------------------------------------------------
+  email-api:
+    image: ${ACR_LOGIN_SERVER}/smtp-server:latest
+    container_name: email-api
+    restart: always
+    ports:
+      - "8000:8000"
+      - "8443:8443"
+    volumes:
+      - ./certs:/app/certs
+    environment:
+      - API_SERVER_ADDR=${API_SERVER_ADDR}
+      - FULLCHAIN_PATH=/app/certs/${FULLCHAIN_PATH}
+      - PRIVKEY_PATH=/app/certs/${PRIVKEY_PATH}
+      - SMTP_USERNAME=${SMTP_USERNAME}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - RUST_LOG=${RUST_LOG:-info}
+    command: ["email_api"]
+    depends_on:
+      - smtp-server
+    networks:
+      - mailnet
+
+  # ----------------------------------------------------------
+  # IMAP Server (Rust) - same image, different command
+  # ----------------------------------------------------------
+  imap-server:
+    image: ${ACR_LOGIN_SERVER}/smtp-server:latest
+    container_name: imap-server
+    restart: always
+    ports:
+      - "143:143"
+      - "993:993"
+      - "8080:8080"
+    volumes:
+      - ./emails:/app/emails
+    environment:
+      - IMAP_SERVER=${IMAP_SERVER}
+      - IMAP_SERVER_API_PORT=${IMAP_SERVER_API_PORT}
+      - MONGODB_USERNAME=${MONGODB_USERNAME}
+      - MONGODB_PASSWORD=${MONGODB_PASSWORD}
+      - MONGODB_CLUSTER_URL=mongodb:27017
+      - MONGODB_APP_NAME=${MONGODB_APP_NAME:-mailserver}
+      - MONGODB_DATABASE=${MONGODB_DATABASE:-mailserver}
+      - USE_MONGODB=${USE_MONGODB:-true}
+      - RUST_LOG=${RUST_LOG:-info}
+    command: ["imap_server"]
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - mailnet
+
+  # ----------------------------------------------------------
+  # DKIM Service (Node.js 22) - image from Azure ACR
+  # ----------------------------------------------------------
+  dkim-service:
+    image: ${ACR_LOGIN_SERVER}/dkim-service:latest
+    container_name: dkim-service
+    restart: always
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./dkim:/app/dkim
+    environment:
+      - PORT=3000
+      - SMTP_HOST=smtp-server
+      - SMTP_PORT=8025
+      - SMTP_SECURE=false
+      - SMTP_USER=${SMTP_USERNAME}
+      - SMTP_PASS=${SMTP_PASSWORD}
+      - DOMAIN_NAME=${DOMAIN_NAME}
+      - KEY_SELECTOR=${KEY_SELECTOR:-default}
+      - PRIVATE_KEY_PATH=/app/dkim/dkim-private.pem
+    depends_on:
+      - smtp-server
+    networks:
+      - mailnet
+
+networks:
+  mailnet:
+    driver: bridge
+
+volumes:
+  emails:
+  mongo_data:

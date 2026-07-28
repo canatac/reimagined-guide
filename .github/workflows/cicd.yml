@@ -1,171 +1,162 @@
-name: CI/CD Pipeline for SMTP Rust (Scaleway)
+name: CI/CD Pipeline - SMTP Rust + DKIM (Azure ACR -> Scaleway VM)
 
 on:
   push:
-    branches: [ master ]
+    branches: [master]
   pull_request:
-    branches: [ master ]
+    branches: [master]
   workflow_dispatch:
+  repository_dispatch:
+    types: [deploy]
 
 env:
-  CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
-  SCW_REGION: fr-par
-  REGISTRY_ENDPOINT: rg.fr-par.scw.cloud
-  REGISTRY_NAMESPACE: ${{ secrets.REGISTRY_NAME }}
+  ACR_NAME: ${{ secrets.ACR_NAME }}
+  ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
   VM_IP: ${{ secrets.VM_IP }}
-  IMAGE_NAME: smtp-server
 
 jobs:
+  # ============================================================
+  # JOB 1 : Test - Compilation Rust (cargo check)
+  # ============================================================
   test:
-    name: Compile
+    name: Compile & Check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Install Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-      
-      - name: Cache cargo registry
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-      
-      - name: Compile (tests mocked Mongo deferred)
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Cargo check (lib + bins)
         run: cargo check --lib --bins --verbose
 
-  build:
-    name: Build and push to Scaleway Registry
+  # ============================================================
+  # JOB 2 : Build & Push SMTP image via az acr build
+  #          SKIPPED on repository_dispatch (DKIM-only change)
+  # ============================================================
+  build-push-smtp:
+    name: Build & Push SMTP image (az acr build)
     needs: test
     runs-on: ubuntu-latest
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/master')
+      || github.event_name == 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Install and configure Scaleway CLI
-        uses: scaleway/action-scw@v0
+      - name: Azure Login
+        uses: azure/login@v2
         with:
-          access-key: ${{ secrets.SCW_ACCESS_KEY }}
-          secret-key: ${{ secrets.SCW_SECRET_KEY }}
-          default-project-id: ${{ secrets.SCW_DEFAULT_PROJECT_ID }}
-          default-organization-id: ${{ secrets.SCW_DEFAULT_ORGANIZATION_ID }}
-          save-config: true
-          export-config: true
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Login to Scaleway Container Registry
-        run: scw registry login program=docker region=fr-par
-
-      - name: Build and push image
-        env:
-          IMAGE_REPO: ${{ env.REGISTRY_ENDPOINT }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.IMAGE_NAME }}
+      - name: Build & push SMTP image (remote ACR build, no local Docker)
         run: |
           set -euo pipefail
-          docker build \
-            -t "$IMAGE_REPO:${{ github.sha }}" \
-            -t "$IMAGE_REPO:latest" \
+          az acr build \
+            --image smtp-server:latest \
+            --image smtp-server:${{ github.sha }} \
+            --registry ${{ env.ACR_NAME }} \
+            --file Dockerfile \
             .
-          docker push "$IMAGE_REPO:${{ github.sha }}"
-          docker push "$IMAGE_REPO:latest"
 
+  # ============================================================
+  # JOB 3 : Déploiement sur la VM Scaleway
+  #          - charge les secrets depuis 1Password
+  #          - SSH -> pull des deux images (SMTP + DKIM) depuis ACR
+  #          - docker-compose up -d
+  # ============================================================
   deploy:
-    name: Deploy to VM
-    needs: build
+    name: Deploy to Scaleway VM
+    needs: [test, build-push-smtp]
     runs-on: ubuntu-latest
+    if: >-
+      always() &&
+      (github.event_name == 'push' && github.ref == 'refs/heads/master')
+      || github.event_name == 'workflow_dispatch'
+      || github.event_name == 'repository_dispatch'
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
+      - uses: actions/checkout@v4
+
+      # --- Charger les secrets depuis 1Password ---
+      - name: Configure 1Password service account
+        uses: 1password/load-secrets-action/configure@v2
+        with:
+          service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+
+      - name: Load secrets from 1Password
+        uses: 1password/load-secrets-action@v4
+        with:
+          export-env: true
+        env:
+          # Format: ENV_VAR_NAME=op://<vault>/<item>/<field>
+          # À adapter selon l'organisation du vault 1Password
+          ACR_USERNAME: op://smtp-project/acr/username
+          ACR_PASSWORD: op://smtp-project/acr/password
+          VM_SSH_KEY: op://smtp-project/vm/ssh-private-key
+          VM_KNOWN_HOSTS: op://smtp-project/vm/known-hosts
+
       - name: Install SSH key
         uses: shimataro/ssh-key-action@v2
         with:
-          key: ${{ secrets.VM_SSH_KEY }}
-          known_hosts: ${{ secrets.VM_KNOWN_HOSTS }}
-      
-      - name: Install and configure Scaleway CLI
-        uses: scaleway/action-scw@v0
-        with:
-          access-key: ${{ secrets.SCW_ACCESS_KEY }}
-          secret-key: ${{ secrets.SCW_SECRET_KEY }}
-          default-project-id: ${{ secrets.SCW_DEFAULT_PROJECT_ID }}
-          default-organization-id: ${{ secrets.SCW_DEFAULT_ORGANIZATION_ID }}
-          save-config: true
-          export-config: true
+          key: ${{ env.VM_SSH_KEY }}
+          known_hosts: ${{ env.VM_KNOWN_HOSTS }}
 
-      - name: Login registry and get pull password
-        id: reg
+      - name: Copy docker-compose.deploy.yml to VM
+        run: |
+          scp -o StrictHostKeyChecking=no \
+            docker-compose.deploy.yml \
+            ubuntu@${{ env.VM_IP }}:/home/ubuntu/docker-compose.deploy.yml
+
+      - name: Pull images & deploy
+        run: |
+          ssh -o StrictHostKeyChecking=no ubuntu@${{ env.VM_IP }} << 'REMOTE'
+            set -euo pipefail
+            cd /home/ubuntu
+
+            # Login to Azure ACR on the VM
+            echo "${{ env.ACR_PASSWORD }}" | docker login \
+              ${{ env.ACR_LOGIN_SERVER }} \
+              -u ${{ env.ACR_USERNAME }} --password-stdin
+
+            # Pull latest images from Azure ACR
+            docker pull ${{ env.ACR_LOGIN_SERVER }}/smtp-server:latest
+            docker pull ${{ env.ACR_LOGIN_SERVER }}/dkim-service:latest
+
+            # Deploy with unified compose
+            docker compose -f docker-compose.deploy.yml --env-file .env.deploy up -d --remove-orphans
+
+            # Wait & check containers
+            sleep 5
+            docker compose -f docker-compose.deploy.yml ps
+          REMOTE
+
+      - name: Smoke test - SMTP port 25
         run: |
           set -euo pipefail
-          scw registry login program=docker region=fr-par
-          # docker login on remote uses SCW secret key + nologin user (official pattern)
-          echo "endpoint=${{ env.REGISTRY_ENDPOINT }}" >> "$GITHUB_OUTPUT"
-
-      - name: Deploy to VM
-        env:
-          IMAGE: ${{ env.REGISTRY_ENDPOINT }}/${{ env.REGISTRY_NAMESPACE }}/${{ env.IMAGE_NAME }}:latest
-        run: |
-          set -euo pipefail
-          ssh -o StrictHostKeyChecking=no ubuntu@${{ env.VM_IP }} bash -s <<EOF
-          set -euo pipefail
-          mkdir -p /home/ubuntu/smtp-data/emails
-          echo "${{ secrets.SCW_SECRET_KEY }}" | docker login ${{ env.REGISTRY_ENDPOINT }} -u nologin --password-stdin
-          docker pull "$IMAGE"
-          docker stop smtp-server || true
-          docker rm smtp-server || true
-          docker run -d --name smtp-server --restart unless-stopped \
-            -e USE_MONGODB=false \
-            -e SMTP_PLAIN_ADDR=0.0.0.0:8025 \
-            -e SMTP_TLS_ADDR=0.0.0.0:8465 \
-            -e SMTP_USERNAME=admin \
-            -e SMTP_PASSWORD=changeme \
-            -e CERT_PATH=/app/localhost.crt \
-            -e KEY_PATH=/app/localhost.key \
-            -p 25:8025 -p 587:8465 -p 8025:8025 -p 8465:8465 \
-            -v /home/ubuntu/smtp-data/emails:/app/emails \
-            "$IMAGE" smtp_server
-          docker ps --filter name=smtp-server
-          EOF
-
-  test-availability:
-    name: Test Service Availability
-    needs: deploy
-    runs-on: ubuntu-latest
-    steps:
-      - name: Wait for container then test SMTP port 25
-        run: |
-          set -euo pipefail
-          for i in $(seq 1 24); do
-            if echo QUIT | nc -w 3 ${{ env.VM_IP }} 25 2>/dev/null | head -1 | grep -Eiq '220|SMTP|ready'; then
-              echo "SMTP banner OK"
-              exit 0
-            fi
-            if nc -z -w 2 ${{ env.VM_IP }} 25 2>/dev/null; then
-              echo "SMTP port open"
+          for i in $(seq 1 12); do
+            if nc -z -w 3 ${{ env.VM_IP }} 25 2>/dev/null; then
+              echo "SMTP port 25 open"
               exit 0
             fi
             echo "retry $i..."
             sleep 5
           done
-          echo "SMTP not reachable on :25"
+          echo "SMTP port 25 not reachable"
           exit 1
 
-      - name: Test SMTP submission port 587
+      - name: Smoke test - DKIM service port 3000
         run: |
           set -euo pipefail
           for i in $(seq 1 12); do
-            if nc -z -w 2 ${{ env.VM_IP }} 587 2>/dev/null; then
-              echo "587 open"
+            if curl -sf http://${{ env.VM_IP }}:3000/health 2>/dev/null | grep -q "ok"; then
+              echo "DKIM health check OK"
               exit 0
             fi
+            echo "retry $i..."
             sleep 5
           done
+          echo "DKIM service not reachable on :3000"
           exit 1
