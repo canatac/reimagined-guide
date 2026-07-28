@@ -16,13 +16,13 @@ sudo usermod -aG docker $USER
 sudo curl -L "https://github.com/docker/compose/releases/download/v2.23.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
 sudo chmod +x /usr/local/bin/docker-compose
 
-# Configurer le login ACR
-ACR_NAME="${ACR_NAME}"
-ACR_USERNAME="${ACR_USERNAME}"
-ACR_PASSWORD="${ACR_PASSWORD}"
+# Configurer le login Scaleway Container Registry
+SCW_REGISTRY_ENDPOINT="${SCW_REGISTRY_ENDPOINT}"
+SCW_ACCESS_KEY="${SCW_ACCESS_KEY}"
+SCW_SECRET_KEY="${SCW_SECRET_KEY}"
 
-echo "Logging into ACR $ACR_NAME..."
-echo $ACR_PASSWORD | docker login $ACR_NAME.azurecr.io -u $ACR_USERNAME --password-stdin
+echo "Logging into Scaleway Container Registry $SCW_REGISTRY_ENDPOINT..."
+echo $SCW_SECRET_KEY | docker login $SCW_REGISTRY_ENDPOINT -u $SCW_ACCESS_KEY --password-stdin
 
 # Créer le répertoire pour les configs
 mkdir -p /home/smtpadmin/smtp-config
@@ -36,7 +36,7 @@ After=network.target
 [Service]
 Restart=always
 User=smtpadmin
-ExecStart=/usr/bin/docker run --rm -p 25:25 -p 587:587 -p 143:143 -p 8080:8080 -v /home/smtpadmin/smtp-config:/config $ACR_NAME.azurecr.io/smtp-server:latest
+ExecStart=/usr/bin/docker run --rm -p 25:25 -p 587:587 -p 143:143 -p 8080:8080 -v /home/smtpadmin/smtp-config:/config $SCW_REGISTRY_ENDPOINT/smtp-server:latest
 WorkingDirectory=/home/smtpadmin
 
 [Install]

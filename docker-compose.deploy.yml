@@ -1,7 +1,7 @@
 # docker-compose.deploy.yml
 # Déploiement unifié sur la VM Scaleway
 # 5 services : smtp-server, email-api, imap-server, mongodb, dkim-service
-# Images pulled from Azure Container Registry
+# Images pulled from Scaleway Container Registry
 #
 # Usage sur la VM :
 #   docker compose -f docker-compose.deploy.yml --env-file .env.deploy up -d
@@ -32,10 +32,10 @@ services:
       - mailnet
 
   # ----------------------------------------------------------
-  # SMTP Server (Rust) - image from Azure ACR
+  # SMTP Server (Rust) - image from Scaleway Container Registry
   # ----------------------------------------------------------
   smtp-server:
-    image: ${ACR_LOGIN_SERVER}/smtp-server:latest
+    image: ${SCW_REGISTRY_ENDPOINT}/smtp-server:latest
     container_name: smtp-server
     restart: always
     ports:
@@ -71,7 +71,7 @@ services:
   # Email API (Rust) - same image, different command
   # ----------------------------------------------------------
   email-api:
-    image: ${ACR_LOGIN_SERVER}/smtp-server:latest
+    image: ${SCW_REGISTRY_ENDPOINT}/smtp-server:latest
     container_name: email-api
     restart: always
     ports:
@@ -96,7 +96,7 @@ services:
   # IMAP Server (Rust) - same image, different command
   # ----------------------------------------------------------
   imap-server:
-    image: ${ACR_LOGIN_SERVER}/smtp-server:latest
+    image: ${SCW_REGISTRY_ENDPOINT}/smtp-server:latest
     container_name: imap-server
     restart: always
     ports:
@@ -123,10 +123,10 @@ services:
       - mailnet
 
   # ----------------------------------------------------------
-  # DKIM Service (Node.js 22) - image from Azure ACR
+  # DKIM Service (Node.js 22) - image from Scaleway Container Registry
   # ----------------------------------------------------------
   dkim-service:
-    image: ${ACR_LOGIN_SERVER}/dkim-service:latest
+    image: ${SCW_REGISTRY_ENDPOINT}/dkim-service:latest
     container_name: dkim-service
     restart: always
     ports:
