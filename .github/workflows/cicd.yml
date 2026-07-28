@@ -99,13 +99,12 @@ jobs:
         env:
           # SSH key from 1Password (SSH key item with dedicated fields)
           VM_SSH_KEY: op://hermes/ssh-hermes-smtp/private-key
-          VM_KNOWN_HOSTS: op://hermes/ssh-hermes-smtp/notesPlain
 
       - name: Install SSH key
         uses: shimataro/ssh-key-action@v2
         with:
           key: ${{ env.VM_SSH_KEY }}
-          known_hosts: ${{ env.VM_KNOWN_HOSTS }}
+          known_hosts: ${{ secrets.VM_KNOWN_HOSTS }}
 
       - name: Copy docker-compose.deploy.yml to VM
         run: |
