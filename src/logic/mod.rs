@@ -528,7 +528,7 @@ impl Logic {
             document.insert("sequence_number", sequence_number as i64);
             document.insert("uid", uid as i64);
             // Store internal_date as BSON datetime
-            document.insert("internal_date", mongodb::bson::DateTime::from(email.internal_date));
+            document.insert("internal_date", mongodb::bson::DateTime::from_millis(email.internal_date.timestamp_millis()));
             // Insert the document into the collection
             collection.insert_one(document).await?;
             Ok(())
