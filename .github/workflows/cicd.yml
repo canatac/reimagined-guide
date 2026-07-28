@@ -119,20 +119,20 @@ jobs:
             cd /home/debian
 
             # Login to Scaleway Container Registry on the VM
-            echo "${{ secrets.SCW_SECRET_KEY }}" | docker login \
+            echo "${{ secrets.SCW_SECRET_KEY }}" | sudo docker login \
               ${{ secrets.SCW_REGISTRY_ENDPOINT }} \
               -u nologin --password-stdin
 
             # Pull latest images from Scaleway Container Registry
-            docker pull ${{ secrets.SCW_REGISTRY_ENDPOINT }}/smtp-server:latest
-            docker pull ${{ secrets.SCW_REGISTRY_ENDPOINT }}/dkim-service:latest
+            sudo docker pull ${{ secrets.SCW_REGISTRY_ENDPOINT }}/smtp-server:latest
+            sudo docker pull ${{ secrets.SCW_REGISTRY_ENDPOINT }}/dkim-service:latest
 
             # Deploy with unified compose
-            docker compose -f docker-compose.deploy.yml --env-file .env.deploy up -d --remove-orphans
+            sudo docker compose -f docker-compose.deploy.yml --env-file .env.deploy up -d --remove-orphans
 
             # Wait & check containers
             sleep 5
-            docker compose -f docker-compose.deploy.yml ps
+            sudo docker compose -f docker-compose.deploy.yml ps
           REMOTE
 
       - name: Smoke test - SMTP port 25
