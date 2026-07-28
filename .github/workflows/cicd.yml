@@ -128,30 +128,10 @@ jobs:
             sudo docker pull ${{ secrets.SCW_REGISTRY_ENDPOINT }}/dkim-service:latest
 
             # Deploy with unified compose
-            # Create .env.deploy if it doesn't exist (from existing .env or defaults)
+            # Create .env.deploy if it doesn't exist with default values
             if [ ! -f .env.deploy ]; then
-              echo "Creating .env.deploy from secrets..."
-              cat > .env.deploy <<EOF
-              SCW_REGISTRY_ENDPOINT=${{ secrets.SCW_REGISTRY_ENDPOINT }}
-              MONGODB_USERNAME=mongo
-              MONGODB_PASSWORD=changeme
-              MONGODB_DATABASE=mailserver
-              MONGODB_APP_NAME=mailserver
-              SMTP_TLS_ADDR=0.0.0.0:8465
-              SMTP_PLAIN_ADDR=0.0.0.0:8025
-              SMTP_USERNAME=admin
-              SMTP_PASSWORD=changeme
-              API_SERVER_ADDR=0.0.0.0:8000
-              IMAP_SERVER=0.0.0.0:143
-              IMAP_SERVER_API_PORT=8080
-              CERT_PATH=localhost.crt
-              KEY_PATH=localhost.key
-              FULLCHAIN_PATH=fullchain.pem
-              PRIVKEY_PATH=privkey.pem
-              DOMAIN_NAME=misfits.ai
-              KEY_SELECTOR=default
-              RUST_LOG=info
-              EOF
+              echo "Creating .env.deploy with default values..."
+              printf 'SCW_REGISTRY_ENDPOINT=%s\nMONGODB_USERNAME=mongo\nMONGODB_PASSWORD=changeme\nMONGODB_DATABASE=mailserver\nMONGODB_APP_NAME=mailserver\nSMTP_TLS_ADDR=0.0.0.0:8465\nSMTP_PLAIN_ADDR=0.0.0.0:8025\nSMTP_USERNAME=admin\nSMTP_PASSWORD=changeme\nAPI_SERVER_ADDR=0.0.0.0:8000\nIMAP_SERVER=0.0.0.0:143\nIMAP_SERVER_API_PORT=8080\nCERT_PATH=localhost.crt\nKEY_PATH=localhost.key\nFULLCHAIN_PATH=fullchain.pem\nPRIVKEY_PATH=privkey.pem\nDOMAIN_NAME=misfits.ai\nKEY_SELECTOR=default\nRUST_LOG=info\n' "${{ secrets.SCW_REGISTRY_ENDPOINT }}" > .env.deploy
             fi
             sudo docker compose -f docker-compose.deploy.yml --env-file .env.deploy up -d --remove-orphans
 
