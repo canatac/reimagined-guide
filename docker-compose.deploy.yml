@@ -13,7 +13,7 @@ services:
     container_name: smtp-server
     restart: always
     ports:
-      - "25:25"
+      - "25:8025"
       - "8025:8025"
       - "8465:8465"
     volumes:
