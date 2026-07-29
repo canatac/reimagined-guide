@@ -18,7 +18,7 @@ pub struct User {
 }
 
 fn default_mailbox() -> String {
-    "INBOX".to_string()
+    "inbox".to_string()
 }
 
 
@@ -70,7 +70,7 @@ impl Logic {
             collection.insert_one(new_user).await?;
 
             // Standard mailboxes to create
-            let standard_mailboxes = vec!["INBOX", "SENT", "DRAFTS", "ARCHIVE", "TRASH"];
+            let standard_mailboxes = vec!["inbox", "sent", "drafts", "archive", "trash"];
             let mailbox_collection = self.client.database(&database_name).collection::<Mailbox>("mailboxes");
 
             for &mailbox_name in &standard_mailboxes {
@@ -556,7 +556,7 @@ impl Logic {
         }
         #[cfg(test)]
         {
-            Ok(vec!["INBOX".to_string(), "Sent".to_string(), "Drafts".to_string()])
+            Ok(vec!["inbox".to_string(), "sent".to_string(), "drafts".to_string()])
         }
     }
 
@@ -993,10 +993,10 @@ mod tests {
             .expect_list_mailboxes()
             .with(eq("testuser"), eq("*"), eq("testmailbox"))
             .times(1)
-            .returning(|_, _, _| Ok(vec!["INBOX".to_string(), "Sent".to_string(), "Drafts".to_string()]));
+            .returning(|_, _, _| Ok(vec!["inbox".to_string(), "sent".to_string(), "drafts".to_string()]));
 
         let logic = Logic::new_with_mock(mock_client);
         let mailboxes = logic.list_mailboxes("testuser", "*", "testmailbox").await.unwrap();
-        assert_eq!(mailboxes, vec!["INBOX", "Sent", "Drafts"]);
+        assert_eq!(mailboxes, vec!["inbox", "sent", "drafts"]);
     }
 }

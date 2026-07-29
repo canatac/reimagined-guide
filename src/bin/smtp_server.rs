@@ -570,7 +570,8 @@ async fn handle_auth_plain(command: &str, session_manager: Arc<SessionManager>) 
     if check_credentials(username, password) {
         let username_str = String::from_utf8_lossy(username).to_string();
         let session_id = session_manager.create_session(&username_str);
-        session_manager.set_mailbox(&session_id, "INBOX");
+        // FE + API use lowercase folder ids (issue #167)
+        session_manager.set_mailbox(&session_id, "inbox");
         Ok("235 Authentication successful\r\n".to_string())
     } else {
         Ok("535 Authentication failed\r\n".to_string())

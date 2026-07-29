@@ -356,7 +356,7 @@ async fn auth_register(
 ) -> impl Responder {
     let display = req.display_name.clone().unwrap_or_else(|| req.email.split('@').next().unwrap_or("user").to_string());
     // Try to create user in MongoDB
-    match logic.create_user(&req.email, &req.password, "INBOX").await {
+    match logic.create_user(&req.email, &req.password, "inbox").await {
         Ok(_) => HttpResponse::Ok().json(make_session(&req.email, &display)),
         Err(e) => {
             eprintln!("Register error: {}", e);
