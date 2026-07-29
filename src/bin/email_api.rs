@@ -854,26 +854,11 @@ async fn api_send(
 
     match send_result {
         Ok(_) => {
-            // Store Sent copy for the sender (local-part user_id)
+            // Store Sent copy for the sender. Local-domain inbox copies come
+            // exclusively from SMTP inbound (Nodemailer/dkim or MX self-delivery)
+            // to avoid duplicate messages.
             if let Err(e) = logic.store_email(&user_id, "sent", &email).await {
                 eprintln!("store sent copy failed: {}", e);
-            }
-            // Loopback convenience: if any recipient is local domain, also drop into their inbox
-            let domain = domain_from_env();
-            for rcpt in body.to.iter().chain(body.cc.iter()).chain(body.bcc.iter()) {
-                let addr = rcpt.email.trim().to_ascii_lowercase();
-                if let Some((local, host)) = addr.split_once('@') {
-                    if host == domain {
-                        let inbound = Email {
-                            id: Uuid::new_v4().to_string(),
-                            flags: vec![],
-                            ..email.clone()
-                        };
-                        if let Err(e) = logic.store_email(local, "inbox", &inbound).await {
-                            eprintln!("store inbox copy for {} failed: {}", local, e);
-                        }
-                    }
-                }
             }
             HttpResponse::Ok().json(serde_json::json!({
                 "sent": true,
