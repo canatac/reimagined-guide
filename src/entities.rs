@@ -54,11 +54,16 @@ pub struct Email {
     pub to: String,
     pub subject: String,
     pub body: String,
+    #[serde(default)]
     pub headers: Vec<(String, String)>,
+    #[serde(default)]
     pub flags: Vec<String>,
+    #[serde(default)]
     pub sequence_number: u32,
+    #[serde(default)]
     pub uid: u32,
     pub internal_date: bson::DateTime,
+    #[serde(default)]
     pub dkim_signature: Option<String>,
 }
 
