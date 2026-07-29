@@ -434,7 +434,9 @@ async fn main() -> std::io::Result<()> {
         format!("mongodb://{}:{}@{}/?authSource=admin&appName={}", mongo_user, mongo_pass, mongo_cluster, mongo_app)
     };
 
-    let mongo_client = if !mongo_user.is_empty() {
+    let use_mongodb = env::var("USE_MONGODB").unwrap_or_else(|_| "false".to_string()) == "true";
+
+    let mongo_client = if use_mongodb && !mongo_user.is_empty() {
         match mongodb::Client::with_uri_str(&client_uri).await {
             Ok(c) => Some(Arc::new(c)),
             Err(e) => {
