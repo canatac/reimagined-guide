@@ -47,11 +47,12 @@ use dotenv::dotenv;
 use std::env;
 use std::sync::Arc;
 use reqwest;
-use simple_smtp_server::entities::Email;
+use simple_smtp_server::entities::{Email, CalendarEvent};
 use simple_smtp_server::logic::Logic;
 use uuid::Uuid;
 use chrono::Utc;
 use simple_smtp_server::smtp_client::send_outgoing_email;
+use mongodb::bson;
 
 // --- Auth types ---
 
@@ -418,6 +419,196 @@ async fn api_templates() -> impl Responder {
     HttpResponse::Ok().json(serde_json::json!({"templates": []}))
 }
 
+// --- Calendar types ---
+
+#[derive(Deserialize)]
+struct CreateCalendarEventRequest {
+    title: String,
+    #[serde(default)]
+    description: String,
+    start: String,  // ISO 8601
+    end: String,    // ISO 8601
+    #[serde(default = "default_event_type_str")]
+    event_type: String,
+    #[serde(default = "default_color_str")]
+    color: String,
+    #[serde(default)]
+    location: String,
+}
+
+fn default_event_type_str() -> String { "default".to_string() }
+fn default_color_str() -> String { "#3788d8".to_string() }
+
+#[derive(Deserialize)]
+struct UpdateCalendarEventRequest {
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    start: Option<String>,
+    #[serde(default)]
+    end: Option<String>,
+    #[serde(default)]
+    event_type: Option<String>,
+    #[serde(default)]
+    color: Option<String>,
+    #[serde(default)]
+    location: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CalendarQueryParams {
+    #[serde(default)]
+    start: Option<String>,  // ISO 8601
+    #[serde(default)]
+    end: Option<String>,    // ISO 8601
+}
+
+fn parse_iso_to_bson(s: &str) -> Option<bson::DateTime> {
+    chrono::DateTime::parse_from_rfc3339(s)
+        .ok()
+        .map(|dt| bson::DateTime::from_millis(dt.timestamp_millis()))
+}
+
+fn get_user_from_headers(req: &actix_web::HttpRequest) -> String {
+    // Try x-user-email header, fallback to query param, fallback to env SMTP_USERNAME
+    if let Some(email) = req.headers().get("x-user-email").and_then(|v| v.to_str().ok()) {
+        return email.to_string();
+    }
+    // Fallback: use SMTP_USERNAME env var
+    env::var("SMTP_USERNAME").unwrap_or_else(|_| "admin@misfits.ai".to_string())
+}
+
+// --- Calendar handlers ---
+
+async fn calendar_create_event(
+    req_body: web::Json<CreateCalendarEventRequest>,
+    req: actix_web::HttpRequest,
+    logic: web::Data<Arc<Logic>>,
+) -> impl Responder {
+    let user = get_user_from_headers(&req);
+
+    let start = match parse_iso_to_bson(&req_body.start) {
+        Some(dt) => dt,
+        None => return HttpResponse::BadRequest().json(serde_json::json!({"error": "Invalid start date format, use ISO 8601"})),
+    };
+    let end = match parse_iso_to_bson(&req_body.end) {
+        Some(dt) => dt,
+        None => return HttpResponse::BadRequest().json(serde_json::json!({"error": "Invalid end date format, use ISO 8601"})),
+    };
+
+    let mut event = CalendarEvent::new(&user, &req_body.title, start, end);
+    event.description = req_body.description.clone();
+    event.event_type = req_body.event_type.clone();
+    event.color = req_body.color.clone();
+    event.location = req_body.location.clone();
+
+    match logic.create_calendar_event(&event).await {
+        Ok(_) => HttpResponse::Created().json(&event),
+        Err(e) => {
+            eprintln!("Calendar create error: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({"error": "Failed to create event"}))
+        }
+    }
+}
+
+async fn calendar_list_events(
+    req: actix_web::HttpRequest,
+    query: web::Query<CalendarQueryParams>,
+    logic: web::Data<Arc<Logic>>,
+) -> impl Responder {
+    let user = get_user_from_headers(&req);
+
+    let start_after = query.start.as_ref().and_then(|s| parse_iso_to_bson(s));
+    let start_before = query.end.as_ref().and_then(|s| parse_iso_to_bson(s));
+
+    match logic.get_calendar_events(&user, start_after, start_before).await {
+        Ok(events) => HttpResponse::Ok().json(serde_json::json!({"events": events, "total": events.len()})),
+        Err(e) => {
+            eprintln!("Calendar list error: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({"error": "Failed to list events"}))
+        }
+    }
+}
+
+async fn calendar_get_event(
+    req: actix_web::HttpRequest,
+    path: web::Path<String>,
+    logic: web::Data<Arc<Logic>>,
+) -> impl Responder {
+    let user = get_user_from_headers(&req);
+    let event_id = path.into_inner();
+
+    match logic.get_calendar_event(&user, &event_id).await {
+        Ok(Some(event)) => HttpResponse::Ok().json(&event),
+        Ok(None) => HttpResponse::NotFound().json(serde_json::json!({"error": "Event not found"})),
+        Err(e) => {
+            eprintln!("Calendar get error: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({"error": "Failed to get event"}))
+        }
+    }
+}
+
+async fn calendar_update_event(
+    req_body: web::Json<UpdateCalendarEventRequest>,
+    req: actix_web::HttpRequest,
+    path: web::Path<String>,
+    logic: web::Data<Arc<Logic>>,
+) -> impl Responder {
+    let user = get_user_from_headers(&req);
+    let event_id = path.into_inner();
+
+    let mut update = bson::Document::new();
+    if let Some(title) = &req_body.title { update.insert("title", title.clone()); }
+    if let Some(desc) = &req_body.description { update.insert("description", desc.clone()); }
+    if let Some(start) = &req_body.start {
+        match parse_iso_to_bson(start) {
+            Some(dt) => { update.insert("start", dt); }
+            None => return HttpResponse::BadRequest().json(serde_json::json!({"error": "Invalid start date format"})),
+        }
+    }
+    if let Some(end) = &req_body.end {
+        match parse_iso_to_bson(end) {
+            Some(dt) => { update.insert("end", dt); }
+            None => return HttpResponse::BadRequest().json(serde_json::json!({"error": "Invalid end date format"})),
+        }
+    }
+    if let Some(et) = &req_body.event_type { update.insert("event_type", et.clone()); }
+    if let Some(color) = &req_body.color { update.insert("color", color.clone()); }
+    if let Some(loc) = &req_body.location { update.insert("location", loc.clone()); }
+
+    if update.is_empty() {
+        return HttpResponse::BadRequest().json(serde_json::json!({"error": "No fields to update"}));
+    }
+
+    match logic.update_calendar_event(&user, &event_id, update).await {
+        Ok(Some(event)) => HttpResponse::Ok().json(&event),
+        Ok(None) => HttpResponse::NotFound().json(serde_json::json!({"error": "Event not found"})),
+        Err(e) => {
+            eprintln!("Calendar update error: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({"error": "Failed to update event"}))
+        }
+    }
+}
+
+async fn calendar_delete_event(
+    req: actix_web::HttpRequest,
+    path: web::Path<String>,
+    logic: web::Data<Arc<Logic>>,
+) -> impl Responder {
+    let user = get_user_from_headers(&req);
+    let event_id = path.into_inner();
+
+    match logic.delete_calendar_event(&user, &event_id).await {
+        Ok(_) => HttpResponse::Ok().json(serde_json::json!({"deleted": true})),
+        Err(e) => {
+            eprintln!("Calendar delete error: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({"error": "Failed to delete event"}))
+        }
+    }
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     dotenv().ok();
@@ -488,6 +679,11 @@ async fn main() -> std::io::Result<()> {
                 .route("/api/templates", web::get().to(api_templates))
                 .route("/api/send/undo", web::post().to(api_send))
                 .route("/api/send/schedule", web::post().to(api_send))
+                .route("/api/calendar/events", web::post().to(calendar_create_event))
+                .route("/api/calendar/events", web::get().to(calendar_list_events))
+                .route("/api/calendar/events/{id}", web::get().to(calendar_get_event))
+                .route("/api/calendar/events/{id}", web::put().to(calendar_update_event))
+                .route("/api/calendar/events/{id}", web::delete().to(calendar_delete_event))
                 .route("/send-email", web::post().to(send_email_handler))
                 .route("/create-mailing-list", web::post().to(create_mailing_list))
                 .route("/send-to-mailing-list", web::post().to(send_to_mailing_list))
