@@ -151,6 +151,9 @@ services:
       - NEXT_TELEMETRY_DISABLED=1
       # Prefer email-api HTTP (used on next image rebuild)
       - BACKEND_URL=http://email-api:8000
+      # OpenRouter (server-only AI proxy /api/ai) — set in .env.deploy
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - AI_MODEL=${AI_MODEL:-qwen/qwen3.7-flash}
     depends_on:
       - email-api
     networks:
