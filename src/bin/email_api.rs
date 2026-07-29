@@ -53,6 +53,8 @@ use uuid::Uuid;
 use chrono::Utc;
 use simple_smtp_server::smtp_client::send_outgoing_email;
 use mongodb::bson;
+use mongodb::bson::doc;
+use std::collections::HashMap;
 
 // --- Auth types ---
 
@@ -905,6 +907,137 @@ async fn api_drafts() -> impl Responder {
     HttpResponse::Ok().json(serde_json::json!({"drafts": []}))
 }
 
+// --- AI settings (Phase B1, issue #173) ----------------------------------------
+
+const AI_SETTINGS_ID: &str = "global";
+const DEFAULT_AI_MODEL: &str = "qwen/qwen3.7-flash";
+
+fn default_ai_feature_models() -> HashMap<String, String> {
+    let mut m = HashMap::new();
+    for key in [
+        "compose",
+        "translate",
+        "triage",
+        "security",
+        "rewrite",
+        "subject",
+        "complete",
+    ] {
+        m.insert(key.to_string(), DEFAULT_AI_MODEL.to_string());
+    }
+    m
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AiSettingsDoc {
+    #[serde(rename = "_id")]
+    id: String,
+    #[serde(rename = "defaultModel", alias = "default_model")]
+    default_model: String,
+    features: HashMap<String, String>,
+    #[serde(rename = "updatedAt", alias = "updated_at", default)]
+    updated_at: Option<String>,
+}
+
+impl AiSettingsDoc {
+    fn defaults() -> Self {
+        Self {
+            id: AI_SETTINGS_ID.to_string(),
+            default_model: DEFAULT_AI_MODEL.to_string(),
+            features: default_ai_feature_models(),
+            updated_at: Some(Utc::now().to_rfc3339()),
+        }
+    }
+
+    fn merge_with_defaults(mut self) -> Self {
+        let defaults = default_ai_feature_models();
+        for (k, v) in defaults {
+            self.features.entry(k).or_insert(v);
+        }
+        if self.default_model.trim().is_empty() {
+            self.default_model = DEFAULT_AI_MODEL.to_string();
+        }
+        self
+    }
+
+    fn to_public_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "defaultModel": self.default_model,
+            "features": self.features,
+            "updatedAt": self.updated_at,
+        })
+    }
+}
+
+#[derive(Deserialize)]
+struct AiSettingsUpdate {
+    #[serde(rename = "defaultModel", alias = "default_model", default)]
+    default_model: Option<String>,
+    #[serde(default)]
+    features: Option<HashMap<String, String>>,
+}
+
+fn mongo_db_name() -> String {
+    env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string())
+}
+
+async fn load_ai_settings(client: &mongodb::Client) -> AiSettingsDoc {
+    let coll = client
+        .database(&mongo_db_name())
+        .collection::<AiSettingsDoc>("ai_settings");
+    match coll.find_one(doc! { "_id": AI_SETTINGS_ID }).await {
+        Ok(Some(doc)) => doc.merge_with_defaults(),
+        _ => AiSettingsDoc::defaults(),
+    }
+}
+
+async fn api_get_ai_settings(mongo: web::Data<Arc<mongodb::Client>>) -> impl Responder {
+    let settings = load_ai_settings(mongo.get_ref()).await;
+    HttpResponse::Ok().json(settings.to_public_json())
+}
+
+async fn api_put_ai_settings(
+    body: web::Json<AiSettingsUpdate>,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    let mut current = load_ai_settings(mongo.get_ref()).await;
+    if let Some(model) = body.default_model.as_ref() {
+        let m = model.trim();
+        if !m.is_empty() {
+            current.default_model = m.to_string();
+        }
+    }
+    if let Some(features) = body.features.as_ref() {
+        for (k, v) in features {
+            let key = k.trim();
+            let val = v.trim();
+            if !key.is_empty() && !val.is_empty() {
+                current.features.insert(key.to_string(), val.to_string());
+            }
+        }
+    }
+    current = current.merge_with_defaults();
+    current.updated_at = Some(Utc::now().to_rfc3339());
+
+    let coll = mongo
+        .database(&mongo_db_name())
+        .collection::<AiSettingsDoc>("ai_settings");
+    // mongodb 3.x: upsert via ReplaceOptions builder chain
+    match coll
+        .replace_one(doc! { "_id": AI_SETTINGS_ID }, current.clone())
+        .upsert(true)
+        .await
+    {
+        Ok(_) => HttpResponse::Ok().json(current.to_public_json()),
+        Err(e) => {
+            eprintln!("ai_settings upsert failed: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({
+                "message": "Failed to save AI settings",
+            }))
+        }
+    }
+}
+
 async fn api_templates() -> impl Responder {
     HttpResponse::Ok().json(serde_json::json!({"templates": []}))
 }
@@ -1132,9 +1265,11 @@ async fn main() -> std::io::Result<()> {
     let fallback_client = Arc::new(
         mongodb::Client::with_uri_str("mongodb://localhost:27017").await.unwrap()
     );
+    let shared_mongo = mongo_client.clone().unwrap_or_else(|| fallback_client.clone());
     let logic = web::Data::new(Arc::new(Logic::new(
         mongo_client.unwrap_or(fallback_client)
     )));
+    let mongo_data = web::Data::new(shared_mongo);
 
     let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
     builder
@@ -1144,6 +1279,7 @@ async fn main() -> std::io::Result<()> {
 
     // Start HTTP server on 8000 (for frontend proxy, no TLS)
     let http_logic = logic.clone();
+    let http_mongo = mongo_data.clone();
     let http_addr = env::var("API_SERVER_ADDR").unwrap_or_else(|_| "0.0.0.0:8000".to_string());
     let http_server = actix_web::rt::spawn(async move {
         HttpServer::new(move || {
@@ -1157,6 +1293,7 @@ async fn main() -> std::io::Result<()> {
             App::new()
                 .wrap(cors)
                 .app_data(http_logic.clone())
+                .app_data(http_mongo.clone())
                 .route("/api/auth/login", web::post().to(auth_login))
                 .route("/api/auth/register", web::post().to(auth_register))
                 .route("/api/auth/logout", web::post().to(auth_logout))
@@ -1168,6 +1305,8 @@ async fn main() -> std::io::Result<()> {
                 .route("/api/drafts", web::get().to(api_drafts))
                 .route("/api/drafts", web::post().to(api_drafts))
                 .route("/api/templates", web::get().to(api_templates))
+                .route("/api/settings/ai", web::get().to(api_get_ai_settings))
+                .route("/api/settings/ai", web::put().to(api_put_ai_settings))
                 .route("/api/send/undo", web::post().to(api_send))
                 .route("/api/send/schedule", web::post().to(api_send))
                 .route("/api/calendar/events", web::post().to(calendar_create_event))
