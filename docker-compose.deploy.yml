@@ -30,7 +30,7 @@ services:
       - SMTP_PASSWORD=${SMTP_PASSWORD}
       - MONGODB_USERNAME=${MONGODB_USERNAME}
       - MONGODB_PASSWORD=${MONGODB_PASSWORD}
-      - MONGODB_CLUSTER_URL=172.17.0.1:27017
+      - MONGODB_CLUSTER_URL=172.16.12.2:27017
       - MONGODB_APP_NAME=${MONGODB_APP_NAME:-mailserver}
       - MONGODB_DATABASE=${MONGODB_DATABASE:-mailserver}
       - MONGODB_COLLECTION=${MONGODB_COLLECTION:-emails}
@@ -57,7 +57,7 @@ services:
       - SMTP_PASSWORD=${SMTP_PASSWORD}
       - MONGODB_USERNAME=${MONGODB_USERNAME}
       - MONGODB_PASSWORD=${MONGODB_PASSWORD}
-      - MONGODB_CLUSTER_URL=172.17.0.1:27017
+      - MONGODB_CLUSTER_URL=172.16.12.2:27017
       - MONGODB_APP_NAME=${MONGODB_APP_NAME:-mailserver}
       - MONGODB_DATABASE=${MONGODB_DATABASE:-mailserver}
       - MONGODB_COLLECTION=${MONGODB_COLLECTION:-emails}
@@ -65,6 +65,14 @@ services:
       - DKIM_SERVICE_URL=http://dkim-service:3000/sign
       - RUST_LOG=${RUST_LOG:-info}
     command: ["email_api"]
+    # Image HEALTHCHECK probes :8025 (SMTP). Override for API binary.
+    # wget --spider treats some 2xx oddly; use full GET + HTTP code check.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8000/api/emails || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
     depends_on:
       - smtp-server
     networks:
@@ -85,13 +93,20 @@ services:
       - IMAP_SERVER_API_PORT=${IMAP_SERVER_API_PORT}
       - MONGODB_USERNAME=${MONGODB_USERNAME}
       - MONGODB_PASSWORD=${MONGODB_PASSWORD}
-      - MONGODB_CLUSTER_URL=172.17.0.1:27017
+      - MONGODB_CLUSTER_URL=172.16.12.2:27017
       - MONGODB_APP_NAME=${MONGODB_APP_NAME:-mailserver}
       - MONGODB_DATABASE=${MONGODB_DATABASE:-mailserver}
       - MONGODB_COLLECTION=${MONGODB_COLLECTION:-emails}
       - USE_MONGODB=${USE_MONGODB:-true}
       - RUST_LOG=${RUST_LOG:-info}
     command: ["imap_server"]
+    # Image HEALTHCHECK is SMTP-specific; slim image has no pgrep — probe PID1.
+    healthcheck:
+      test: ["CMD-SHELL", "test -d /proc/1 && grep -q imap_server /proc/1/comm"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
     networks:
       - mailnet
 
@@ -127,12 +142,18 @@ services:
     restart: always
     ports:
       - "3001:3000"
+    # Next rewrites bake BACKEND_URL at image build time. Until image rebuild,
+    # overlay patched server.js + manifests (imap-server:8080 → email-api:8000).
+    volumes:
+      - ./runtime-patches/misfits-web/server.js:/app/server.js:ro
+      - ./runtime-patches/misfits-web/.next/required-server-files.json:/app/.next/required-server-files.json:ro
+      - ./runtime-patches/misfits-web/.next/routes-manifest.json:/app/.next/routes-manifest.json:ro
     environment:
       - NODE_ENV=production
       - NEXT_TELEMETRY_DISABLED=1
-      - BACKEND_URL=http://imap-server:8080
+      # Proxy Next /api/* → email_api HTTP (not imap :8080 — no HTTP there)
+      - BACKEND_URL=http://email-api:8000
     depends_on:
-      - imap-server
       - email-api
     networks:
       - mailnet
