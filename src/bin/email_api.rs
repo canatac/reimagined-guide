@@ -490,24 +490,32 @@ struct EmailDto {
 
 fn parse_address(raw: &str) -> EmailAddressDto {
     let raw = raw.trim();
-    // "Name <addr@x>" or bare addr
-    if let Some(start) = raw.find('<') {
-        if let Some(end) = raw.find('>') {
-            let name = raw[..start].trim().trim_matches('"').to_string();
+    // "Name <addr@x>" or bare addr. Guard against malformed inputs where
+    // '>' appears before '<' (e.g. `">" <admin@misfits.ai`) — naive slicing
+    // panics on start > end. Pick the last '<' and the matching '>' after it.
+    if let Some(start) = raw.rfind('<') {
+        // Only treat as bracketed form when a '>' exists AFTER the '<'.
+        if let Some(rel_end) = raw[start + 1..].find('>') {
+            let end = start + 1 + rel_end;
+            let name = raw[..start].trim().trim_matches('"').trim().to_string();
             let address = raw[start + 1..end].trim().to_string();
-            return EmailAddressDto {
-                name: if name.is_empty() {
-                    address.split('@').next().unwrap_or("").to_string()
-                } else {
-                    name
-                },
-                address,
-            };
+            if !address.is_empty() {
+                return EmailAddressDto {
+                    name: if name.is_empty() {
+                        address.split('@').next().unwrap_or("").to_string()
+                    } else {
+                        name
+                    },
+                    address,
+                };
+            }
         }
     }
+    // Bare address fallback: strip any stray angle brackets/quotes.
+    let cleaned = raw.trim_matches(|c| c == '<' || c == '>' || c == '"').trim();
     EmailAddressDto {
-        name: raw.split('@').next().unwrap_or(raw).to_string(),
-        address: raw.to_string(),
+        name: cleaned.split('@').next().unwrap_or(cleaned).to_string(),
+        address: cleaned.to_string(),
     }
 }
 
