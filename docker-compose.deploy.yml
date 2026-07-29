@@ -1,33 +1,13 @@
 # docker-compose.deploy.yml
 # Déploiement unifié sur la VM Scaleway
-# 6 services : smtp-server, email-api, imap-server, mongodb, dkim-service, misfits-web
+# 5 services : smtp-server, email-api, imap-server, dkim-service, misfits-web
+# MongoDB est installé nativement sur la VM (pas dans un container)
 # Images pulled from Scaleway Container Registry
 #
 # Usage sur la VM :
 #   docker compose -f docker-compose.deploy.yml --env-file .env.deploy up -d
 
 services:
-  mongodb:
-    image: mongo:7-jammy
-    container_name: mongodb
-    restart: always
-    ports:
-      - "27017:27017"
-    environment:
-      - MONGO_INITDB_ROOT_USERNAME=${MONGODB_USERNAME}
-      - MONGO_INITDB_ROOT_PASSWORD=${MONGODB_PASSWORD}
-      - MONGO_INITDB_DATABASE=${MONGODB_DATABASE:-mailserver}
-    volumes:
-      - mongo_data:/data/db
-      - ./init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
-    healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - mailnet
-
   smtp-server:
     image: ${SCW_REGISTRY_ENDPOINT}/smtp-server:latest
     container_name: smtp-server
@@ -49,16 +29,13 @@ services:
       - SMTP_PASSWORD=${SMTP_PASSWORD}
       - MONGODB_USERNAME=${MONGODB_USERNAME}
       - MONGODB_PASSWORD=${MONGODB_PASSWORD}
-      - MONGODB_CLUSTER_URL=mongodb:27017
+      - MONGODB_CLUSTER_URL=172.17.0.1:27017
       - MONGODB_APP_NAME=${MONGODB_APP_NAME:-mailserver}
       - MONGODB_DATABASE=${MONGODB_DATABASE:-mailserver}
       - MONGODB_COLLECTION=${MONGODB_COLLECTION:-emails}
       - USE_MONGODB=${USE_MONGODB:-true}
       - RUST_LOG=${RUST_LOG:-info}
     command: ["smtp_server"]
-    depends_on:
-      mongodb:
-        condition: service_healthy
     networks:
       - mailnet
 
@@ -79,7 +56,7 @@ services:
       - SMTP_PASSWORD=${SMTP_PASSWORD}
       - MONGODB_USERNAME=${MONGODB_USERNAME}
       - MONGODB_PASSWORD=${MONGODB_PASSWORD}
-      - MONGODB_CLUSTER_URL=mongodb:27017
+      - MONGODB_CLUSTER_URL=172.17.0.1:27017
       - MONGODB_APP_NAME=${MONGODB_APP_NAME:-mailserver}
       - MONGODB_DATABASE=${MONGODB_DATABASE:-mailserver}
       - MONGODB_COLLECTION=${MONGODB_COLLECTION:-emails}
@@ -107,16 +84,13 @@ services:
       - IMAP_SERVER_API_PORT=${IMAP_SERVER_API_PORT}
       - MONGODB_USERNAME=${MONGODB_USERNAME}
       - MONGODB_PASSWORD=${MONGODB_PASSWORD}
-      - MONGODB_CLUSTER_URL=mongodb:27017
+      - MONGODB_CLUSTER_URL=172.17.0.1:27017
       - MONGODB_APP_NAME=${MONGODB_APP_NAME:-mailserver}
       - MONGODB_DATABASE=${MONGODB_DATABASE:-mailserver}
       - MONGODB_COLLECTION=${MONGODB_COLLECTION:-emails}
       - USE_MONGODB=${USE_MONGODB:-true}
       - RUST_LOG=${RUST_LOG:-info}
     command: ["imap_server"]
-    depends_on:
-      mongodb:
-        condition: service_healthy
     networks:
       - mailnet
 
@@ -165,7 +139,3 @@ services:
 networks:
   mailnet:
     driver: bridge
-
-volumes:
-  emails:
-  mongo_data:
