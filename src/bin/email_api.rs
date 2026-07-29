@@ -547,12 +547,44 @@ fn email_to_dto(email: &Email, folder: &str) -> EmailDto {
             .map(|d| d.to_rfc3339())
             .unwrap_or_else(|| Utc::now().to_rfc3339())
     };
+    // SMTP/Nodemailer inbound often leaves `id` blank and packs DKIM-/Message-ID
+    // into weird header tuples ("Message-ID: <...>", "Message-ID: <...>").
     let message_id = email
         .headers
         .iter()
-        .find(|(k, _)| k.eq_ignore_ascii_case("message-id"))
-        .map(|(_, v)| v.clone())
-        .unwrap_or_else(|| email.id.clone());
+        .find_map(|(k, v)| {
+            if k.eq_ignore_ascii_case("message-id") && !v.is_empty() {
+                Some(v.clone())
+            } else if k.to_ascii_lowercase().starts_with("message-id:") {
+                let val = k.splitn(2, ':').nth(1).unwrap_or("").trim();
+                if !val.is_empty() {
+                    Some(val.to_string())
+                } else if !v.is_empty() {
+                    Some(v.clone())
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| {
+            if !email.id.is_empty() {
+                email.id.clone()
+            } else if email.uid > 0 {
+                format!("uid-{}", email.uid)
+            } else {
+                Uuid::new_v4().to_string()
+            }
+        });
+    let id = if email.id.is_empty() {
+        message_id
+            .trim_matches(|c| c == '<' || c == '>')
+            .to_string()
+    } else {
+        email.id.clone()
+    };
     let to_list: Vec<EmailAddressDto> = email
         .to
         .split(',')
@@ -561,7 +593,7 @@ fn email_to_dto(email: &Email, folder: &str) -> EmailDto {
         .map(parse_address)
         .collect();
     EmailDto {
-        id: email.id.clone(),
+        id,
         thread_id: message_id.clone(),
         folder: folder.to_ascii_lowercase(),
         from: parse_address(&email.from),
