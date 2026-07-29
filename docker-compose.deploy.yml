@@ -14,6 +14,7 @@ services:
     restart: always
     ports:
       - "25:8025"
+      - "587:8465"
       - "8025:8025"
       - "8465:8465"
     volumes:
