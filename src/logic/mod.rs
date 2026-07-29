@@ -102,21 +102,20 @@ impl Logic {
         #[cfg(not(test))]
         {
             let database_name = std::env::var("MONGODB_DATABASE").expect("MONGODB_DATABASE must be set");
-            let collection_name = std::env::var("MONGODB_COLLECTION").expect("MONGODB_COLLECTION must be set");
-            let collection = self.client.database(&database_name).collection::<User>(&collection_name);
+            // Prefer dedicated users collection — never scan "emails" with a User shape.
+            let collection_name = std::env::var("MONGODB_USERS_COLLECTION")
+                .unwrap_or_else(|_| "users".to_string());
+            let collection = self
+                .client
+                .database(&database_name)
+                .collection::<User>(&collection_name);
 
-            let filter = doc! { 
-                "username": username, 
-                "password": password 
+            let filter = doc! {
+                "username": username,
+                "password": password
             };
-            let user = collection.find_one(filter).await?;
-            if let Some(user) = user {
-                format!("{} OK LOGIN completed\r\n","A000");
-                Ok(Some(user))
-            } else {
-                println!("No user found with the given username, mailbox, and password.");
-                Ok(None)
-            }
+            // Fast path: no noise log when missing (env fallback handles bootstrap admin).
+            Ok(collection.find_one(filter).await?)
         }
         #[cfg(test)]
         {
@@ -125,17 +124,37 @@ impl Logic {
     }
 
     pub async fn get_emails(&self, username: &str, mailbox: &str) -> Result<Vec<Email>> {
+        self.get_emails_page(username, mailbox, 200, 0).await
+    }
+
+    /// Sorted newest-first page; omits heavy headers projection at the driver level when possible.
+    pub async fn get_emails_page(
+        &self,
+        username: &str,
+        mailbox: &str,
+        limit: i64,
+        skip: u64,
+    ) -> Result<Vec<Email>> {
         #[cfg(not(test))]
         {
             let database_name = std::env::var("MONGODB_DATABASE").expect("MONGODB_DATABASE must be set");
             let collection = self.client.database(&database_name).collection::<Email>("emails");
             let filter = doc! { "user_id": username, "mailbox": mailbox };
-            let cursor = collection.find(filter).await?;
+            let cursor = collection
+                .find(filter)
+                .sort(doc! { "internal_date": -1 })
+                .skip(skip)
+                .limit(limit.max(1).min(200))
+                .projection(doc! {
+                    // Drop bulky SMTP header dump from list query payloads
+                    "headers": 0,
+                })
+                .await?;
             cursor.try_collect().await
         }
         #[cfg(test)]
         {
-            //For test, we need to return a vector of emails
+            let _ = (limit, skip);
             let emails = vec![Email::new("testemail", "from@test.com", "to@test.com", "Test Subject", "Test Body")];
             Ok(emails)
         }

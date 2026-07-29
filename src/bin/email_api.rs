@@ -525,7 +525,7 @@ fn strip_tags(html: &str) -> String {
     out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn email_to_dto(email: &Email, folder: &str) -> EmailDto {
+fn email_to_dto(email: &Email, folder: &str, include_body: bool) -> EmailDto {
     let flags_l: Vec<String> = email.flags.iter().map(|f| f.to_ascii_lowercase()).collect();
     let is_read = flags_l.iter().any(|f| f == "seen" || f == "\\seen");
     let is_starred = flags_l.iter().any(|f| f == "flagged" || f == "\\flagged" || f == "starred");
@@ -602,7 +602,12 @@ fn email_to_dto(email: &Email, folder: &str) -> EmailDto {
         to: to_list,
         subject: email.subject.clone(),
         preview,
-        body: email.body.clone(),
+        // List payloads stay lean — detail fetch fills body via GET /api/emails/:id
+        body: if include_body {
+            email.body.clone()
+        } else {
+            String::new()
+        },
         body_type: body_type.to_string(),
         date: date.clone(),
         received_at: date,
@@ -617,6 +622,14 @@ fn email_to_dto(email: &Email, folder: &str) -> EmailDto {
     }
 }
 
+fn email_to_list_dto(email: &Email, folder: &str) -> EmailDto {
+    email_to_dto(email, folder, false)
+}
+
+fn email_to_detail_dto(email: &Email, folder: &str) -> EmailDto {
+    email_to_dto(email, folder, true)
+}
+
 async fn api_emails(
     query: web::Query<EmailListQuery>,
     req: actix_web::HttpRequest,
@@ -625,11 +638,17 @@ async fn api_emails(
     let user_id = resolve_user_id(&req);
     let folder = query.folder.trim().to_ascii_lowercase();
     let page = query.page.max(1);
-    let page_size = query.page_size.clamp(1, 200);
+    let page_size = query.page_size.clamp(1, 100);
+    // Over-fetch a single page-sized chunk per mailbox candidate, then merge.
+    // Skip huge dumps: limit from Mongo already newest-first.
+    let fetch_limit = (page_size as i64).saturating_mul(page as i64).max(page_size as i64);
 
     let mut collected: Vec<Email> = Vec::new();
     for mailbox in folder_to_mailboxes(&folder) {
-        match logic.get_emails(&user_id, &mailbox).await {
+        match logic
+            .get_emails_page(&user_id, &mailbox, fetch_limit, 0)
+            .await
+        {
             Ok(mut batch) => {
                 collected.append(&mut batch);
             }
@@ -639,11 +658,18 @@ async fn api_emails(
         }
     }
 
-    // Newest first
+    // Newest first (Mongo sort already does this; keep stable merge)
     collected.sort_by(|a, b| b.internal_date.cmp(&a.internal_date));
-    // Dedup by id if same mail matched multiple mailbox casings
+    // Dedup by id / message-id fallback
     let mut seen = std::collections::HashSet::new();
-    collected.retain(|e| seen.insert(e.id.clone()));
+    collected.retain(|e| {
+        let key = if e.id.is_empty() {
+            format!("{}|{}|{}", e.from, e.subject, e.internal_date.timestamp_millis())
+        } else {
+            e.id.clone()
+        };
+        seen.insert(key)
+    });
 
     let total = collected.len() as u32;
     let start = ((page - 1) * page_size) as usize;
@@ -651,7 +677,7 @@ async fn api_emails(
         .into_iter()
         .skip(start)
         .take(page_size as usize)
-        .map(|e| email_to_dto(&e, &folder))
+        .map(|e| email_to_list_dto(&e, &folder))
         .collect();
     let has_more = start + page_items.len() < total as usize;
 
@@ -888,7 +914,7 @@ async fn api_email_by_id(
     match logic.fetch_email(&user_id, &email_id).await {
         Ok(Some(email)) => {
             // Infer folder best-effort — FE mostly uses list; detail uses body
-            let dto = email_to_dto(&email, "inbox");
+            let dto = email_to_detail_dto(&email, "inbox");
             HttpResponse::Ok().json(dto)
         }
         Ok(None) => HttpResponse::NotFound().json(serde_json::json!({
