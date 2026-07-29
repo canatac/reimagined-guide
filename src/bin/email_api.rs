@@ -435,18 +435,23 @@ async fn main() -> std::io::Result<()> {
     };
 
     let mongo_client = if !mongo_user.is_empty() {
-        Some(Arc::new(mongodb::Client::with_uri_str(&client_uri).await.unwrap_or_else(|e| {
-            eprintln!("MongoDB connection failed: {}, auth will use env vars", e);
-            // Return a dummy client — auth will fall back to env vars
-            mongodb::Client::with_uri_str("mongodb://localhost:27017").await.unwrap()
-        })))
+        match mongodb::Client::with_uri_str(&client_uri).await {
+            Ok(c) => Some(Arc::new(c)),
+            Err(e) => {
+                eprintln!("MongoDB connection failed: {}, auth will use env vars", e);
+                None
+            }
+        }
     } else {
         None
     };
 
-    let logic = web::Data::new(Arc::new(Logic::new(mongo_client.unwrap_or_else(|| {
-        Arc::new(mongodb::Client::with_uri_str("mongodb://localhost:27017").await.unwrap())
-    }))));
+    let fallback_client = Arc::new(
+        mongodb::Client::with_uri_str("mongodb://localhost:27017").await.unwrap()
+    );
+    let logic = web::Data::new(Arc::new(Logic::new(
+        mongo_client.unwrap_or(fallback_client)
+    )));
 
     let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
     builder
@@ -458,16 +463,16 @@ async fn main() -> std::io::Result<()> {
     let http_logic = logic.clone();
     let http_addr = env::var("API_SERVER_ADDR").unwrap_or_else(|_| "0.0.0.0:8000".to_string());
     let http_server = actix_web::rt::spawn(async move {
-        let cors = Cors::permissive()
-            .allow_any_origin()
-            .allow_any_method()
-            .allow_any_header()
-            .supports_credentials()
-            .max_age(3600);
-
         HttpServer::new(move || {
+            let cors = Cors::permissive()
+                .allow_any_origin()
+                .allow_any_method()
+                .allow_any_header()
+                .supports_credentials()
+                .max_age(3600);
+
             App::new()
-                .wrap(cors.clone())
+                .wrap(cors)
                 .app_data(http_logic.clone())
                 .route("/api/auth/login", web::post().to(auth_login))
                 .route("/api/auth/register", web::post().to(auth_register))
