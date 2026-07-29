@@ -148,19 +148,8 @@ jobs:
 
       - name: Smoke test - SMTP port 587 (STARTTLS)
         run: |
-          ssh -o StrictHostKeyChecking=no debian@${{ secrets.VM_IP }} << 'SMOKE'
-            set -euo pipefail
-            for i in $(seq 1 12); do
-              if nc -z -w 3 127.0.0.1 587 2>/dev/null; then
-                echo "SMTP port 587 open"
-                exit 0
-              fi
-              echo "retry $i..."
-              sleep 5
-            done
-            echo "SMTP port 587 not reachable"
-            exit 1
-          SMOKE
+          ssh -o StrictHostKeyChecking=no debian@${{ secrets.VM_IP }} \
+            "for i in \$(seq 1 12); do if nc -z -w 3 127.0.0.1 587 2>/dev/null; then echo 'SMTP port 587 open' && exit 0; fi; echo \"retry \$i...\"; sleep 5; done; echo 'SMTP port 587 not reachable'; exit 1"
 
       - name: Smoke test - DKIM service port 3000
         run: |
