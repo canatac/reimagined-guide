@@ -62,7 +62,7 @@ services:
       - MONGODB_DATABASE=${MONGODB_DATABASE:-mailserver}
       - MONGODB_COLLECTION=${MONGODB_COLLECTION:-emails}
       - USE_MONGODB=${USE_MONGODB:-true}
-      - DKIM_SERVICE_URL=http://dkim-service:3000/sign
+      - DKIM_SERVICE_URL=http://dkim-service:3000/generate-dkim
       - RUST_LOG=${RUST_LOG:-info}
     command: ["email_api"]
     # Image HEALTHCHECK probes :8025 (SMTP). Override for API binary.

@@ -723,14 +723,18 @@ async fn api_send(
         body: mail_body.clone(),
     };
 
-    // DKIM sign via shared service (same path as /send-email)
+    // DKIM sign via shared service (same path as /send-email).
+    // Note: studious-octo-rotary-phone exposes POST /generate-dkim and may
+    // both sign and deliver via Nodemailer — when no dkimSignature is
+    // returned we treat success as "already delivered by dkim-service".
     let dkim_service: Box<dyn DkimService> = Box::new(RealDkimService);
-    let (dkim_sig, message_id_hdr) = match dkim_service.sign_email(&email_req).await {
+    let (dkim_sig, message_id_hdr, already_delivered) = match dkim_service.sign_email(&email_req).await {
         Ok(dkim_result) => {
             let status = dkim_result["status"].as_str().unwrap_or("");
             if status != "success" {
                 let msg = dkim_result["message"]
                     .as_str()
+                    .or_else(|| dkim_result["error"].as_str())
                     .unwrap_or("DKIM signing failed");
                 return HttpResponse::InternalServerError().json(serde_json::json!({
                     "sent": false,
@@ -739,13 +743,16 @@ async fn api_send(
             }
             let sig = dkim_result["dkimSignature"]
                 .as_str()
+                .or_else(|| dkim_result["dkim_signature"].as_str())
                 .unwrap_or("")
                 .to_string();
             let mid = dkim_result["messageId"]
                 .as_str()
+                .or_else(|| dkim_result["message_id"].as_str())
                 .unwrap_or("")
                 .to_string();
-            (sig, mid)
+            let delivered = sig.is_empty();
+            (sig, mid, delivered)
         }
         Err(e) => {
             eprintln!("DKIM service error on /api/send: {}", e);
@@ -806,7 +813,14 @@ async fn api_send(
         },
     };
 
-    match send_outgoing_email(&email).await {
+    let send_result = if already_delivered {
+        // dkim-service already handed off to SMTP (Nodemailer).
+        Ok(())
+    } else {
+        send_outgoing_email(&email).await
+    };
+
+    match send_result {
         Ok(_) => {
             // Store Sent copy for the sender (local-part user_id)
             if let Err(e) = logic.store_email(&user_id, "sent", &email).await {
