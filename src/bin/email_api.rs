@@ -393,13 +393,240 @@ async fn auth_refresh() -> impl Responder {
     }))
 }
 
-async fn api_emails() -> impl Responder {
-    // Return empty list for now
+// --- Mail list (Phase A1, issue #166) -----------------------------------------
+
+#[derive(Deserialize)]
+struct EmailListQuery {
+    #[serde(default = "default_folder")]
+    folder: String,
+    #[serde(default = "default_page")]
+    page: u32,
+    #[serde(rename = "pageSize", default = "default_page_size")]
+    page_size: u32,
+}
+
+fn default_folder() -> String {
+    "inbox".to_string()
+}
+fn default_page() -> u32 {
+    1
+}
+fn default_page_size() -> u32 {
+    50
+}
+
+/// Canonical FE folder id → mailbox names to try in Mongo (SMTP historically used INBOX).
+fn folder_to_mailboxes(folder: &str) -> Vec<String> {
+    let f = folder.trim().to_ascii_lowercase();
+    match f.as_str() {
+        "inbox" => vec!["inbox".into(), "INBOX".into()],
+        "sent" => vec!["sent".into(), "SENT".into(), "Sent".into()],
+        "drafts" => vec!["drafts".into(), "DRAFTS".into(), "Drafts".into()],
+        "archive" => vec!["archive".into(), "ARCHIVE".into(), "Archive".into()],
+        "trash" => vec!["trash".into(), "TRASH".into(), "Trash".into()],
+        "spam" => vec!["spam".into(), "SPAM".into(), "Spam".into(), "Junk".into()],
+        other => vec![other.to_string(), other.to_ascii_uppercase()],
+    }
+}
+
+/// Resolve mailbox local-part. Convention: user_id = `admin` (not admin@misfits.ai).
+fn resolve_user_id(req: &actix_web::HttpRequest) -> String {
+    if let Some(id) = req
+        .headers()
+        .get("x-user-id")
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        return id.to_string();
+    }
+    if let Some(email) = req
+        .headers()
+        .get("x-user-email")
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        return email
+            .split('@')
+            .next()
+            .unwrap_or(email)
+            .to_string();
+    }
+    env::var("SMTP_USERNAME").unwrap_or_else(|_| "admin".to_string())
+}
+
+#[derive(Serialize)]
+struct EmailAddressDto {
+    name: String,
+    address: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EmailDto {
+    id: String,
+    thread_id: String,
+    folder: String,
+    from: EmailAddressDto,
+    to: Vec<EmailAddressDto>,
+    subject: String,
+    preview: String,
+    body: String,
+    body_type: String,
+    date: String,
+    received_at: String,
+    is_read: bool,
+    is_starred: bool,
+    is_important: bool,
+    has_attachments: bool,
+    attachments: Vec<serde_json::Value>,
+    labels: Vec<String>,
+    size: u64,
+    message_id: String,
+}
+
+fn parse_address(raw: &str) -> EmailAddressDto {
+    let raw = raw.trim();
+    // "Name <addr@x>" or bare addr
+    if let Some(start) = raw.find('<') {
+        if let Some(end) = raw.find('>') {
+            let name = raw[..start].trim().trim_matches('"').to_string();
+            let address = raw[start + 1..end].trim().to_string();
+            return EmailAddressDto {
+                name: if name.is_empty() {
+                    address.split('@').next().unwrap_or("").to_string()
+                } else {
+                    name
+                },
+                address,
+            };
+        }
+    }
+    EmailAddressDto {
+        name: raw.split('@').next().unwrap_or(raw).to_string(),
+        address: raw.to_string(),
+    }
+}
+
+fn strip_tags(html: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+    let mut in_tag = false;
+    for c in html.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => out.push(c),
+            _ => {}
+        }
+    }
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn email_to_dto(email: &Email, folder: &str) -> EmailDto {
+    let flags_l: Vec<String> = email.flags.iter().map(|f| f.to_ascii_lowercase()).collect();
+    let is_read = flags_l.iter().any(|f| f == "seen" || f == "\\seen");
+    let is_starred = flags_l.iter().any(|f| f == "flagged" || f == "\\flagged" || f == "starred");
+    let body_type = if email.body.to_ascii_lowercase().contains("<html")
+        || email.body.contains("</")
+        || email.body.contains("<p")
+    {
+        "html"
+    } else {
+        "text"
+    };
+    let plain = if body_type == "html" {
+        strip_tags(&email.body)
+    } else {
+        email.body.clone()
+    };
+    let preview: String = plain.chars().take(160).collect();
+    let date = {
+        let ms = email.internal_date.timestamp_millis();
+        chrono::DateTime::from_timestamp_millis(ms)
+            .map(|d| d.to_rfc3339())
+            .unwrap_or_else(|| Utc::now().to_rfc3339())
+    };
+    let message_id = email
+        .headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("message-id"))
+        .map(|(_, v)| v.clone())
+        .unwrap_or_else(|| email.id.clone());
+    let to_list: Vec<EmailAddressDto> = email
+        .to
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(parse_address)
+        .collect();
+    EmailDto {
+        id: email.id.clone(),
+        thread_id: message_id.clone(),
+        folder: folder.to_ascii_lowercase(),
+        from: parse_address(&email.from),
+        to: to_list,
+        subject: email.subject.clone(),
+        preview,
+        body: email.body.clone(),
+        body_type: body_type.to_string(),
+        date: date.clone(),
+        received_at: date,
+        is_read,
+        is_starred,
+        is_important: false,
+        has_attachments: false,
+        attachments: vec![],
+        labels: vec![],
+        size: email.body.len() as u64,
+        message_id,
+    }
+}
+
+async fn api_emails(
+    query: web::Query<EmailListQuery>,
+    req: actix_web::HttpRequest,
+    logic: web::Data<Arc<Logic>>,
+) -> impl Responder {
+    let user_id = resolve_user_id(&req);
+    let folder = query.folder.trim().to_ascii_lowercase();
+    let page = query.page.max(1);
+    let page_size = query.page_size.clamp(1, 200);
+
+    let mut collected: Vec<Email> = Vec::new();
+    for mailbox in folder_to_mailboxes(&folder) {
+        match logic.get_emails(&user_id, &mailbox).await {
+            Ok(mut batch) => {
+                collected.append(&mut batch);
+            }
+            Err(e) => {
+                eprintln!("get_emails user={} mailbox={}: {}", user_id, mailbox, e);
+            }
+        }
+    }
+
+    // Newest first
+    collected.sort_by(|a, b| b.internal_date.cmp(&a.internal_date));
+    // Dedup by id if same mail matched multiple mailbox casings
+    let mut seen = std::collections::HashSet::new();
+    collected.retain(|e| seen.insert(e.id.clone()));
+
+    let total = collected.len() as u32;
+    let start = ((page - 1) * page_size) as usize;
+    let page_items: Vec<EmailDto> = collected
+        .into_iter()
+        .skip(start)
+        .take(page_size as usize)
+        .map(|e| email_to_dto(&e, &folder))
+        .collect();
+    let has_more = start + page_items.len() < total as usize;
+
     HttpResponse::Ok().json(serde_json::json!({
-        "emails": [],
-        "total": 0,
-        "page": 1,
-        "pageSize": 50,
+        "emails": page_items,
+        "total": total,
+        "page": page,
+        "pageSize": page_size,
+        "hasMore": has_more,
     }))
 }
 
