@@ -634,8 +634,240 @@ async fn api_tags() -> impl Responder {
     HttpResponse::Ok().json(serde_json::json!({"tags": []}))
 }
 
-async fn api_send() -> impl Responder {
-    HttpResponse::Ok().json(serde_json::json!({"sent": true}))
+// --- Send + get-by-id (Phase A3/A4, issues #168/#169) -------------------------
+
+#[derive(Deserialize)]
+struct ComposerRecipient {
+    #[serde(default)]
+    email: String,
+    #[serde(default)]
+    name: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ComposeSendRequest {
+    #[serde(default)]
+    to: Vec<ComposerRecipient>,
+    #[serde(default)]
+    cc: Vec<ComposerRecipient>,
+    #[serde(default)]
+    bcc: Vec<ComposerRecipient>,
+    #[serde(default)]
+    subject: String,
+    #[serde(default)]
+    body: String,
+    /// Some FE clients send flat strings instead of recipient objects.
+    #[serde(default)]
+    from: Option<String>,
+}
+
+fn format_recipient(r: &ComposerRecipient) -> Option<String> {
+    let email = r.email.trim();
+    if email.is_empty() {
+        return None;
+    }
+    match r.name.as_ref().map(|n| n.trim()).filter(|n| !n.is_empty()) {
+        Some(name) => Some(format!("{} <{}>", name, email)),
+        None => Some(email.to_string()),
+    }
+}
+
+fn join_recipients(list: &[ComposerRecipient]) -> String {
+    list.iter()
+        .filter_map(format_recipient)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn domain_from_env() -> String {
+    env::var("DOMAIN_NAME").unwrap_or_else(|_| "misfits.ai".to_string())
+}
+
+fn from_address_for_user(user_id: &str) -> String {
+    if user_id.contains('@') {
+        user_id.to_string()
+    } else {
+        format!("{}@{}", user_id, domain_from_env())
+    }
+}
+
+async fn api_send(
+    body: web::Json<ComposeSendRequest>,
+    req: actix_web::HttpRequest,
+    logic: web::Data<Arc<Logic>>,
+) -> impl Responder {
+    let user_id = resolve_user_id(&req);
+    let from = body
+        .from
+        .as_ref()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| from_address_for_user(&user_id));
+
+    let to = join_recipients(&body.to);
+    if to.is_empty() {
+        return HttpResponse::BadRequest().json(serde_json::json!({
+            "sent": false,
+            "message": "At least one recipient (to) is required",
+        }));
+    }
+    let cc = join_recipients(&body.cc);
+    let bcc = join_recipients(&body.bcc);
+    let subject = body.subject.clone();
+    let mail_body = body.body.clone();
+
+    let email_req = EmailRequest {
+        from: from.clone(),
+        to: to.clone(),
+        subject: subject.clone(),
+        body: mail_body.clone(),
+    };
+
+    // DKIM sign via shared service (same path as /send-email)
+    let dkim_service: Box<dyn DkimService> = Box::new(RealDkimService);
+    let (dkim_sig, message_id_hdr) = match dkim_service.sign_email(&email_req).await {
+        Ok(dkim_result) => {
+            let status = dkim_result["status"].as_str().unwrap_or("");
+            if status != "success" {
+                let msg = dkim_result["message"]
+                    .as_str()
+                    .unwrap_or("DKIM signing failed");
+                return HttpResponse::InternalServerError().json(serde_json::json!({
+                    "sent": false,
+                    "message": format!("Failed to sign email: {}", msg),
+                }));
+            }
+            let sig = dkim_result["dkimSignature"]
+                .as_str()
+                .unwrap_or("")
+                .to_string();
+            let mid = dkim_result["messageId"]
+                .as_str()
+                .unwrap_or("")
+                .to_string();
+            (sig, mid)
+        }
+        Err(e) => {
+            eprintln!("DKIM service error on /api/send: {}", e);
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "sent": false,
+                "message": "Failed to generate DKIM signature",
+            }));
+        }
+    };
+
+    let id = Uuid::new_v4().to_string();
+    let message_id = if message_id_hdr.is_empty() {
+        format!("<{}@{}>", id, domain_from_env())
+    } else if message_id_hdr.starts_with('<') {
+        message_id_hdr.clone()
+    } else {
+        format!("<{}>", message_id_hdr)
+    };
+
+    let mut headers = vec![
+        ("Message-ID".to_string(), message_id.clone()),
+        (
+            "Date".to_string(),
+            Utc::now().to_rfc2822(),
+        ),
+        ("MIME-Version".to_string(), "1.0".to_string()),
+        (
+            "Content-Type".to_string(),
+            "text/html; charset=utf-8".to_string(),
+        ),
+    ];
+    if !cc.is_empty() {
+        headers.push(("Cc".to_string(), cc.clone()));
+    }
+    if !bcc.is_empty() {
+        // Envelope Bcc isn't fully separated yet; record header for stored copy only if present.
+        headers.push(("Bcc".to_string(), bcc.clone()));
+    }
+    if !dkim_sig.is_empty() {
+        headers.push(("DKIM-Signature".to_string(), dkim_sig.clone()));
+    }
+
+    let email = Email {
+        id: id.clone(),
+        from: from.clone(),
+        to: to.clone(),
+        subject: subject.clone(),
+        body: mail_body.clone(),
+        headers,
+        flags: vec![],
+        sequence_number: 0,
+        uid: 0,
+        internal_date: mongodb::bson::DateTime::from_millis(Utc::now().timestamp_millis()),
+        dkim_signature: if dkim_sig.is_empty() {
+            None
+        } else {
+            Some(dkim_sig)
+        },
+    };
+
+    match send_outgoing_email(&email).await {
+        Ok(_) => {
+            // Store Sent copy for the sender (local-part user_id)
+            if let Err(e) = logic.store_email(&user_id, "sent", &email).await {
+                eprintln!("store sent copy failed: {}", e);
+            }
+            // Loopback convenience: if any recipient is local domain, also drop into their inbox
+            let domain = domain_from_env();
+            for rcpt in body.to.iter().chain(body.cc.iter()).chain(body.bcc.iter()) {
+                let addr = rcpt.email.trim().to_ascii_lowercase();
+                if let Some((local, host)) = addr.split_once('@') {
+                    if host == domain {
+                        let inbound = Email {
+                            id: Uuid::new_v4().to_string(),
+                            flags: vec![],
+                            ..email.clone()
+                        };
+                        if let Err(e) = logic.store_email(local, "inbox", &inbound).await {
+                            eprintln!("store inbox copy for {} failed: {}", local, e);
+                        }
+                    }
+                }
+            }
+            HttpResponse::Ok().json(serde_json::json!({
+                "sent": true,
+                "id": id,
+                "messageId": message_id,
+            }))
+        }
+        Err(e) => {
+            eprintln!("send_outgoing_email failed: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({
+                "sent": false,
+                "message": format!("Failed to send email: {}", e),
+            }))
+        }
+    }
+}
+
+async fn api_email_by_id(
+    path: web::Path<String>,
+    req: actix_web::HttpRequest,
+    logic: web::Data<Arc<Logic>>,
+) -> impl Responder {
+    let user_id = resolve_user_id(&req);
+    let email_id = path.into_inner();
+    match logic.fetch_email(&user_id, &email_id).await {
+        Ok(Some(email)) => {
+            // Infer folder best-effort — FE mostly uses list; detail uses body
+            let dto = email_to_dto(&email, "inbox");
+            HttpResponse::Ok().json(dto)
+        }
+        Ok(None) => HttpResponse::NotFound().json(serde_json::json!({
+            "message": "Email not found",
+        })),
+        Err(e) => {
+            eprintln!("fetch_email error: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({
+                "message": "Failed to fetch email",
+            }))
+        }
+    }
 }
 
 async fn api_drafts() -> impl Responder {
@@ -899,6 +1131,7 @@ async fn main() -> std::io::Result<()> {
                 .route("/api/auth/logout", web::post().to(auth_logout))
                 .route("/api/auth/refresh", web::post().to(auth_refresh))
                 .route("/api/emails", web::get().to(api_emails))
+                .route("/api/emails/{id}", web::get().to(api_email_by_id))
                 .route("/api/tags", web::get().to(api_tags))
                 .route("/api/send", web::post().to(api_send))
                 .route("/api/drafts", web::get().to(api_drafts))
