@@ -43,3 +43,6 @@ infra/*.tfvars.json
 
 # Deploy secrets (local VM only)
 .env.deploy
+
+# ephemeral Next bake patches (deploy patches in-container)
+runtime-patches/

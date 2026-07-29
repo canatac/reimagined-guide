@@ -142,16 +142,14 @@ services:
     restart: always
     ports:
       - "3001:3000"
-    # Next rewrites bake BACKEND_URL at image build time. Until image rebuild,
-    # overlay patched server.js + manifests (imap-server:8080 → email-api:8000).
-    volumes:
-      - ./runtime-patches/misfits-web/server.js:/app/server.js:ro
-      - ./runtime-patches/misfits-web/.next/required-server-files.json:/app/.next/required-server-files.json:ro
-      - ./runtime-patches/misfits-web/.next/routes-manifest.json:/app/.next/routes-manifest.json:ro
+    # NOTE: Next rewrites bake BACKEND_URL at *image build* time.
+    # Runtime BACKEND_URL alone is not enough for old images that baked
+    # imap-server:8080. Deploy workflow sed-patches the bake after start
+    # until misfits-web:latest is rebuilt with email-api:8000.
     environment:
       - NODE_ENV=production
       - NEXT_TELEMETRY_DISABLED=1
-      # Proxy Next /api/* → email_api HTTP (not imap :8080 — no HTTP there)
+      # Prefer email-api HTTP (used on next image rebuild)
       - BACKEND_URL=http://email-api:8000
     depends_on:
       - email-api

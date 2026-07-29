@@ -139,10 +139,33 @@ jobs:
               echo "Creating .env.deploy with default values..."
               printf 'SCW_REGISTRY_ENDPOINT=%s\nMONGODB_USERNAME=mongo\nMONGODB_PASSWORD=change...o\n' "${{ secrets.SCW_REGISTRY_ENDPOINT }}" > .env.deploy
             fi
+            # Drop stale Docker bind dirs created when file sources were missing
+            # (docker turns missing file mounts into empty directories → OCI mount error)
+            sudo rm -rf /home/debian/runtime-patches 2>/dev/null || true
+
             sudo docker compose -f docker-compose.deploy.yml --env-file .env.deploy up -d --force-recreate --remove-orphans
 
-            # Wait & check containers
+            # Wait for misfits-web, then hot-patch baked Next rewrites if still
+            # pointing at imap-server:8080 (old image). BACKEND_URL env is not
+            # enough — rewrites are baked into server.js / routes-manifest.
             sleep 5
+            if sudo docker ps --format '{{.Names}}' | grep -qx misfits-web; then
+              sudo docker exec -u 0 misfits-web sh -c '
+                set -e
+                for f in /app/server.js \
+                         /app/.next/required-server-files.json \
+                         /app/.next/routes-manifest.json; do
+                  if [ -f "$f" ] && grep -q "imap-server:8080" "$f" 2>/dev/null; then
+                    sed -i "s|http://imap-server:8080|http://email-api:8000|g" "$f"
+                    echo "patched $f"
+                  fi
+                done
+              '
+              sudo docker restart misfits-web
+              sleep 3
+            fi
+
+            # Wait & check containers
             sudo docker compose -f docker-compose.deploy.yml ps
           REMOTE
 
