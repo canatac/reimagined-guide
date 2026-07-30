@@ -115,6 +115,12 @@ jobs:
             docker-compose.deploy.yml \
             debian@${{ secrets.VM_IP }}:/home/debian/docker-compose.deploy.yml
 
+      - name: Copy Caddyfile to VM
+        run: |
+          scp -o StrictHostKeyChecking=no \
+            Caddyfile \
+            debian@${{ secrets.VM_IP }}:/home/debian/Caddyfile
+
       - name: Pull images & deploy
         run: |
           ssh -o StrictHostKeyChecking=no debian@${{ secrets.VM_IP }} << 'REMOTE'
@@ -142,6 +148,17 @@ jobs:
               echo "Creating .env.deploy with default values..."
               printf 'SCW_REGISTRY_ENDPOINT=%s\nMONGODB_USERNAME=mongo\nMONGODB_PASSWORD=change...o\n' "${{ secrets.SCW_REGISTRY_ENDPOINT }}" > .env.deploy
             fi
+            # Upsert OAuth secrets so GitHub login works without manual intervention
+            upsert_env() {
+              local key="$1" val="$2" file=".env.deploy"
+              if grep -q "^${key}=" "$file" 2>/dev/null; then
+                sed -i "s|^${key}=.*|${key}=${val}|" "$file"
+              else
+                echo "${key}=${val}" >> "$file"
+              fi
+            }
+            upsert_env GITHUB_CLIENT_ID "${{ secrets.OAUTH_GITHUB_CLIENT_ID }}"
+            upsert_env GITHUB_CLIENT_SECRET "${{ secrets.OAUTH_GITHUB_CLIENT_SECRET }}"
             # Drop stale Docker bind dirs created when file sources were missing
             # (docker turns missing file mounts into empty directories → OCI mount error)
             sudo rm -rf /home/debian/runtime-patches 2>/dev/null || true
