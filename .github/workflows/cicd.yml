@@ -140,7 +140,7 @@ jobs:
             sudo docker pull ${{ secrets.SCW_REGISTRY_ENDPOINT }}/dkim-service:latest
 
             # Remove stale containers that conflict with compose names
-            sudo docker rm -f email-api smtp-server imap-server misfits-web dkim-service 2>/dev/null || true
+            sudo docker rm -f email-api smtp-server imap-server misfits-web dkim-service caddy 2>/dev/null || true
 
             # Deploy with unified compose
             # Create .env.deploy if it doesn't exist with default values
