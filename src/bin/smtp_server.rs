@@ -45,7 +45,7 @@ use std::sync::Arc;
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use chrono::Utc;
-use log::{info, error, debug};
+use log::{info, warn, error, debug};
 use rustls::ServerConfig;
 
 use tokio_rustls::TlsAcceptor;
@@ -678,12 +678,12 @@ async fn main() -> Result<(), MainError> {
         let mongodb_app_name = env::var("MONGODB_APP_NAME").unwrap_or_else(|_| "mailserver".to_string());
         if cluster_url.contains(".mongodb.net") {
             format!(
-                "mongodb+srv://{}:{}@{}/?retryWrites=true&w=majority&appName={}",
+                "mongodb+srv://{}:{}@{}/?retryWrites=true&w=majority&appName={}&serverSelectionTimeoutMS=5000",
                 mongodb_username, mongodb_password, cluster_url, mongodb_app_name
             )
         } else {
             format!(
-                "mongodb://{}:{}@{}/?authSource=admin&appName={}",
+                "mongodb://{}:{}@{}/?authSource=admin&appName={}&serverSelectionTimeoutMS=5000",
                 mongodb_username, mongodb_password, cluster_url, mongodb_app_name
             )
         }
@@ -693,6 +693,15 @@ async fn main() -> Result<(), MainError> {
     };
 
     let client = Arc::new(mongodb::Client::with_uri_str(&client_uri).await.unwrap());
+    // Warm-up: force DNS resolution + TLS + MongoDB handshake at startup
+    // so the first user authentication is not delayed by 10-30s.
+    if use_mongodb {
+        if let Err(e) = client.database("admin").run_command(mongodb::bson::doc! {"ping": 1}).await {
+            warn!("MongoDB warm-up ping failed (non-fatal): {}", e);
+        } else {
+            info!("MongoDB connection ready.");
+        }
+    }
     let logic = Arc::new(Logic::new(client));
     let session_manager = Arc::new(SessionManager::new());
 
