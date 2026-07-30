@@ -44,9 +44,6 @@ services:
     image: ${SCW_REGISTRY_ENDPOINT}/smtp-server:latest
     container_name: email-api
     restart: always
-    ports:
-      - "8000:8000"
-      - "8443:8443"
     volumes:
       - ./certs:/app/certs
     environment:
@@ -64,6 +61,10 @@ services:
       - USE_MONGODB=${USE_MONGODB:-true}
       - DKIM_SERVICE_URL=http://dkim-service:3000/generate-dkim
       - RUST_LOG=${RUST_LOG:-info}
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
+      - OAUTH_CALLBACK_BASE_URL=${OAUTH_CALLBACK_BASE_URL:-https://mail.misfits.ai}
+      - FRONTEND_BASE_URL=${FRONTEND_BASE_URL:-https://mail.misfits.ai}
     command: ["email_api"]
     # Image HEALTHCHECK probes :8025 (SMTP). Override for API binary.
     # wget --spider treats some 2xx oddly; use full GET + HTTP code check.
@@ -159,6 +160,28 @@ services:
     networks:
       - mailnet
 
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - email-api
+      - misfits-web
+    networks:
+      - mailnet
+
 networks:
   mailnet:
     driver: bridge
+
+volumes:
+  caddy_data:
+  caddy_config:

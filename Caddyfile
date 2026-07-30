@@ -1,0 +1,7 @@
+mail.misfits.ai {
+    # Route l'API vers email-api
+    reverse_proxy /api/* email-api:8000
+
+    # Route le reste vers le frontend Next.js
+    reverse_proxy * misfits-web:3000
+}
