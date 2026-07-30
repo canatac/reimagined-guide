@@ -37,6 +37,7 @@ The API server will attempt to send the email using the SMTP client and return t
 
 use actix_cors::Cors;
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
+use base64::{engine::general_purpose, Engine as _};
 use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 use serde::{Deserialize, Serialize};
 
@@ -76,9 +77,40 @@ struct RegisterRequest {
 struct OAuthCallbackQuery {
     code: Option<String>,
     state: Option<String>,
-    subject: Option<String>,
+}
+
+// --- OAuth provider response types ---
+
+#[derive(Deserialize)]
+struct GithubTokenResponse {
+    access_token: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct GithubUser {
+    id: u64,
+    login: String,
+    name: Option<String>,
     email: Option<String>,
-    display_name: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct GithubEmail {
+    email: String,
+    primary: bool,
+    verified: bool,
+}
+
+#[derive(Deserialize)]
+struct GoogleTokenResponse {
+    access_token: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct GoogleUser {
+    id: String,
+    email: Option<String>,
+    name: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -448,20 +480,46 @@ async fn auth_oauth_start(path: web::Path<String>) -> impl Responder {
     };
 
     let state = Uuid::new_v4().to_string();
-    let callback_base =
-        env::var("OAUTH_CALLBACK_BASE_URL").unwrap_or_else(|_| "http://localhost:8000".to_string());
-    let auth_url = format!(
-        "{}/api/auth/oauth/{}/callback?state={}",
-        callback_base.trim_end_matches('/'),
-        provider,
-        state
-    );
+    let callback_base = env::var("OAUTH_CALLBACK_BASE_URL")
+        .unwrap_or_else(|_| "https://mail.misfits.ai".to_string());
 
-    HttpResponse::Ok().json(serde_json::json!({
-        "provider": provider,
-        "state": state,
-        "authUrl": auth_url
-    }))
+    let auth_url = match provider.as_str() {
+        "github" => {
+            let client_id = env::var("GITHUB_CLIENT_ID").unwrap_or_default();
+            let redirect_uri = format!(
+                "{}/api/auth/oauth/github/callback",
+                callback_base.trim_end_matches('/')
+            );
+            format!(
+                "https://github.com/login/oauth/authorize?client_id={}&redirect_uri={}&state={}&scope=user:email",
+                client_id,
+                urlencoding::encode(&redirect_uri),
+                state
+            )
+        }
+        "google" => {
+            let client_id = env::var("GOOGLE_CLIENT_ID").unwrap_or_default();
+            let redirect_uri = format!(
+                "{}/api/auth/oauth/google/callback",
+                callback_base.trim_end_matches('/')
+            );
+            format!(
+                "https://accounts.google.com/o/oauth2/v2/auth?client_id={}&redirect_uri={}&state={}&scope=openid%20email%20profile&response_type=code",
+                client_id,
+                urlencoding::encode(&redirect_uri),
+                state
+            )
+        }
+        _ => {
+            return HttpResponse::BadRequest().json(serde_json::json!({
+                "message": "Unsupported OAuth provider."
+            }))
+        }
+    };
+
+    HttpResponse::Found()
+        .insert_header(("Location", auth_url))
+        .finish()
 }
 
 async fn auth_oauth_callback(
@@ -494,33 +552,228 @@ async fn auth_oauth_callback(
     };
 
     let _state = query.state.clone().unwrap_or_default();
-    let subject = query
-        .subject
-        .as_ref()
-        .map(|v| v.trim())
-        .filter(|v| !v.is_empty())
-        .map(|v| v.to_string())
-        .unwrap_or_else(|| code.clone());
-    let email = query
-        .email
-        .as_ref()
-        .map(|v| v.trim())
-        .filter(|v| !v.is_empty())
-        .map(|v| v.to_string())
-        .unwrap_or_else(|| format!("{}+{}@misfits.ai", provider, subject));
-    let display = query
-        .display_name
-        .as_ref()
-        .map(|v| v.trim())
-        .filter(|v| !v.is_empty())
-        .map(|v| v.to_string())
-        .unwrap_or_else(|| email.split('@').next().unwrap_or("user").to_string());
+    let callback_base = env::var("OAUTH_CALLBACK_BASE_URL")
+        .unwrap_or_else(|_| "https://mail.misfits.ai".to_string());
+    let frontend_base = env::var("FRONTEND_BASE_URL")
+        .unwrap_or_else(|_| "https://mail.misfits.ai".to_string());
+
+    let http_client = reqwest::Client::builder()
+        .user_agent("misfits-email-api/1.0")
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+
+    let (subject, email, display) = match provider.as_str() {
+        "github" => {
+            let client_id = env::var("GITHUB_CLIENT_ID").unwrap_or_default();
+            let client_secret = env::var("GITHUB_CLIENT_SECRET").unwrap_or_default();
+
+            // Exchange code for access_token
+            let token_resp = http_client
+                .post("https://github.com/login/oauth/access_token")
+                .header("Accept", "application/json")
+                .json(&serde_json::json!({
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "code": code,
+                }))
+                .send()
+                .await;
+
+            let access_token = match token_resp {
+                Ok(r) => match r.json::<GithubTokenResponse>().await {
+                    Ok(t) => match t.access_token {
+                        Some(tok) if !tok.is_empty() => tok,
+                        _ => {
+                            eprintln!("GitHub OAuth: missing access_token in response");
+                            return HttpResponse::Unauthorized().json(serde_json::json!({
+                                "message": "OAuth authentication failed."
+                            }));
+                        }
+                    },
+                    Err(e) => {
+                        eprintln!("GitHub OAuth token parse error: {}", e);
+                        return HttpResponse::Unauthorized().json(serde_json::json!({
+                            "message": "OAuth authentication failed."
+                        }));
+                    }
+                },
+                Err(e) => {
+                    eprintln!("GitHub OAuth token request error: {}", e);
+                    return HttpResponse::Unauthorized().json(serde_json::json!({
+                        "message": "OAuth authentication failed."
+                    }));
+                }
+            };
+
+            // Fetch user profile
+            let user_resp = http_client
+                .get("https://api.github.com/user")
+                .bearer_auth(&access_token)
+                .header("Accept", "application/vnd.github+json")
+                .send()
+                .await;
+
+            let gh_user = match user_resp {
+                Ok(r) => match r.json::<GithubUser>().await {
+                    Ok(u) => u,
+                    Err(e) => {
+                        eprintln!("GitHub user profile parse error: {}", e);
+                        return HttpResponse::Unauthorized().json(serde_json::json!({
+                            "message": "OAuth authentication failed."
+                        }));
+                    }
+                },
+                Err(e) => {
+                    eprintln!("GitHub user profile request error: {}", e);
+                    return HttpResponse::Unauthorized().json(serde_json::json!({
+                        "message": "OAuth authentication failed."
+                    }));
+                }
+            };
+
+            let subject = gh_user.id.to_string();
+            let display = gh_user
+                .name
+                .as_deref()
+                .unwrap_or(&gh_user.login)
+                .to_string();
+
+            // Use profile email or fall back to emails endpoint
+            let email = if let Some(e) = gh_user.email.filter(|e| !e.is_empty()) {
+                e
+            } else {
+                let emails_resp = http_client
+                    .get("https://api.github.com/user/emails")
+                    .bearer_auth(&access_token)
+                    .header("Accept", "application/vnd.github+json")
+                    .send()
+                    .await;
+
+                match emails_resp {
+                    Ok(r) => match r.json::<Vec<GithubEmail>>().await {
+                        Ok(emails) => emails
+                            .into_iter()
+                            .find(|e| e.primary && e.verified)
+                            .map(|e| e.email)
+                            .unwrap_or_else(|| {
+                                format!("github+{}@misfits.ai", subject)
+                            }),
+                        Err(_) => format!("github+{}@misfits.ai", subject),
+                    },
+                    Err(_) => format!("github+{}@misfits.ai", subject),
+                }
+            };
+
+            (subject, email, display)
+        }
+        "google" => {
+            let client_id = env::var("GOOGLE_CLIENT_ID").unwrap_or_default();
+            let client_secret = env::var("GOOGLE_CLIENT_SECRET").unwrap_or_default();
+            let redirect_uri = format!(
+                "{}/api/auth/oauth/google/callback",
+                callback_base.trim_end_matches('/')
+            );
+
+            // Exchange code for access_token
+            let token_resp = http_client
+                .post("https://oauth2.googleapis.com/token")
+                .json(&serde_json::json!({
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "code": code,
+                    "redirect_uri": redirect_uri,
+                    "grant_type": "authorization_code",
+                }))
+                .send()
+                .await;
+
+            let access_token = match token_resp {
+                Ok(r) => match r.json::<GoogleTokenResponse>().await {
+                    Ok(t) => match t.access_token {
+                        Some(tok) if !tok.is_empty() => tok,
+                        _ => {
+                            eprintln!("Google OAuth: missing access_token in response");
+                            return HttpResponse::Unauthorized().json(serde_json::json!({
+                                "message": "OAuth authentication failed."
+                            }));
+                        }
+                    },
+                    Err(e) => {
+                        eprintln!("Google OAuth token parse error: {}", e);
+                        return HttpResponse::Unauthorized().json(serde_json::json!({
+                            "message": "OAuth authentication failed."
+                        }));
+                    }
+                },
+                Err(e) => {
+                    eprintln!("Google OAuth token request error: {}", e);
+                    return HttpResponse::Unauthorized().json(serde_json::json!({
+                        "message": "OAuth authentication failed."
+                    }));
+                }
+            };
+
+            // Fetch user profile
+            let user_resp = http_client
+                .get("https://www.googleapis.com/oauth2/v2/userinfo")
+                .bearer_auth(&access_token)
+                .send()
+                .await;
+
+            let g_user = match user_resp {
+                Ok(r) => match r.json::<GoogleUser>().await {
+                    Ok(u) => u,
+                    Err(e) => {
+                        eprintln!("Google user profile parse error: {}", e);
+                        return HttpResponse::Unauthorized().json(serde_json::json!({
+                            "message": "OAuth authentication failed."
+                        }));
+                    }
+                },
+                Err(e) => {
+                    eprintln!("Google user profile request error: {}", e);
+                    return HttpResponse::Unauthorized().json(serde_json::json!({
+                        "message": "OAuth authentication failed."
+                    }));
+                }
+            };
+
+            let subject = g_user.id.clone();
+            let email = g_user
+                .email
+                .filter(|e| !e.is_empty())
+                .unwrap_or_else(|| format!("google+{}@misfits.ai", subject));
+            let display = g_user
+                .name
+                .filter(|n| !n.is_empty())
+                .unwrap_or_else(|| email.split('@').next().unwrap_or("user").to_string());
+
+            (subject, email, display)
+        }
+        _ => {
+            return HttpResponse::BadRequest().json(serde_json::json!({
+                "message": "Unsupported OAuth provider."
+            }))
+        }
+    };
 
     match logic
         .find_or_create_oauth_user(&provider, &subject, &email, Some(&display))
         .await
     {
-        Ok(user) => HttpResponse::Ok().json(make_session(&user.username, &display)),
+        Ok(user) => {
+            let session = make_session(&user.username, &display);
+            let session_json = serde_json::to_string(&session).unwrap_or_default();
+            let session_b64 = general_purpose::STANDARD.encode(session_json.as_bytes());
+            let redirect_url = format!(
+                "{}/auth/callback?session={}",
+                frontend_base.trim_end_matches('/'),
+                urlencoding::encode(&session_b64)
+            );
+            HttpResponse::Found()
+                .insert_header(("Location", redirect_url))
+                .finish()
+        }
         Err(e) => {
             eprintln!("OAuth callback error: {}", e);
             HttpResponse::Unauthorized().json(serde_json::json!({
