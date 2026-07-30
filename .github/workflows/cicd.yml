@@ -100,8 +100,8 @@ jobs:
         with:
           export-env: true
         env:
-          # SSH key from 1Password (SSH key item with dedicated fields)
           VM_SSH_KEY: op://hermes/ssh-hermes-smtp/private-key
+          DEPLOY_ENV_CONTENT: op://hermes/scw-hermes-smtp/texte
 
       - name: Install SSH key
         uses: shimataro/ssh-key-action@v2
@@ -121,18 +121,36 @@ jobs:
             Caddyfile \
             debian@${{ secrets.VM_IP }}:/home/debian/Caddyfile
 
+      - name: Write .env.deploy to VM
+        run: |
+          # Write the 1Password env content to the VM
+          printf '%s\n' "$DEPLOY_ENV_CONTENT" | \
+            ssh -o StrictHostKeyChecking=no debian@${{ secrets.VM_IP }} \
+            "cat > /home/debian/.env.deploy"
+
+          # Inject GitHub-only secrets on top
+          ssh -o StrictHostKeyChecking=no debian@${{ secrets.VM_IP }} bash -s << 'REMOTE'
+            upsert_env() {
+              local key="$1" val="$2" file="/home/debian/.env.deploy"
+              if grep -q "^${key}=" "$file" 2>/dev/null; then
+                sed -i "s|^${key}=.*|${key}=${val}|" "$file"
+              else
+                echo "${key}=${val}" >> "$file"
+              fi
+            }
+            upsert_env GITHUB_CLIENT_ID      "${{ secrets.OAUTH_GITHUB_CLIENT_ID }}"
+            upsert_env GITHUB_CLIENT_SECRET  "${{ secrets.OAUTH_GITHUB_CLIENT_SECRET }}"
+            upsert_env SCW_REGISTRY_ENDPOINT "${{ secrets.SCW_REGISTRY_ENDPOINT }}"
+            upsert_env OAUTH_CALLBACK_BASE_URL "https://mail.misfits.ai"
+            upsert_env FRONTEND_BASE_URL       "https://mail.misfits.ai"
+          REMOTE
+
       - name: Pull images & deploy
         env:
-          INJECT_GITHUB_CLIENT_ID: ${{ secrets.OAUTH_GITHUB_CLIENT_ID }}
-          INJECT_GITHUB_CLIENT_SECRET: ${{ secrets.OAUTH_GITHUB_CLIENT_SECRET }}
-          INJECT_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           INJECT_SCW_REGISTRY_ENDPOINT: ${{ secrets.SCW_REGISTRY_ENDPOINT }}
           INJECT_SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
         run: |
           ssh -o StrictHostKeyChecking=no debian@${{ secrets.VM_IP }} \
-            INJECT_GITHUB_CLIENT_ID="$INJECT_GITHUB_CLIENT_ID" \
-            INJECT_GITHUB_CLIENT_SECRET="$INJECT_GITHUB_CLIENT_SECRET" \
-            INJECT_GOOGLE_CLIENT_ID="$INJECT_GOOGLE_CLIENT_ID" \
             INJECT_SCW_REGISTRY_ENDPOINT="$INJECT_SCW_REGISTRY_ENDPOINT" \
             INJECT_SCW_SECRET_KEY="$INJECT_SCW_SECRET_KEY" \
             bash << 'REMOTE'
@@ -157,32 +175,7 @@ jobs:
             # Stop any running compose stack to release bound ports (e.g. :80/:443)
             sudo docker compose -f docker-compose.deploy.yml down --remove-orphans 2>/dev/null || true
 
-            # Deploy with unified compose
-            # Create .env.deploy if it doesn't exist with default values
-            if [ ! -f .env.deploy ]; then
-              echo "Creating .env.deploy with default values..."
-              printf 'MONGODB_USERNAME=mongo\nMONGODB_PASSWORD=changeme\n' > .env.deploy
-            fi
-            # Upsert all required secrets into .env.deploy
-            upsert_env() {
-              local key="$1" val="$2" file=".env.deploy"
-              if grep -q "^${key}=" "$file" 2>/dev/null; then
-                sed -i "s|^${key}=.*|${key}=${val}|" "$file"
-              else
-                echo "${key}=${val}" >> "$file"
-              fi
-            }
-            # OAuth credentials (from GitHub Secrets)
-            upsert_env GITHUB_CLIENT_ID     "$INJECT_GITHUB_CLIENT_ID"
-            upsert_env GITHUB_CLIENT_SECRET "$INJECT_GITHUB_CLIENT_SECRET"
-            upsert_env GOOGLE_CLIENT_ID     "$INJECT_GOOGLE_CLIENT_ID"
-            # OAuth routing (static values)
-            upsert_env OAUTH_CALLBACK_BASE_URL "https://mail.misfits.ai"
-            upsert_env FRONTEND_BASE_URL       "https://mail.misfits.ai"
-            # SCW Registry (from GitHub Secrets)
-            upsert_env SCW_REGISTRY_ENDPOINT "$INJECT_SCW_REGISTRY_ENDPOINT"
-            # Drop stale Docker bind dirs created when file sources were missing
-            # (docker turns missing file mounts into empty directories → OCI mount error)
+            # Drop stale Docker bind dirs
             sudo rm -rf /home/debian/runtime-patches 2>/dev/null || true
 
             # ── Free ports used by compose services ──────────────────────────────────────
