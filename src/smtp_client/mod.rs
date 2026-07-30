@@ -26,29 +26,29 @@ Make sure you have set the necessary environment variables in your .env file:
 The client will attempt to connect to the SMTP server, send the email, and report the result.
 */
 
+use rustls::pki_types::{CertificateDer, ServerName};
+use rustls::{ClientConfig, RootCertStore};
 use std::io::{Error as IoError, ErrorKind};
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio::time::timeout;
 use tokio_rustls::client::TlsStream;
-use tokio::io::{AsyncWriteExt, AsyncReadExt};
+use tokio_rustls::TlsConnector;
 use trust_dns_resolver::config::{ResolverConfig, ResolverOpts};
 use trust_dns_resolver::TokioAsyncResolver;
-use tokio_rustls::TlsConnector;
-use tokio::time::timeout;
-use std::time::Duration;
-use rustls::{ClientConfig, RootCertStore};
-use std::sync::Arc;
-use rustls::pki_types::{ServerName,CertificateDer};
 
+use rustls_native_certs::load_native_certs;
 use std::convert::TryFrom;
+use std::env;
 use std::fs::File;
 use std::io::BufReader;
-use rustls_native_certs::load_native_certs;
 use webpki_roots::TLS_SERVER_ROOTS;
-use std::env;
 const SMTP_PORTS: [u16; 3] = [587, 465, 25];
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(5);
-use std::collections::HashMap;
 use crate::entities::Email;
+use std::collections::HashMap;
 
 enum StreamType {
     Plain(TcpStream),
@@ -71,13 +71,19 @@ async fn find_smtp_port(host: &str) -> Option<u16> {
     None
 }
 
-async fn expect_code<T: AsyncReadExt + Unpin>(stream: &mut T, expected: &str) -> std::io::Result<()> {
+async fn expect_code<T: AsyncReadExt + Unpin>(
+    stream: &mut T,
+    expected: &str,
+) -> std::io::Result<()> {
     let mut response = [0; 1024];
     let n = stream.read(&mut response).await?;
     let response_str = String::from_utf8_lossy(&response[..n]);
     println!("Received response: {}", response_str);
     if !response_str.starts_with(expected) {
-        return Err(std::io::Error::new(std::io::ErrorKind::Other, format!("Unexpected response: {}", response_str)));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("Unexpected response: {}", response_str),
+        ));
     }
     Ok(())
 }
@@ -100,24 +106,37 @@ pub async fn send_outgoing_email(email: &Email) -> std::io::Result<()> {
 
     let recipient_email = extract_email_address(&email_content, "To:")
         .ok_or_else(|| IoError::new(ErrorKind::InvalidInput, "Invalid recipient email"))?;
-    let recipient_domain = recipient_email.split('@').nth(1)
+    let recipient_domain = recipient_email
+        .split('@')
+        .nth(1)
         .ok_or_else(|| IoError::new(ErrorKind::InvalidInput, "Invalid recipient email"))?;
-    
+
     println!("Resolving MX records for domain: {}", recipient_domain);
 
     let resolver = TokioAsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default());
 
-    let mx_lookup = resolver.mx_lookup(recipient_domain).await
+    let mx_lookup = resolver
+        .mx_lookup(recipient_domain)
+        .await
         .map_err(|e| IoError::new(ErrorKind::Other, format!("MX lookup failed: {}", e)))?;
     let mx_records: Vec<_> = mx_lookup.iter().collect();
 
     if mx_records.is_empty() {
-        return Err(IoError::new(ErrorKind::Other, "No MX records found"))
+        return Err(IoError::new(ErrorKind::Other, "No MX records found"));
     }
-    println!("Found {} MX records. Using: {}", mx_records.len(), mx_records[0].exchange());
+    println!(
+        "Found {} MX records. Using: {}",
+        mx_records.len(),
+        mx_records[0].exchange()
+    );
 
-    let smtp_server = mx_records[0].exchange().to_ascii().trim_end_matches('.').to_string();
-    let smtp_port = find_smtp_port(&smtp_server).await
+    let smtp_server = mx_records[0]
+        .exchange()
+        .to_ascii()
+        .trim_end_matches('.')
+        .to_string();
+    let smtp_port = find_smtp_port(&smtp_server)
+        .await
         .ok_or_else(|| IoError::new(ErrorKind::Other, "No open SMTP ports found"))?;
 
     println!("Connecting to {}:{}", smtp_server, smtp_port);
@@ -129,13 +148,14 @@ pub async fn send_outgoing_email(email: &Email) -> std::io::Result<()> {
     stream.write_all(b"EHLO misfits.ai\r\n").await?;
     expect_code(&mut stream, "250").await?;
 
-    let mut stream_type =  if smtp_port != 465 {  // 465 is already SSL/TLS
+    let mut stream_type = if smtp_port != 465 {
+        // 465 is already SSL/TLS
         let smtp_server_clone = smtp_server.clone();
         stream.write_all(b"STARTTLS\r\n").await?;
         expect_code(&mut stream, "220").await?;
 
         let mut root_store = RootCertStore::empty();
-        
+
         // Load native root certificates
         // CertificateResult.certs is Vec<CertificateDer<'static>>; errors are ignored here.
         for cert in load_native_certs().certs {
@@ -149,18 +169,20 @@ pub async fn send_outgoing_email(email: &Email) -> std::io::Result<()> {
         for cert in certs {
             root_store.add_parsable_certificates(cert);
         }
-        
+
         // Optionally add webpki roots as well
-        root_store.add_parsable_certificates(TLS_SERVER_ROOTS.iter().map(|ta| ta.subject.to_vec().into()));
+        root_store.add_parsable_certificates(
+            TLS_SERVER_ROOTS.iter().map(|ta| ta.subject.to_vec().into()),
+        );
 
         let config = ClientConfig::builder()
-        .with_root_certificates(root_store)
-        .with_no_client_auth();
+            .with_root_certificates(root_store)
+            .with_no_client_auth();
 
         let connector = TlsConnector::from(Arc::new(config));
         let server_name = ServerName::try_from(smtp_server_clone)
             .map_err(|_| IoError::new(ErrorKind::InvalidInput, "Invalid server name"))?;
-        
+
         let tls_stream = connector.connect(server_name, stream).await?;
 
         StreamType::Tls(tls_stream)
@@ -191,38 +213,54 @@ async fn send_email_content(stream: &mut StreamType, email_content: &str) -> std
         .ok_or_else(|| IoError::new(ErrorKind::InvalidInput, "Invalid To address"))?;
 
     match stream {
-        StreamType::Plain(ref mut s) => send_email_content_inner(s, &from_address, &to_address, email_content).await,
-        StreamType::Tls(ref mut s) => send_email_content_inner(s, &from_address, &to_address, email_content).await,
+        StreamType::Plain(ref mut s) => {
+            send_email_content_inner(s, &from_address, &to_address, email_content).await
+        }
+        StreamType::Tls(ref mut s) => {
+            send_email_content_inner(s, &from_address, &to_address, email_content).await
+        }
     }
 }
 
 // Helper function to extract email address from headers
 
 pub fn extract_email_address(content: &str, header: &str) -> Option<String> {
-    content.lines()
+    content
+        .lines()
         .find(|line| line.starts_with(header))
         .and_then(|line| line.split(':').nth(1))
-        .map(|addr| addr.trim().trim_matches(|c| c == '<' || c == '>').to_string())
+        .map(|addr| {
+            addr.trim()
+                .trim_matches(|c| c == '<' || c == '>')
+                .to_string()
+        })
 }
 async fn send_email_content_inner<T: AsyncWriteExt + AsyncReadExt + Unpin>(
-    stream: &mut T, 
-    from: &str, 
-    to: &str, 
-    email_content: &str
+    stream: &mut T,
+    from: &str,
+    to: &str,
+    email_content: &str,
 ) -> std::io::Result<()> {
     println!("Sending MAIL FROM: <{}>", from);
-    stream.write_all(format!("MAIL FROM:<{}>\r\n", from).as_bytes()).await?;
+    stream
+        .write_all(format!("MAIL FROM:<{}>\r\n", from).as_bytes())
+        .await?;
     expect_code(stream, "250").await?;
 
     println!("Sending RCPT TO: <{}>", to);
-    stream.write_all(format!("RCPT TO:<{}>\r\n", to).as_bytes()).await?;
+    stream
+        .write_all(format!("RCPT TO:<{}>\r\n", to).as_bytes())
+        .await?;
     expect_code(stream, "250").await?;
 
     println!("Sending DATA command");
     stream.write_all(b"DATA\r\n").await?;
     expect_code(stream, "354").await?;
     // Send the entire email content without alteration
-    println!("++++++++++++++++++++++++++++Sending unaltered email content: {}", email_content);
+    println!(
+        "++++++++++++++++++++++++++++Sending unaltered email content: {}",
+        email_content
+    );
     stream.write_all(email_content.as_bytes()).await?;
 
     // Ensure the email content ends with \r\n.\r\n
@@ -238,7 +276,6 @@ async fn send_email_content_inner<T: AsyncWriteExt + AsyncReadExt + Unpin>(
     expect_code(stream, "221").await?;
 
     return Ok(());
-
 }
 
 fn _parse_email_content(content: &str) -> (HashMap<String, String>, String) {
@@ -270,23 +307,22 @@ fn _parse_email_content(content: &str) -> (HashMap<String, String>, String) {
                             break;
                         }
                         if trimmed.starts_with("b=") {
-                            b_tag_content.push_str(&trimmed[2..]);  // Start capturing from after "b="
+                            b_tag_content.push_str(&trimmed[2..]); // Start capturing from after "b="
                             while !b_tag_content.ends_with('=') {
                                 if let Some(next_b_line) = lines.next() {
                                     b_tag_content.push_str(next_b_line.trim());
                                 } else {
-                                    break;  // End of input
+                                    break; // End of input
                                 }
                             }
                             // Add the captured b tag content to full_signature
                             full_signature.push_str("b=");
                             full_signature.push_str(&b_tag_content);
-                            break;  // We've captured the entire b tag, so we can stop 
+                            break; // We've captured the entire b tag, so we can stop
                         } else {
                             full_signature.push(' ');
                             full_signature.push_str(trimmed);
                         }
-                       
                     }
                     println!("Full DKIM-Signature: {}", full_signature);
                     let processed_signature = _process_dkim_signature(&full_signature);
@@ -331,28 +367,40 @@ fn _parse_email_content(content: &str) -> (HashMap<String, String>, String) {
 
 fn _process_dkim_signature(signature: &str) -> String {
     // RFC 6376
-    let dkim_tags = ["v", "a", "b", "bh", "c", "d", "h", "i", "l", "q", "s", "t", "x", "z"];
-    
+    let dkim_tags = [
+        "v", "a", "b", "bh", "c", "d", "h", "i", "l", "q", "s", "t", "x", "z",
+    ];
+
     let parts: Vec<&str> = signature.split(';').collect();
-    let processed_parts: Vec<String> = parts.iter()
+    let processed_parts: Vec<String> = parts
+        .iter()
         .take_while(|&&part| {
             let trimmed = part.trim();
-            dkim_tags.iter().any(|&tag| trimmed.starts_with(tag) && trimmed[tag.len()..].trim_start().starts_with('='))
+            dkim_tags.iter().any(|&tag| {
+                trimmed.starts_with(tag) && trimmed[tag.len()..].trim_start().starts_with('=')
+            })
         })
         .map(|&part| {
             let trimmed = part.trim();
             if trimmed.starts_with("b=") {
                 // Remove line breaks in 'b' tag value as per DKIM spec
                 let b_value = trimmed.splitn(2, '=').nth(1).unwrap_or("");
-                format!("b={}", b_value.lines().map(|line| line.trim()).collect::<Vec<_>>().join(""))
+                format!(
+                    "b={}",
+                    b_value
+                        .lines()
+                        .map(|line| line.trim())
+                        .collect::<Vec<_>>()
+                        .join("")
+                )
             } else {
                 trimmed.to_string()
             }
-        }).collect();
+        })
+        .collect();
 
     processed_parts.join("; ")
 }
-
 
 fn _format_email_address(addr: &str) -> String {
     if !addr.contains('<') && !addr.contains('>') {
@@ -378,4 +426,3 @@ fn _validate_email_content(content: &str) -> Result<(), String> {
     }
     Ok(())
 }
-

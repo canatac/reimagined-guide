@@ -35,26 +35,26 @@ curl -X POST http://localhost:3000/send_email \
 The API server will attempt to send the email using the SMTP client and return the result.
 */
 
+use actix_cors::Cors;
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 use serde::{Deserialize, Serialize};
-use actix_cors::Cors;
 
-use std::fs::{File, create_dir_all};
-use std::io::{Write, BufRead, BufReader};
-use std::path::Path;
-use dotenv::dotenv;
-use std::env;
-use std::sync::Arc;
-use reqwest;
-use simple_smtp_server::entities::{Email, CalendarEvent};
-use simple_smtp_server::logic::Logic;
-use uuid::Uuid;
 use chrono::Utc;
-use simple_smtp_server::smtp_client::send_outgoing_email;
+use dotenv::dotenv;
 use mongodb::bson;
 use mongodb::bson::doc;
+use reqwest;
+use simple_smtp_server::entities::{CalendarEvent, Email};
+use simple_smtp_server::logic::Logic;
+use simple_smtp_server::smtp_client::send_outgoing_email;
 use std::collections::HashMap;
+use std::env;
+use std::fs::{create_dir_all, File};
+use std::io::{BufRead, BufReader, Write};
+use std::path::Path;
+use std::sync::Arc;
+use uuid::Uuid;
 
 // --- Auth types ---
 
@@ -69,6 +69,15 @@ struct RegisterRequest {
     email: String,
     password: String,
     #[serde(default)]
+    display_name: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct OAuthCallbackQuery {
+    code: Option<String>,
+    state: Option<String>,
+    subject: Option<String>,
+    email: Option<String>,
     display_name: Option<String>,
 }
 
@@ -122,6 +131,14 @@ fn make_session(email: &str, display_name: &str) -> AuthResponse {
     }
 }
 
+fn normalize_oauth_provider(provider: &str) -> Option<String> {
+    let p = provider.trim().to_ascii_lowercase();
+    match p.as_str() {
+        "google" | "github" => Some(p),
+        _ => None,
+    }
+}
+
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
 pub struct EmailRequest {
     from: String,
@@ -158,10 +175,12 @@ async fn create_mailing_list(mailing_list: web::Json<MailingListRequest>) -> imp
     let file_path = mailing_list_dir.join(format!("{}.csv", mailing_list.label));
     let mut file = match File::create(&file_path) {
         Ok(file) => file,
-        Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({
-            "status": "error",
-            "message": format!("Failed to create file: {}", e)
-        })),
+        Err(e) => {
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "status": "error",
+                "message": format!("Failed to create file: {}", e)
+            }))
+        }
     };
 
     for email in &mailing_list.emails {
@@ -180,8 +199,9 @@ async fn create_mailing_list(mailing_list: web::Json<MailingListRequest>) -> imp
 }
 
 async fn send_to_mailing_list(email_req: web::Json<MailingListEmailRequest>) -> impl Responder {
-    let mailing_list_path = Path::new("mailing-lists").join(format!("{}.csv", email_req.mailing_list));
-    
+    let mailing_list_path =
+        Path::new("mailing-lists").join(format!("{}.csv", email_req.mailing_list));
+
     if !mailing_list_path.exists() {
         return HttpResponse::NotFound().json(serde_json::json!({
             "status": "error",
@@ -191,10 +211,12 @@ async fn send_to_mailing_list(email_req: web::Json<MailingListEmailRequest>) -> 
 
     let file = match File::open(&mailing_list_path) {
         Ok(file) => file,
-        Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({
-            "status": "error",
-            "message": format!("Failed to open mailing list file: {}", e)
-        })),
+        Err(e) => {
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "status": "error",
+                "message": format!("Failed to open mailing list file: {}", e)
+            }))
+        }
     };
 
     let reader = BufReader::new(file);
@@ -209,12 +231,12 @@ async fn send_to_mailing_list(email_req: web::Json<MailingListEmailRequest>) -> 
                 continue;
             }
         };
-    
+
         let from = email_req.from.clone();
         let to = to_email;
         let subject = email_req.subject.clone();
         let body = email_req.body.clone();
-    
+
         let _email_content = format!(
             "From: {}\r\nTo: {}\r\nSubject: {}\r\n\r\n{}",
             from, to, subject, body
@@ -222,7 +244,8 @@ async fn send_to_mailing_list(email_req: web::Json<MailingListEmailRequest>) -> 
         let client = reqwest::Client::new();
         let dkim_service_url = env::var("DKIM_SERVICE_URL").expect("DKIM_SERVICE_URL not set");
 
-        let _dkim_response = match client.post(&dkim_service_url)
+        let _dkim_response = match client
+            .post(&dkim_service_url)
             .json(&serde_json::json!({
                 "from": from,
                 "to": to,
@@ -230,23 +253,24 @@ async fn send_to_mailing_list(email_req: web::Json<MailingListEmailRequest>) -> 
                 "text": body
             }))
             .send()
-            .await {
-                Ok(resp) => {
-                    if resp.status().is_success() {
-                        success_count += 1;
-                    } else {
-                        failure_count += 1;
-                    }
-                },
-                Err(_) => {
+            .await
+        {
+            Ok(resp) => {
+                if resp.status().is_success() {
+                    success_count += 1;
+                } else {
                     failure_count += 1;
                 }
-            };
+            }
+            Err(_) => {
+                failure_count += 1;
+            }
+        };
     }
 
     HttpResponse::Ok().json(serde_json::json!({
         "status": "success",
-        "message": format!("Emails sent to mailing list '{}'. Successful: {}, Failed: {}", 
+        "message": format!("Emails sent to mailing list '{}'. Successful: {}, Failed: {}",
                            email_req.mailing_list, success_count, failure_count)
     }))
 }
@@ -270,12 +294,25 @@ async fn send_email_handler(
                         to: email_req.to.clone(),
                         subject: email_req.subject.clone(),
                         body: email_req.body.clone(),
-                        headers: vec![("DKIM-Signature".to_string(), dkim_result["dkimSignature"].as_str().unwrap_or("").to_string())],
+                        headers: vec![(
+                            "DKIM-Signature".to_string(),
+                            dkim_result["dkimSignature"]
+                                .as_str()
+                                .unwrap_or("")
+                                .to_string(),
+                        )],
                         flags: vec![],
                         sequence_number: 0,
                         uid: 0,
-                        internal_date: mongodb::bson::DateTime::from_millis(Utc::now().timestamp_millis()),
-                        dkim_signature: Some(dkim_result["dkimSignature"].as_str().unwrap_or("").to_string()),
+                        internal_date: mongodb::bson::DateTime::from_millis(
+                            Utc::now().timestamp_millis(),
+                        ),
+                        dkim_signature: Some(
+                            dkim_result["dkimSignature"]
+                                .as_str()
+                                .unwrap_or("")
+                                .to_string(),
+                        ),
                     };
 
                     // Send the email
@@ -312,14 +349,15 @@ async fn send_email_handler(
 
 // --- Auth handlers ---
 
-async fn auth_login(
-    req: web::Json<LoginRequest>,
-    logic: web::Data<Arc<Logic>>,
-) -> impl Responder {
+async fn auth_login(req: web::Json<LoginRequest>, logic: web::Data<Arc<Logic>>) -> impl Responder {
     // Try to authenticate against MongoDB
     match logic.authenticate_user(&req.email, &req.password).await {
         Ok(Some(user)) => {
-            let display = if user.mailbox.is_empty() { req.email.clone() } else { user.mailbox.clone() };
+            let display = if user.mailbox.is_empty() {
+                req.email.clone()
+            } else {
+                user.mailbox.clone()
+            };
             HttpResponse::Ok().json(make_session(&req.email, &display))
         }
         Ok(None) => {
@@ -356,7 +394,10 @@ async fn auth_register(
     req: web::Json<RegisterRequest>,
     logic: web::Data<Arc<Logic>>,
 ) -> impl Responder {
-    let display = req.display_name.clone().unwrap_or_else(|| req.email.split('@').next().unwrap_or("user").to_string());
+    let display = req
+        .display_name
+        .clone()
+        .unwrap_or_else(|| req.email.split('@').next().unwrap_or("user").to_string());
     // Try to create user in MongoDB
     match logic.create_user(&req.email, &req.password, "inbox").await {
         Ok(_) => HttpResponse::Ok().json(make_session(&req.email, &display)),
@@ -393,6 +434,100 @@ async fn auth_refresh() -> impl Responder {
             "issuedAt": Utc::now().timestamp_millis() as u64,
         }
     }))
+}
+
+async fn auth_oauth_start(path: web::Path<String>) -> impl Responder {
+    let provider_raw = path.into_inner();
+    let provider = match normalize_oauth_provider(&provider_raw) {
+        Some(p) => p,
+        None => {
+            return HttpResponse::BadRequest().json(serde_json::json!({
+                "message": "Unsupported OAuth provider."
+            }))
+        }
+    };
+
+    let state = Uuid::new_v4().to_string();
+    let callback_base =
+        env::var("OAUTH_CALLBACK_BASE_URL").unwrap_or_else(|_| "http://localhost:8000".to_string());
+    let auth_url = format!(
+        "{}/api/auth/oauth/{}/callback?state={}",
+        callback_base.trim_end_matches('/'),
+        provider,
+        state
+    );
+
+    HttpResponse::Ok().json(serde_json::json!({
+        "provider": provider,
+        "state": state,
+        "authUrl": auth_url
+    }))
+}
+
+async fn auth_oauth_callback(
+    path: web::Path<String>,
+    query: web::Query<OAuthCallbackQuery>,
+    logic: web::Data<Arc<Logic>>,
+) -> impl Responder {
+    let provider_raw = path.into_inner();
+    let provider = match normalize_oauth_provider(&provider_raw) {
+        Some(p) => p,
+        None => {
+            return HttpResponse::BadRequest().json(serde_json::json!({
+                "message": "Unsupported OAuth provider."
+            }))
+        }
+    };
+
+    let code = match query
+        .code
+        .as_ref()
+        .map(|v| v.trim())
+        .filter(|v| !v.is_empty())
+    {
+        Some(v) => v.to_string(),
+        None => {
+            return HttpResponse::BadRequest().json(serde_json::json!({
+                "message": "Missing OAuth authorization code."
+            }))
+        }
+    };
+
+    let _state = query.state.clone().unwrap_or_default();
+    let subject = query
+        .subject
+        .as_ref()
+        .map(|v| v.trim())
+        .filter(|v| !v.is_empty())
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| code.clone());
+    let email = query
+        .email
+        .as_ref()
+        .map(|v| v.trim())
+        .filter(|v| !v.is_empty())
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| format!("{}+{}@misfits.ai", provider, subject));
+    let display = query
+        .display_name
+        .as_ref()
+        .map(|v| v.trim())
+        .filter(|v| !v.is_empty())
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| email.split('@').next().unwrap_or("user").to_string());
+
+    match logic
+        .find_or_create_oauth_user(&provider, &subject, &email, Some(&display))
+        .await
+    {
+        Ok(user) => HttpResponse::Ok().json(make_session(&user.username, &display)),
+        Err(e) => {
+            eprintln!("OAuth callback error: {}", e);
+            HttpResponse::Unauthorized().json(serde_json::json!({
+                "message": "OAuth authentication failed."
+            }))
+        }
+    }
 }
 
 // --- Mail list (Phase A1, issue #166) -----------------------------------------
@@ -449,11 +584,7 @@ fn resolve_user_id(req: &actix_web::HttpRequest) -> String {
         .map(str::trim)
         .filter(|s| !s.is_empty())
     {
-        return email
-            .split('@')
-            .next()
-            .unwrap_or(email)
-            .to_string();
+        return email.split('@').next().unwrap_or(email).to_string();
     }
     env::var("SMTP_USERNAME").unwrap_or_else(|_| "admin".to_string())
 }
@@ -512,7 +643,9 @@ fn parse_address(raw: &str) -> EmailAddressDto {
         }
     }
     // Bare address fallback: strip any stray angle brackets/quotes.
-    let cleaned = raw.trim_matches(|c| c == '<' || c == '>' || c == '"').trim();
+    let cleaned = raw
+        .trim_matches(|c| c == '<' || c == '>' || c == '"')
+        .trim();
     EmailAddressDto {
         name: cleaned.split('@').next().unwrap_or(cleaned).to_string(),
         address: cleaned.to_string(),
@@ -536,7 +669,9 @@ fn strip_tags(html: &str) -> String {
 fn email_to_dto(email: &Email, folder: &str, include_body: bool) -> EmailDto {
     let flags_l: Vec<String> = email.flags.iter().map(|f| f.to_ascii_lowercase()).collect();
     let is_read = flags_l.iter().any(|f| f == "seen" || f == "\\seen");
-    let is_starred = flags_l.iter().any(|f| f == "flagged" || f == "\\flagged" || f == "starred");
+    let is_starred = flags_l
+        .iter()
+        .any(|f| f == "flagged" || f == "\\flagged" || f == "starred");
     let body_type = if email.body.to_ascii_lowercase().contains("<html")
         || email.body.contains("</")
         || email.body.contains("<p")
@@ -649,7 +784,9 @@ async fn api_emails(
     let page_size = query.page_size.clamp(1, 100);
     // Over-fetch a single page-sized chunk per mailbox candidate, then merge.
     // Skip huge dumps: limit from Mongo already newest-first.
-    let fetch_limit = (page_size as i64).saturating_mul(page as i64).max(page_size as i64);
+    let fetch_limit = (page_size as i64)
+        .saturating_mul(page as i64)
+        .max(page_size as i64);
 
     let mut collected: Vec<Email> = Vec::new();
     for mailbox in folder_to_mailboxes(&folder) {
@@ -672,7 +809,12 @@ async fn api_emails(
     let mut seen = std::collections::HashSet::new();
     collected.retain(|e| {
         let key = if e.id.is_empty() {
-            format!("{}|{}|{}", e.from, e.subject, e.internal_date.timestamp_millis())
+            format!(
+                "{}|{}|{}",
+                e.from,
+                e.subject,
+                e.internal_date.timestamp_millis()
+            )
         } else {
             e.id.clone()
         };
@@ -796,40 +938,41 @@ async fn api_send(
     // both sign and deliver via Nodemailer — when no dkimSignature is
     // returned we treat success as "already delivered by dkim-service".
     let dkim_service: Box<dyn DkimService> = Box::new(RealDkimService);
-    let (dkim_sig, message_id_hdr, already_delivered) = match dkim_service.sign_email(&email_req).await {
-        Ok(dkim_result) => {
-            let status = dkim_result["status"].as_str().unwrap_or("");
-            if status != "success" {
-                let msg = dkim_result["message"]
+    let (dkim_sig, message_id_hdr, already_delivered) =
+        match dkim_service.sign_email(&email_req).await {
+            Ok(dkim_result) => {
+                let status = dkim_result["status"].as_str().unwrap_or("");
+                if status != "success" {
+                    let msg = dkim_result["message"]
+                        .as_str()
+                        .or_else(|| dkim_result["error"].as_str())
+                        .unwrap_or("DKIM signing failed");
+                    return HttpResponse::InternalServerError().json(serde_json::json!({
+                        "sent": false,
+                        "message": format!("Failed to sign email: {}", msg),
+                    }));
+                }
+                let sig = dkim_result["dkimSignature"]
                     .as_str()
-                    .or_else(|| dkim_result["error"].as_str())
-                    .unwrap_or("DKIM signing failed");
+                    .or_else(|| dkim_result["dkim_signature"].as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let mid = dkim_result["messageId"]
+                    .as_str()
+                    .or_else(|| dkim_result["message_id"].as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let delivered = sig.is_empty();
+                (sig, mid, delivered)
+            }
+            Err(e) => {
+                eprintln!("DKIM service error on /api/send: {}", e);
                 return HttpResponse::InternalServerError().json(serde_json::json!({
                     "sent": false,
-                    "message": format!("Failed to sign email: {}", msg),
+                    "message": "Failed to generate DKIM signature",
                 }));
             }
-            let sig = dkim_result["dkimSignature"]
-                .as_str()
-                .or_else(|| dkim_result["dkim_signature"].as_str())
-                .unwrap_or("")
-                .to_string();
-            let mid = dkim_result["messageId"]
-                .as_str()
-                .or_else(|| dkim_result["message_id"].as_str())
-                .unwrap_or("")
-                .to_string();
-            let delivered = sig.is_empty();
-            (sig, mid, delivered)
-        }
-        Err(e) => {
-            eprintln!("DKIM service error on /api/send: {}", e);
-            return HttpResponse::InternalServerError().json(serde_json::json!({
-                "sent": false,
-                "message": "Failed to generate DKIM signature",
-            }));
-        }
-    };
+        };
 
     let id = Uuid::new_v4().to_string();
     let message_id = if message_id_hdr.is_empty() {
@@ -842,10 +985,7 @@ async fn api_send(
 
     let mut headers = vec![
         ("Message-ID".to_string(), message_id.clone()),
-        (
-            "Date".to_string(),
-            Utc::now().to_rfc2822(),
-        ),
+        ("Date".to_string(), Utc::now().to_rfc2822()),
         ("MIME-Version".to_string(), "1.0".to_string()),
         (
             "Content-Type".to_string(),
@@ -1083,8 +1223,8 @@ struct CreateCalendarEventRequest {
     title: String,
     #[serde(default)]
     description: String,
-    start: String,  // ISO 8601
-    end: String,    // ISO 8601
+    start: String, // ISO 8601
+    end: String,   // ISO 8601
     #[serde(default = "default_event_type_str")]
     event_type: String,
     #[serde(default = "default_color_str")]
@@ -1093,8 +1233,12 @@ struct CreateCalendarEventRequest {
     location: String,
 }
 
-fn default_event_type_str() -> String { "default".to_string() }
-fn default_color_str() -> String { "#3788d8".to_string() }
+fn default_event_type_str() -> String {
+    "default".to_string()
+}
+fn default_color_str() -> String {
+    "#3788d8".to_string()
+}
 
 #[derive(Deserialize)]
 struct UpdateCalendarEventRequest {
@@ -1117,9 +1261,9 @@ struct UpdateCalendarEventRequest {
 #[derive(Deserialize)]
 struct CalendarQueryParams {
     #[serde(default)]
-    start: Option<String>,  // ISO 8601
+    start: Option<String>, // ISO 8601
     #[serde(default)]
-    end: Option<String>,    // ISO 8601
+    end: Option<String>, // ISO 8601
 }
 
 fn parse_iso_to_bson(s: &str) -> Option<bson::DateTime> {
@@ -1130,7 +1274,11 @@ fn parse_iso_to_bson(s: &str) -> Option<bson::DateTime> {
 
 fn get_user_from_headers(req: &actix_web::HttpRequest) -> String {
     // Try x-user-email header, fallback to query param, fallback to env SMTP_USERNAME
-    if let Some(email) = req.headers().get("x-user-email").and_then(|v| v.to_str().ok()) {
+    if let Some(email) = req
+        .headers()
+        .get("x-user-email")
+        .and_then(|v| v.to_str().ok())
+    {
         return email.to_string();
     }
     // Fallback: use SMTP_USERNAME env var
@@ -1148,11 +1296,17 @@ async fn calendar_create_event(
 
     let start = match parse_iso_to_bson(&req_body.start) {
         Some(dt) => dt,
-        None => return HttpResponse::BadRequest().json(serde_json::json!({"error": "Invalid start date format, use ISO 8601"})),
+        None => {
+            return HttpResponse::BadRequest()
+                .json(serde_json::json!({"error": "Invalid start date format, use ISO 8601"}))
+        }
     };
     let end = match parse_iso_to_bson(&req_body.end) {
         Some(dt) => dt,
-        None => return HttpResponse::BadRequest().json(serde_json::json!({"error": "Invalid end date format, use ISO 8601"})),
+        None => {
+            return HttpResponse::BadRequest()
+                .json(serde_json::json!({"error": "Invalid end date format, use ISO 8601"}))
+        }
     };
 
     let mut event = CalendarEvent::new(&user, &req_body.title, start, end);
@@ -1165,7 +1319,8 @@ async fn calendar_create_event(
         Ok(_) => HttpResponse::Created().json(&event),
         Err(e) => {
             eprintln!("Calendar create error: {}", e);
-            HttpResponse::InternalServerError().json(serde_json::json!({"error": "Failed to create event"}))
+            HttpResponse::InternalServerError()
+                .json(serde_json::json!({"error": "Failed to create event"}))
         }
     }
 }
@@ -1180,11 +1335,17 @@ async fn calendar_list_events(
     let start_after = query.start.as_ref().and_then(|s| parse_iso_to_bson(s));
     let start_before = query.end.as_ref().and_then(|s| parse_iso_to_bson(s));
 
-    match logic.get_calendar_events(&user, start_after, start_before).await {
-        Ok(events) => HttpResponse::Ok().json(serde_json::json!({"events": events, "total": events.len()})),
+    match logic
+        .get_calendar_events(&user, start_after, start_before)
+        .await
+    {
+        Ok(events) => {
+            HttpResponse::Ok().json(serde_json::json!({"events": events, "total": events.len()}))
+        }
         Err(e) => {
             eprintln!("Calendar list error: {}", e);
-            HttpResponse::InternalServerError().json(serde_json::json!({"error": "Failed to list events"}))
+            HttpResponse::InternalServerError()
+                .json(serde_json::json!({"error": "Failed to list events"}))
         }
     }
 }
@@ -1202,7 +1363,8 @@ async fn calendar_get_event(
         Ok(None) => HttpResponse::NotFound().json(serde_json::json!({"error": "Event not found"})),
         Err(e) => {
             eprintln!("Calendar get error: {}", e);
-            HttpResponse::InternalServerError().json(serde_json::json!({"error": "Failed to get event"}))
+            HttpResponse::InternalServerError()
+                .json(serde_json::json!({"error": "Failed to get event"}))
         }
     }
 }
@@ -1217,26 +1379,47 @@ async fn calendar_update_event(
     let event_id = path.into_inner();
 
     let mut update = bson::Document::new();
-    if let Some(title) = &req_body.title { update.insert("title", title.clone()); }
-    if let Some(desc) = &req_body.description { update.insert("description", desc.clone()); }
+    if let Some(title) = &req_body.title {
+        update.insert("title", title.clone());
+    }
+    if let Some(desc) = &req_body.description {
+        update.insert("description", desc.clone());
+    }
     if let Some(start) = &req_body.start {
         match parse_iso_to_bson(start) {
-            Some(dt) => { update.insert("start", dt); }
-            None => return HttpResponse::BadRequest().json(serde_json::json!({"error": "Invalid start date format"})),
+            Some(dt) => {
+                update.insert("start", dt);
+            }
+            None => {
+                return HttpResponse::BadRequest()
+                    .json(serde_json::json!({"error": "Invalid start date format"}))
+            }
         }
     }
     if let Some(end) = &req_body.end {
         match parse_iso_to_bson(end) {
-            Some(dt) => { update.insert("end", dt); }
-            None => return HttpResponse::BadRequest().json(serde_json::json!({"error": "Invalid end date format"})),
+            Some(dt) => {
+                update.insert("end", dt);
+            }
+            None => {
+                return HttpResponse::BadRequest()
+                    .json(serde_json::json!({"error": "Invalid end date format"}))
+            }
         }
     }
-    if let Some(et) = &req_body.event_type { update.insert("event_type", et.clone()); }
-    if let Some(color) = &req_body.color { update.insert("color", color.clone()); }
-    if let Some(loc) = &req_body.location { update.insert("location", loc.clone()); }
+    if let Some(et) = &req_body.event_type {
+        update.insert("event_type", et.clone());
+    }
+    if let Some(color) = &req_body.color {
+        update.insert("color", color.clone());
+    }
+    if let Some(loc) = &req_body.location {
+        update.insert("location", loc.clone());
+    }
 
     if update.is_empty() {
-        return HttpResponse::BadRequest().json(serde_json::json!({"error": "No fields to update"}));
+        return HttpResponse::BadRequest()
+            .json(serde_json::json!({"error": "No fields to update"}));
     }
 
     match logic.update_calendar_event(&user, &event_id, update).await {
@@ -1244,7 +1427,8 @@ async fn calendar_update_event(
         Ok(None) => HttpResponse::NotFound().json(serde_json::json!({"error": "Event not found"})),
         Err(e) => {
             eprintln!("Calendar update error: {}", e);
-            HttpResponse::InternalServerError().json(serde_json::json!({"error": "Failed to update event"}))
+            HttpResponse::InternalServerError()
+                .json(serde_json::json!({"error": "Failed to update event"}))
         }
     }
 }
@@ -1261,7 +1445,8 @@ async fn calendar_delete_event(
         Ok(_) => HttpResponse::Ok().json(serde_json::json!({"deleted": true})),
         Err(e) => {
             eprintln!("Calendar delete error: {}", e);
-            HttpResponse::InternalServerError().json(serde_json::json!({"error": "Failed to delete event"}))
+            HttpResponse::InternalServerError()
+                .json(serde_json::json!({"error": "Failed to delete event"}))
         }
     }
 }
@@ -1273,13 +1458,17 @@ async fn main() -> std::io::Result<()> {
     // Connect to MongoDB for auth
     let mongo_user = env::var("MONGODB_USERNAME").unwrap_or_default();
     let mongo_pass = env::var("MONGODB_PASSWORD").unwrap_or_default();
-    let mongo_cluster = env::var("MONGODB_CLUSTER_URL").unwrap_or_else(|_| "mongodb:27017".to_string());
+    let mongo_cluster =
+        env::var("MONGODB_CLUSTER_URL").unwrap_or_else(|_| "mongodb:27017".to_string());
     let mongo_app = env::var("MONGODB_APP_NAME").unwrap_or_else(|_| "mailserver".to_string());
 
     let client_uri = if mongo_cluster.contains(".mongodb.net") {
         format!("mongodb+srv://{}:{}@{}/?retryWrites=true&w=majority&appName={}&serverSelectionTimeoutMS=5000", mongo_user, mongo_pass, mongo_cluster, mongo_app)
     } else {
-        format!("mongodb://{}:{}@{}/?authSource=admin&appName={}&serverSelectionTimeoutMS=5000", mongo_user, mongo_pass, mongo_cluster, mongo_app)
+        format!(
+            "mongodb://{}:{}@{}/?authSource=admin&appName={}&serverSelectionTimeoutMS=5000",
+            mongo_user, mongo_pass, mongo_cluster, mongo_app
+        )
     };
 
     let use_mongodb = env::var("USE_MONGODB").unwrap_or_else(|_| "false".to_string()) == "true";
@@ -1290,7 +1479,11 @@ async fn main() -> std::io::Result<()> {
                 let c = Arc::new(c);
                 // Warm-up: force DNS resolution + TLS + MongoDB handshake at startup
                 // so the first user login is not delayed by 10-30s.
-                if let Err(e) = c.database("admin").run_command(mongodb::bson::doc! {"ping": 1}).await {
+                if let Err(e) = c
+                    .database("admin")
+                    .run_command(mongodb::bson::doc! {"ping": 1})
+                    .await
+                {
                     eprintln!("MongoDB warm-up ping failed (non-fatal): {}", e);
                 } else {
                     println!("MongoDB connection ready.");
@@ -1307,19 +1500,28 @@ async fn main() -> std::io::Result<()> {
     };
 
     let fallback_client = Arc::new(
-        mongodb::Client::with_uri_str("mongodb://localhost:27017").await.unwrap()
+        mongodb::Client::with_uri_str("mongodb://localhost:27017")
+            .await
+            .unwrap(),
     );
-    let shared_mongo = mongo_client.clone().unwrap_or_else(|| fallback_client.clone());
+    let shared_mongo = mongo_client
+        .clone()
+        .unwrap_or_else(|| fallback_client.clone());
     let logic = web::Data::new(Arc::new(Logic::new(
-        mongo_client.unwrap_or(fallback_client)
+        mongo_client.unwrap_or(fallback_client),
     )));
     let mongo_data = web::Data::new(shared_mongo);
 
     let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
     builder
-        .set_private_key_file(env::var("PRIVKEY_PATH").expect("PRIVKEY_PATH must be set"), SslFiletype::PEM)
+        .set_private_key_file(
+            env::var("PRIVKEY_PATH").expect("PRIVKEY_PATH must be set"),
+            SslFiletype::PEM,
+        )
         .unwrap();
-    builder.set_certificate_chain_file(env::var("FULLCHAIN_PATH").expect("FULLCHAIN_PATH must be set")).unwrap();
+    builder
+        .set_certificate_chain_file(env::var("FULLCHAIN_PATH").expect("FULLCHAIN_PATH must be set"))
+        .unwrap();
 
     // Start HTTP server on 8000 (for frontend proxy, no TLS)
     let http_logic = logic.clone();
@@ -1342,6 +1544,14 @@ async fn main() -> std::io::Result<()> {
                 .route("/api/auth/register", web::post().to(auth_register))
                 .route("/api/auth/logout", web::post().to(auth_logout))
                 .route("/api/auth/refresh", web::post().to(auth_refresh))
+                .route(
+                    "/api/auth/oauth/{provider}/start",
+                    web::get().to(auth_oauth_start),
+                )
+                .route(
+                    "/api/auth/oauth/{provider}/callback",
+                    web::get().to(auth_oauth_callback),
+                )
                 .route("/api/emails", web::get().to(api_emails))
                 .route("/api/emails/{id}", web::get().to(api_email_by_id))
                 .route("/api/tags", web::get().to(api_tags))
@@ -1353,14 +1563,29 @@ async fn main() -> std::io::Result<()> {
                 .route("/api/settings/ai", web::put().to(api_put_ai_settings))
                 .route("/api/send/undo", web::post().to(api_send))
                 .route("/api/send/schedule", web::post().to(api_send))
-                .route("/api/calendar/events", web::post().to(calendar_create_event))
+                .route(
+                    "/api/calendar/events",
+                    web::post().to(calendar_create_event),
+                )
                 .route("/api/calendar/events", web::get().to(calendar_list_events))
-                .route("/api/calendar/events/{id}", web::get().to(calendar_get_event))
-                .route("/api/calendar/events/{id}", web::put().to(calendar_update_event))
-                .route("/api/calendar/events/{id}", web::delete().to(calendar_delete_event))
+                .route(
+                    "/api/calendar/events/{id}",
+                    web::get().to(calendar_get_event),
+                )
+                .route(
+                    "/api/calendar/events/{id}",
+                    web::put().to(calendar_update_event),
+                )
+                .route(
+                    "/api/calendar/events/{id}",
+                    web::delete().to(calendar_delete_event),
+                )
                 .route("/send-email", web::post().to(send_email_handler))
                 .route("/create-mailing-list", web::post().to(create_mailing_list))
-                .route("/send-to-mailing-list", web::post().to(send_to_mailing_list))
+                .route(
+                    "/send-to-mailing-list",
+                    web::post().to(send_to_mailing_list),
+                )
         })
         .bind(http_addr)
         .expect("Failed to bind HTTP on 8000")
@@ -1384,7 +1609,10 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(RealDkimService))
             .route("/send-email", web::post().to(send_email_handler))
             .route("/create-mailing-list", web::post().to(create_mailing_list))
-            .route("/send-to-mailing-list", web::post().to(send_to_mailing_list))
+            .route(
+                "/send-to-mailing-list",
+                web::post().to(send_to_mailing_list),
+            )
     })
     .bind_openssl("0.0.0.0:8443", builder)?
     .run()
@@ -1396,8 +1624,8 @@ mod tests {
     use super::*;
     use actix_web::{test, App};
     use dotenv::dotenv;
-    use mockall::predicate::eq;
     use mockall::mock;
+    use mockall::predicate::eq;
 
     mock! {
         pub DkimService {
@@ -1407,7 +1635,10 @@ mod tests {
 
     #[async_trait::async_trait]
     impl DkimService for MockDkimService {
-        async fn sign_email(&self, email: &EmailRequest) -> Result<serde_json::Value, std::io::Error> {
+        async fn sign_email(
+            &self,
+            email: &EmailRequest,
+        ) -> Result<serde_json::Value, std::io::Error> {
             self.sign_email(email).await
         }
     }
@@ -1430,9 +1661,12 @@ mod tests {
 
         let app = test::init_service(
             App::new()
-            .app_data(web::Data::new(Box::new(mock_dkim_service) as Box<dyn DkimService>))
-            .route("/send-email", web::post().to(send_email_handler))
-        ).await;
+                .app_data(web::Data::new(
+                    Box::new(mock_dkim_service) as Box<dyn DkimService>
+                ))
+                .route("/send-email", web::post().to(send_email_handler)),
+        )
+        .await;
 
         let email_request = EmailRequest {
             from: "sender@example.com".to_string(),
@@ -1465,7 +1699,8 @@ impl DkimService for RealDkimService {
         let dkim_service_url = env::var("DKIM_SERVICE_URL").expect("DKIM_SERVICE_URL not set");
         let client = reqwest::Client::new();
 
-        let response = client.post(&dkim_service_url)
+        let response = client
+            .post(&dkim_service_url)
             .json(&serde_json::json!({
                 "from": email.from,
                 "to": email.to,
@@ -1477,9 +1712,15 @@ impl DkimService for RealDkimService {
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
         if response.status().is_success() {
-            response.json().await.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+            response
+                .json()
+                .await
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
         } else {
-            Err(std::io::Error::new(std::io::ErrorKind::Other, "Failed to sign email"))
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "Failed to sign email",
+            ))
         }
     }
 }
