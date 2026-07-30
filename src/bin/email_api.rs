@@ -565,7 +565,7 @@ async fn auth_oauth_callback(
     let (subject, email, display) = match provider.as_str() {
         "github" => {
             let client_id = env::var("GITHUB_CLIENT_ID").unwrap_or_default();
-            let client_secret = env::var("OAUTH_GITHUB_CLIENT_SECRET").unwrap_or_default();
+            let client_secret = env::var("GITHUB_CLIENT_SECRET").unwrap_or_default();
 
             // Exchange code for access_token
             let token_resp = http_client
