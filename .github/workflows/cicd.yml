@@ -149,6 +149,22 @@ jobs:
           scp -o StrictHostKeyChecking=no /tmp/.env.deploy \
             debian@${{ secrets.VM_IP }}:/home/debian/.env.deploy
 
+      - name: Diagnose .env.deploy on VM
+        run: |
+          ssh -o StrictHostKeyChecking=no debian@${{ secrets.VM_IP }} bash << 'REMOTE'
+            echo "=== .env.deploy diagnostics ==="
+            if [ ! -f /home/debian/.env.deploy ]; then
+              echo "ERROR: /home/debian/.env.deploy does not exist!"
+              exit 1
+            fi
+            echo "File size: $(wc -c < /home/debian/.env.deploy) bytes"
+            echo "Line count: $(wc -l < /home/debian/.env.deploy)"
+            echo "=== Keys present (values hidden) ==="
+            grep -v '^#' /home/debian/.env.deploy | grep '=' | cut -d'=' -f1 | sort
+            echo "=== Keys with EMPTY values ==="
+            grep -v '^#' /home/debian/.env.deploy | grep '^[^=]*=$' | cut -d'=' -f1 || echo "(none)"
+          REMOTE
+
       - name: Pull images & deploy
         env:
           INJECT_SCW_REGISTRY_ENDPOINT: ${{ secrets.SCW_REGISTRY_ENDPOINT }}
