@@ -1277,16 +1277,26 @@ async fn main() -> std::io::Result<()> {
     let mongo_app = env::var("MONGODB_APP_NAME").unwrap_or_else(|_| "mailserver".to_string());
 
     let client_uri = if mongo_cluster.contains(".mongodb.net") {
-        format!("mongodb+srv://{}:{}@{}/?retryWrites=true&w=majority&appName={}", mongo_user, mongo_pass, mongo_cluster, mongo_app)
+        format!("mongodb+srv://{}:{}@{}/?retryWrites=true&w=majority&appName={}&serverSelectionTimeoutMS=5000", mongo_user, mongo_pass, mongo_cluster, mongo_app)
     } else {
-        format!("mongodb://{}:{}@{}/?authSource=admin&appName={}", mongo_user, mongo_pass, mongo_cluster, mongo_app)
+        format!("mongodb://{}:{}@{}/?authSource=admin&appName={}&serverSelectionTimeoutMS=5000", mongo_user, mongo_pass, mongo_cluster, mongo_app)
     };
 
     let use_mongodb = env::var("USE_MONGODB").unwrap_or_else(|_| "false".to_string()) == "true";
 
     let mongo_client = if use_mongodb && !mongo_user.is_empty() {
         match mongodb::Client::with_uri_str(&client_uri).await {
-            Ok(c) => Some(Arc::new(c)),
+            Ok(c) => {
+                let c = Arc::new(c);
+                // Warm-up: force DNS resolution + TLS + MongoDB handshake at startup
+                // so the first user login is not delayed by 10-30s.
+                if let Err(e) = c.database("admin").run_command(mongodb::bson::doc! {"ping": 1}).await {
+                    eprintln!("MongoDB warm-up ping failed (non-fatal): {}", e);
+                } else {
+                    println!("MongoDB connection ready.");
+                }
+                Some(c)
+            }
             Err(e) => {
                 eprintln!("MongoDB connection failed: {}, auth will use env vars", e);
                 None
