@@ -122,8 +122,20 @@ jobs:
             debian@${{ secrets.VM_IP }}:/home/debian/Caddyfile
 
       - name: Pull images & deploy
+        env:
+          INJECT_GITHUB_CLIENT_ID: ${{ secrets.OAUTH_GITHUB_CLIENT_ID }}
+          INJECT_GITHUB_CLIENT_SECRET: ${{ secrets.OAUTH_GITHUB_CLIENT_SECRET }}
+          INJECT_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          INJECT_SCW_REGISTRY_ENDPOINT: ${{ secrets.SCW_REGISTRY_ENDPOINT }}
+          INJECT_SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
         run: |
-          ssh -o StrictHostKeyChecking=no debian@${{ secrets.VM_IP }} << 'REMOTE'
+          ssh -o StrictHostKeyChecking=no debian@${{ secrets.VM_IP }} \
+            INJECT_GITHUB_CLIENT_ID="$INJECT_GITHUB_CLIENT_ID" \
+            INJECT_GITHUB_CLIENT_SECRET="$INJECT_GITHUB_CLIENT_SECRET" \
+            INJECT_GOOGLE_CLIENT_ID="$INJECT_GOOGLE_CLIENT_ID" \
+            INJECT_SCW_REGISTRY_ENDPOINT="$INJECT_SCW_REGISTRY_ENDPOINT" \
+            INJECT_SCW_SECRET_KEY="$INJECT_SCW_SECRET_KEY" \
+            bash << 'REMOTE'
             set -euo pipefail
             cd /home/debian
 
@@ -131,13 +143,13 @@ jobs:
             sudo docker system prune -af --filter "until=1h" 2>/dev/null || true
 
             # Login to Scaleway Container Registry on the VM
-            echo "${{ secrets.SCW_SECRET_KEY }}" | sudo docker login \
-              ${{ secrets.SCW_REGISTRY_ENDPOINT }} \
+            echo "$INJECT_SCW_SECRET_KEY" | sudo docker login \
+              "$INJECT_SCW_REGISTRY_ENDPOINT" \
               -u nologin --password-stdin
 
             # Pull latest images from Scaleway Container Registry
-            sudo docker pull ${{ secrets.SCW_REGISTRY_ENDPOINT }}/smtp-server:latest
-            sudo docker pull ${{ secrets.SCW_REGISTRY_ENDPOINT }}/dkim-service:latest
+            sudo docker pull "$INJECT_SCW_REGISTRY_ENDPOINT/smtp-server:latest"
+            sudo docker pull "$INJECT_SCW_REGISTRY_ENDPOINT/dkim-service:latest"
 
             # Remove stale containers that conflict with compose names
             sudo docker rm -f email-api smtp-server imap-server misfits-web dkim-service caddy 2>/dev/null || true
@@ -149,9 +161,9 @@ jobs:
             # Create .env.deploy if it doesn't exist with default values
             if [ ! -f .env.deploy ]; then
               echo "Creating .env.deploy with default values..."
-              printf 'SCW_REGISTRY_ENDPOINT=%s\nMONGODB_USERNAME=mongo\nMONGODB_PASSWORD=change...o\n' "${{ secrets.SCW_REGISTRY_ENDPOINT }}" > .env.deploy
+              printf 'MONGODB_USERNAME=mongo\nMONGODB_PASSWORD=changeme\n' > .env.deploy
             fi
-            # Upsert OAuth secrets so GitHub login works without manual intervention
+            # Upsert all required secrets into .env.deploy
             upsert_env() {
               local key="$1" val="$2" file=".env.deploy"
               if grep -q "^${key}=" "$file" 2>/dev/null; then
@@ -160,8 +172,15 @@ jobs:
                 echo "${key}=${val}" >> "$file"
               fi
             }
-            upsert_env GITHUB_CLIENT_ID "${{ secrets.OAUTH_GITHUB_CLIENT_ID }}"
-            upsert_env GITHUB_CLIENT_SECRET "${{ secrets.OAUTH_GITHUB_CLIENT_SECRET }}"
+            # OAuth credentials (from GitHub Secrets)
+            upsert_env GITHUB_CLIENT_ID     "$INJECT_GITHUB_CLIENT_ID"
+            upsert_env GITHUB_CLIENT_SECRET "$INJECT_GITHUB_CLIENT_SECRET"
+            upsert_env GOOGLE_CLIENT_ID     "$INJECT_GOOGLE_CLIENT_ID"
+            # OAuth routing (static values)
+            upsert_env OAUTH_CALLBACK_BASE_URL "https://mail.misfits.ai"
+            upsert_env FRONTEND_BASE_URL       "https://mail.misfits.ai"
+            # SCW Registry (from GitHub Secrets)
+            upsert_env SCW_REGISTRY_ENDPOINT "$INJECT_SCW_REGISTRY_ENDPOINT"
             # Drop stale Docker bind dirs created when file sources were missing
             # (docker turns missing file mounts into empty directories → OCI mount error)
             sudo rm -rf /home/debian/runtime-patches 2>/dev/null || true
