@@ -166,6 +166,37 @@ jobs:
             # (docker turns missing file mounts into empty directories → OCI mount error)
             sudo rm -rf /home/debian/runtime-patches 2>/dev/null || true
 
+            # ── Free ports used by compose services ──────────────────────────────────────
+            # Stop known system services that may hold ports before Docker tries to bind them.
+            for svc in nginx apache2 caddy haproxy lighttpd; do
+              if systemctl is-active --quiet "$svc" 2>/dev/null; then
+                echo "Stopping system service: $svc"
+                sudo systemctl stop "$svc" || true
+                sudo systemctl disable "$svc" || true
+              fi
+            done
+
+            # Kill any remaining process still listening on the ports we need.
+            PORTS="80 443 25 587 8025 8465 143 993 8000 8443 3000 3001 8080"
+            if command -v fuser &>/dev/null; then
+              for port in $PORTS; do
+                sudo fuser -k "${port}/tcp" 2>/dev/null || true
+              done
+            else
+              # fallback: ss + kill
+              for port in $PORTS; do
+                pids=$(sudo ss -tlnp "sport = :${port}" 2>/dev/null \
+                       | grep -oP 'pid=\K[0-9]+' | sort -u || true)
+                for pid in $pids; do
+                  echo "Killing pid $pid on port $port"
+                  sudo kill -9 "$pid" 2>/dev/null || true
+                done
+              done
+            fi
+            # Brief pause to let the OS release sockets
+            sleep 2
+            # ─────────────────────────────────────────────────────────────────────────────
+
             sudo docker compose -f docker-compose.deploy.yml --env-file .env.deploy up -d --force-recreate --remove-orphans
 
             # Wait for misfits-web, then hot-patch baked Next rewrites if still
