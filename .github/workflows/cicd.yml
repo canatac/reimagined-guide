@@ -177,6 +177,10 @@ jobs:
             set -euo pipefail
             cd /home/debian
 
+            # Restart dockerd to evict any unkillable zombie containers from previous runs
+            sudo systemctl restart docker
+            sleep 3
+
             # Clean up old images to free disk space (VM has limited storage)
             sudo docker system prune -af --filter "until=1h" 2>/dev/null || true
 
@@ -188,18 +192,6 @@ jobs:
             # Pull latest images from Scaleway Container Registry
             sudo docker pull "$INJECT_SCW_REGISTRY_ENDPOINT/smtp-server:latest"
             sudo docker pull "$INJECT_SCW_REGISTRY_ENDPOINT/dkim-service:latest"
-
-            # Force-kill stuck containers before removal (handles zombie/unkillable state)
-            sudo docker kill -s SIGKILL email-api smtp-server imap-server misfits-web dkim-service caddy 2>/dev/null || true
-            # Kill container host PIDs directly in case Docker-level kill is ignored
-            for name in email-api smtp-server imap-server misfits-web dkim-service caddy; do
-              pid=$(sudo docker inspect --format='{{.State.Pid}}' "$name" 2>/dev/null || true)
-              if [ -n "$pid" ] && [ "$pid" != "0" ]; then
-                sudo kill -9 "$pid" 2>/dev/null || true
-              fi
-            done
-            # Remove stale containers that conflict with compose names
-            sudo docker rm -f email-api smtp-server imap-server misfits-web dkim-service caddy 2>/dev/null || true
 
             # Source .env.deploy so docker compose can resolve ${VAR} in the YAML
             # (avoids misleading "variable is not set" warnings)
