@@ -73,7 +73,7 @@ DISTRO_CODENAME=$(lsb_release -cs)
 if ! command -v mongod &>/dev/null; then
   curl -fsSL https://www.mongodb.org/static/pgp/server-7.0.asc \
     | sudo gpg --batch --yes --no-tty --dearmor -o /usr/share/keyrings/mongodb-server-7.0.gpg
-  echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/debian ${DISTRO_CODENAME}/mongodb-org/7.0 main" \
+  echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/debian/${DISTRO_CODENAME}/mongodb-org/7.0/main" \
     | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
 
   sudo apt-get update -qq
