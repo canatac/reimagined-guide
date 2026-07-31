@@ -83,9 +83,9 @@ jobs:
     runs-on: ubuntu-latest
     if: >-
       always() &&
-      (github.event_name == 'push' && github.ref == 'refs/heads/master')
-      || github.event_name == 'workflow_dispatch'
-      || github.event_name == 'repository_dispatch'
+      (github.event_name == 'push' && github.ref == 'refs/heads/master') ||
+       github.event_name == 'workflow_dispatch' ||
+       github.event_name == 'repository_dispatch'
     steps:
       - uses: actions/checkout@v4
 
@@ -193,7 +193,7 @@ jobs:
             sudo docker rm -f email-api smtp-server imap-server misfits-web dkim-service caddy 2>/dev/null || true
 
             # Stop any running compose stack to release bound ports (e.g. :80/:443)
-            sudo docker compose -f /home/debian/docker-compose.deploy.yml down --remove-orphans 2>/dev/null || true
+            sudo docker compose -f /home/debian/docker-compose.deploy.yml down --env-file /home/debian/.env.deploy --remove-orphans 2>/dev/null || true
 
             # Drop stale Docker bind dirs
             sudo rm -rf /home/debian/runtime-patches 2>/dev/null || true
