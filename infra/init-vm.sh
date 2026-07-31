@@ -81,11 +81,12 @@ if ! command -v mongod &>/dev/null; then
   curl -fsSL "https://www.mongodb.org/static/pgp/server-${MONGO_VERSION}.asc" \
     | sudo gpg --batch --yes --no-tty --dearmor \
       -o "/usr/share/keyrings/mongodb-server-${MONGO_VERSION}.gpg"
+  sudo chmod a+r "/usr/share/keyrings/mongodb-server-${MONGO_VERSION}.gpg"
   echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-${MONGO_VERSION}.gpg ] https://repo.mongodb.org/apt/debian ${MONGO_DISTRO}/mongodb-org/${MONGO_VERSION} main" \
     | sudo tee "/etc/apt/sources.list.d/mongodb-org-${MONGO_VERSION}.list"
 
-  sudo apt-get update -qq
-  sudo apt-get install -y -qq mongodb-org
+  sudo apt-get update
+  sudo apt-get install -y mongodb-org
   sudo systemctl enable --now mongod
   echo "MongoDB installé : $(mongod --version | head -1)"
 else
