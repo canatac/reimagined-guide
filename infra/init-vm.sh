@@ -68,13 +68,21 @@ sudo usermod -aG docker "$USER"
 # =============================================================================
 # 2. MongoDB 7
 # =============================================================================
-echo "=== Installation de MongoDB 7 ==="
+echo "=== Installation de MongoDB ==="
 DISTRO_CODENAME=$(lsb_release -cs)
+MONGO_VERSION="7.0"
+case "$DISTRO_CODENAME" in
+  bullseye|bookworm|trixie) MONGO_DISTRO="$DISTRO_CODENAME" ;;
+  *)                        MONGO_DISTRO="bookworm" ;;
+esac
+# Supprimer tout ancien .list MongoDB malformé avant d'en écrire un nouveau
+sudo rm -f /etc/apt/sources.list.d/mongodb-org-*.list
 if ! command -v mongod &>/dev/null; then
-  curl -fsSL https://www.mongodb.org/static/pgp/server-7.0.asc \
-    | sudo gpg --batch --yes --no-tty --dearmor -o /usr/share/keyrings/mongodb-server-7.0.gpg
-  echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/debian/dists/${DISTRO_CODENAME}/mongodb-org/7.0/main" \
-    | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
+  curl -fsSL "https://www.mongodb.org/static/pgp/server-${MONGO_VERSION}.asc" \
+    | sudo gpg --batch --yes --no-tty --dearmor \
+      -o "/usr/share/keyrings/mongodb-server-${MONGO_VERSION}.gpg"
+  echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-${MONGO_VERSION}.gpg ] https://repo.mongodb.org/apt/debian ${MONGO_DISTRO}/mongodb-org/${MONGO_VERSION} main" \
+    | sudo tee "/etc/apt/sources.list.d/mongodb-org-${MONGO_VERSION}.list"
 
   sudo apt-get update -qq
   sudo apt-get install -y -qq mongodb-org
