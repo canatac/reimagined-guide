@@ -293,8 +293,11 @@ jobs:
                   echo "Resolved cert: $CERT_REAL"
                   echo "Resolved key : $KEY_REAL"
                   sudo mkdir -p "$LINK_DIR"
-                  sudo ln -sfn "$CERT_REAL" "$LINK_DIR/${DOMAIN}.crt"
-                  sudo ln -sfn "$KEY_REAL" "$LINK_DIR/${DOMAIN}.key"
+                  # Relative symlinks so paths resolve correctly inside the container too
+                  CERT_REL=$(sudo realpath --relative-to="$LINK_DIR" "$CERT_REAL")
+                  KEY_REL=$(sudo realpath --relative-to="$LINK_DIR" "$KEY_REAL")
+                  sudo ln -sfn "$CERT_REL" "$LINK_DIR/${DOMAIN}.crt"
+                  sudo ln -sfn "$KEY_REL" "$LINK_DIR/${DOMAIN}.key"
                   CERT_READY=1
                   break
                 fi
