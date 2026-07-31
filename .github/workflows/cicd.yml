@@ -243,6 +243,19 @@ jobs:
 
             sudo -E docker compose -f /home/debian/docker-compose.deploy.yml --env-file /home/debian/.env.deploy up -d --force-recreate --remove-orphans
 
+            # Wait for Caddy to obtain Let's Encrypt certs before smtp-server can read them
+            DOMAIN=$(grep '^DOMAIN_NAME=' .env.deploy | cut -d= -f2-)
+            CERT="/var/lib/docker/volumes/debian_caddy_data/_data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/${DOMAIN}/${DOMAIN}.crt"
+            echo "Waiting for Caddy cert: $CERT"
+            for i in $(seq 1 24); do
+              if sudo test -f "$CERT"; then
+                echo "Caddy cert ready after ${i} attempts"
+                break
+              fi
+              echo "attempt $i/24 - cert not yet available, waiting 5s..."
+              sleep 5
+            done
+
             # Wait for misfits-web, then hot-patch baked Next rewrites if still
             # pointing at imap-server:8080 (old image). BACKEND_URL env is not
             # enough — rewrites are baked into server.js / routes-manifest.
