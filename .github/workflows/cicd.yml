@@ -245,7 +245,9 @@ jobs:
             if sudo nft list chain inet filter input 2>/dev/null | grep -q 'policy drop'; then
               sudo nft add rule inet filter input tcp dport 80 accept 2>/dev/null || true
               sudo nft add rule inet filter input tcp dport 443 accept 2>/dev/null || true
-              echo "nftables: opened ports 80 and 443 in INPUT chain"
+              # Allow Docker bridge subnets to reach MongoDB on the host
+              sudo nft add rule inet filter input ip saddr 172.16.0.0/12 tcp dport 27017 accept 2>/dev/null || true
+              echo "nftables: opened ports 80, 443 and 27017 (Docker→MongoDB) in INPUT chain"
             fi
             # Fix nftables FORWARD: allow Docker bridge traffic without hardcoding the bridge name
             if sudo nft list chain inet filter forward 2>/dev/null | grep -q 'policy drop'; then
