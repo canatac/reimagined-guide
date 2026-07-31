@@ -281,7 +281,11 @@ jobs:
             CERT_REAL=""
             KEY_REAL=""
             for i in $(seq 1 24); do
-              CERT_REAL=$(sudo find "$CERT_ROOT" -type f -path "*/${DOMAIN}/${DOMAIN}.crt" 2>/dev/null | head -n1 || true)
+              CERT_REAL=$(sudo find "$CERT_ROOT" -type f \
+                \( -path "*/${DOMAIN}/${DOMAIN}.crt" \
+                   -o -path "*/mail.${DOMAIN}/mail.${DOMAIN}.crt" \) \
+                -not -path "*/acme-staging-*/*" \
+                2>/dev/null | head -n1 || true)
               if [ -n "$CERT_REAL" ]; then
                 KEY_REAL="${CERT_REAL%.crt}.key"
                 if sudo test -f "$KEY_REAL"; then
