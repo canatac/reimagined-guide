@@ -24,8 +24,8 @@ services:
     environment:
       - SMTP_TLS_ADDR=${SMTP_TLS_ADDR}
       - SMTP_PLAIN_ADDR=${SMTP_PLAIN_ADDR}
-      - CERT_PATH=/caddy-certs/caddy/certificates/acme-v02.api.letsencrypt.org-directory/${DOMAIN_NAME}/${DOMAIN_NAME}.crt
-      - KEY_PATH=/caddy-certs/caddy/certificates/acme-v02.api.letsencrypt.org-directory/${DOMAIN_NAME}/${DOMAIN_NAME}.key
+      - CERT_PATH=/caddy-certs/live/${DOMAIN_NAME}.crt
+      - KEY_PATH=/caddy-certs/live/${DOMAIN_NAME}.key
       - SMTP_USERNAME=${SMTP_USERNAME}
       - SMTP_PASSWORD=${SMTP_PASSWORD}
       - MONGODB_USERNAME=${MONGODB_USERNAME}
@@ -48,8 +48,8 @@ services:
       - caddy_data:/caddy-certs:ro
     environment:
       - API_SERVER_ADDR=${API_SERVER_ADDR}
-      - FULLCHAIN_PATH=/caddy-certs/caddy/certificates/acme-v02.api.letsencrypt.org-directory/${DOMAIN_NAME}/${DOMAIN_NAME}.crt
-      - PRIVKEY_PATH=/caddy-certs/caddy/certificates/acme-v02.api.letsencrypt.org-directory/${DOMAIN_NAME}/${DOMAIN_NAME}.key
+      - FULLCHAIN_PATH=/caddy-certs/live/${DOMAIN_NAME}.crt
+      - PRIVKEY_PATH=/caddy-certs/live/${DOMAIN_NAME}.key
       - SMTP_USERNAME=${SMTP_USERNAME}
       - SMTP_PASSWORD=${SMTP_PASSWORD}
       - MONGODB_USERNAME=${MONGODB_USERNAME}

@@ -244,26 +244,60 @@ jobs:
             # Bootstrap Caddy first so ACME certs exist before TLS services fully start
             sudo -E docker compose -f /home/debian/docker-compose.deploy.yml --env-file /home/debian/.env.deploy up -d --force-recreate --remove-orphans caddy
 
-            # Wait for Caddy to obtain Let's Encrypt certs before smtp-server can read them
-            DOMAIN=$(grep '^DOMAIN_NAME=' .env.deploy | cut -d= -f2-)
-            CERT="/var/lib/docker/volumes/debian_caddy_data/_data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/${DOMAIN}/${DOMAIN}.crt"
-            echo "Waiting for Caddy cert: $CERT"
+            # Resolve cert path from Caddy storage and expose stable symlinks for services
+            DOMAIN=$(grep '^DOMAIN_NAME=' .env.deploy | cut -d= -f2- | tr -d '\r')
+            if [ -z "$DOMAIN" ]; then
+              echo "ERROR: DOMAIN_NAME is empty in .env.deploy"
+              exit 1
+            fi
+            CADDY_DATA_HOST=$(sudo docker inspect caddy --format '{{ range .Mounts }}{{ if eq .Destination "/data" }}{{ .Source }}{{ end }}{{ end }}' 2>/dev/null || true)
+            if [ -z "$CADDY_DATA_HOST" ]; then
+              echo "ERROR: could not resolve Caddy /data mount source"
+              sudo docker inspect caddy 2>/dev/null || true
+              exit 1
+            fi
+            CERT_ROOT="$CADDY_DATA_HOST/caddy/certificates"
+            LINK_DIR="$CADDY_DATA_HOST/live"
+            echo "Waiting for Caddy cert for domain: $DOMAIN"
             CERT_READY=0
+            CERT_REAL=""
+            KEY_REAL=""
             for i in $(seq 1 24); do
-              if sudo test -f "$CERT"; then
-                echo "Caddy cert ready after ${i} attempts"
-                CERT_READY=1
-                break
+              CERT_REAL=$(sudo find "$CERT_ROOT" -type f -path "*/${DOMAIN}/${DOMAIN}.crt" 2>/dev/null | head -n1 || true)
+              if [ -n "$CERT_REAL" ]; then
+                KEY_REAL="${CERT_REAL%.crt}.key"
+                if sudo test -f "$KEY_REAL"; then
+                  echo "Caddy cert ready after ${i} attempts"
+                  echo "Resolved cert: $CERT_REAL"
+                  echo "Resolved key : $KEY_REAL"
+                  sudo mkdir -p "$LINK_DIR"
+                  sudo ln -sfn "$CERT_REAL" "$LINK_DIR/${DOMAIN}.crt"
+                  sudo ln -sfn "$KEY_REAL" "$LINK_DIR/${DOMAIN}.key"
+                  CERT_READY=1
+                  break
+                fi
+              fi
+              if [ "$i" -eq 12 ]; then
+                echo "mid-check: testing ACME endpoint reachability from Caddy container"
+                sudo docker exec caddy sh -c 'wget -q -O /dev/null https://acme-v02.api.letsencrypt.org/directory || exit 1' \
+                  && echo "ACME endpoint reachable" \
+                  || echo "WARN: ACME endpoint unreachable from Caddy container"
               fi
               echo "attempt $i/24 - cert not yet available, waiting 5s..."
               sleep 5
             done
 
             if [ "$CERT_READY" -ne 1 ]; then
-              echo "ERROR: Caddy certificate not found after waiting."
+              echo "ERROR: No Caddy certificate found for domain '$DOMAIN'."
+              echo "DEBUG: listing candidate cert files from Caddy volume"
+              sudo find "$CERT_ROOT" -maxdepth 6 -type f \( -name '*.crt' -o -name '*.key' \) 2>/dev/null | sed -n '1,80p' || true
+              echo "DEBUG: testing ACME endpoint reachability from Caddy container"
+              sudo docker exec caddy sh -c 'wget -S -O /dev/null https://acme-v02.api.letsencrypt.org/directory' 2>&1 || true
               sudo docker logs caddy --tail 120 2>&1 || true
               exit 1
             fi
+
+            sudo ls -l "$LINK_DIR/${DOMAIN}.crt" "$LINK_DIR/${DOMAIN}.key"
 
             sudo -E docker compose -f /home/debian/docker-compose.deploy.yml --env-file /home/debian/.env.deploy up -d --force-recreate --remove-orphans
 
