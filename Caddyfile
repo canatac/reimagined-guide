@@ -1,3 +1,8 @@
+{
+    # Use staging first to validate ACME flow without production rate limits.
+    acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
 mail.misfits.ai {
     # Route l'API vers email-api
     reverse_proxy /api/* email-api:8000
