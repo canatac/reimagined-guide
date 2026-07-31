@@ -189,6 +189,8 @@ jobs:
             sudo docker pull "$INJECT_SCW_REGISTRY_ENDPOINT/smtp-server:latest"
             sudo docker pull "$INJECT_SCW_REGISTRY_ENDPOINT/dkim-service:latest"
 
+            # Force-kill stuck containers before removal (handles zombie/unkillable state)
+            sudo docker kill -s SIGKILL email-api smtp-server imap-server misfits-web dkim-service caddy 2>/dev/null || true
             # Remove stale containers that conflict with compose names
             sudo docker rm -f email-api smtp-server imap-server misfits-web dkim-service caddy 2>/dev/null || true
 
@@ -199,7 +201,7 @@ jobs:
             set +a
             
             # Stop any running compose stack to release bound ports (e.g. :80/:443)
-            sudo -E docker compose -f /home/debian/docker-compose.deploy.yml --env-file /home/debian/.env.deploy down --remove-orphans 2>/dev/null || true
+            sudo -E docker compose -f /home/debian/docker-compose.deploy.yml --env-file /home/debian/.env.deploy down --timeout 0 --remove-orphans 2>/dev/null || true
 
             # Drop stale Docker bind dirs
             sudo rm -rf /home/debian/runtime-patches 2>/dev/null || true
