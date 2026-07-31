@@ -70,10 +70,12 @@ sudo usermod -aG docker "$USER"
 # =============================================================================
 echo "=== Installation de MongoDB ==="
 DISTRO_CODENAME=$(lsb_release -cs)
-MONGO_VERSION="7.0"
+MONGO_VERSION="8.0"
+# Les paquets serveur MongoDB n'existent que pour bullseye et bookworm ;
+# trixie+ → bookworm (cf. https://www.mongodb.com/docs/v8.0/tutorial/install-mongodb-on-debian/)
 case "$DISTRO_CODENAME" in
-  bullseye|bookworm|trixie) MONGO_DISTRO="$DISTRO_CODENAME" ;;
-  *)                        MONGO_DISTRO="bookworm" ;;
+  bullseye) MONGO_DISTRO="bullseye" ;;
+  *)        MONGO_DISTRO="bookworm" ;;
 esac
 # Supprimer tout ancien .list MongoDB malformé avant d'en écrire un nouveau
 sudo rm -f /etc/apt/sources.list.d/mongodb-org-*.list
