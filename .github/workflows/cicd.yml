@@ -293,7 +293,8 @@ jobs:
                   echo "Resolved cert: $CERT_REAL"
                   echo "Resolved key : $KEY_REAL"
                   # Allow non-root containers (UID 10001) to read Caddy-generated certs
-                  sudo chmod o+r "$CERT_REAL" "$KEY_REAL"
+                  # o+rX = world-read on files + world-traversal on directories (all caddy/ subdirs)
+                  sudo chmod -R o+rX "${CADDY_DATA_HOST}/caddy"
                   sudo mkdir -p "$LINK_DIR"
                   # Relative symlinks so paths resolve correctly inside the container too
                   CERT_REL=$(sudo realpath --relative-to="$LINK_DIR" "$CERT_REAL")
