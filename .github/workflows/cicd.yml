@@ -192,6 +192,12 @@ jobs:
             # Remove stale containers that conflict with compose names
             sudo docker rm -f email-api smtp-server imap-server misfits-web dkim-service caddy 2>/dev/null || true
 
+            # Source .env.deploy so docker compose can resolve ${VAR} in the YAML
+            # (avoids misleading "variable is not set" warnings)
+            set -a
+            source /home/debian/.env.deploy
+            set +a
+            
             # Stop any running compose stack to release bound ports (e.g. :80/:443)
             sudo -E docker compose -f /home/debian/docker-compose.deploy.yml --env-file /home/debian/.env.deploy up -d --force-recreate --remove-orphans
 
@@ -233,14 +239,6 @@ jobs:
               echo ".env.deploy is missing; aborting deployment."
               exit 1
             fi
-
-            # Source .env.deploy so docker compose can resolve ${VAR} in the YAML
-            # (avoids misleading "variable is not set" warnings)
-            set -a
-            source /home/debian/.env.deploy
-            set +a
-
-            sudo docker compose -f /home/debian/docker-compose.deploy.yml --env-file /home/debian/.env.deploy up -d --force-recreate --remove-orphans
 
             # Wait for misfits-web, then hot-patch baked Next rewrites if still
             # pointing at imap-server:8080 (old image). BACKEND_URL env is not
