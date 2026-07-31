@@ -244,6 +244,20 @@ jobs:
             # Bootstrap Caddy first so ACME certs exist before TLS services fully start
             sudo -E docker compose -f /home/debian/docker-compose.deploy.yml --env-file /home/debian/.env.deploy up -d --force-recreate --remove-orphans caddy
 
+            # Ensure Docker bridge can reach HTTPS (required for ACME from inside caddy)
+            if ! sudo docker exec caddy sh -c 'wget -q -O /dev/null https://acme-v02.api.letsencrypt.org/directory'; then
+              echo "Caddy container cannot reach ACME; applying Docker forwarding fixes"
+              WAN_IF=$(ip route show default | awk '/default/ {print $5; exit}')
+              sudo sysctl -w net.ipv4.ip_forward=1 >/dev/null
+              sudo iptables -P FORWARD ACCEPT || true
+              sudo iptables -C DOCKER-USER -j ACCEPT 2>/dev/null || sudo iptables -I DOCKER-USER 1 -j ACCEPT
+              if [ -n "$WAN_IF" ]; then
+                sudo iptables -C FORWARD -i docker0 -o "$WAN_IF" -j ACCEPT 2>/dev/null || sudo iptables -I FORWARD 1 -i docker0 -o "$WAN_IF" -j ACCEPT
+                sudo iptables -C FORWARD -i "$WAN_IF" -o docker0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || sudo iptables -I FORWARD 1 -i "$WAN_IF" -o docker0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+              fi
+              sudo docker exec caddy sh -c 'wget -S -O /dev/null https://acme-v02.api.letsencrypt.org/directory' 2>&1 || true
+            fi
+
             # Resolve cert path from Caddy storage and expose stable symlinks for services
             DOMAIN=$(grep '^DOMAIN_NAME=' .env.deploy | cut -d= -f2- | tr -d '\r')
             if [ -z "$DOMAIN" ]; then
