@@ -44,6 +44,8 @@ services:
     image: ${SCW_REGISTRY_ENDPOINT}/smtp-server:latest
     container_name: email-api
     restart: always
+    ports:
+      - "127.0.0.1:8000:8000"
     volumes:
       - caddy_data:/caddy-certs:ro
     environment:
@@ -164,10 +166,7 @@ services:
     image: caddy:2-alpine
     container_name: caddy
     restart: always
-    ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
+    network_mode: "host"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
@@ -175,8 +174,6 @@ services:
     depends_on:
       - email-api
       - misfits-web
-    networks:
-      - mailnet
 
 networks:
   mailnet:

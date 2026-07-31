@@ -1,12 +1,7 @@
-{
-    # Use staging first to validate ACME flow without production rate limits.
-    acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
-}
-
 mail.misfits.ai {
     # Route l'API vers email-api
-    reverse_proxy /api/* email-api:8000
+    reverse_proxy /api/* localhost:8000
 
     # Route le reste vers le frontend Next.js
-    reverse_proxy * misfits-web:3000
+    reverse_proxy * localhost:3001
 }

@@ -241,39 +241,26 @@ jobs:
               exit 1
             fi
 
-            # Bootstrap Caddy first so ACME certs exist before TLS services fully start
-            sudo -E docker compose -f /home/debian/docker-compose.deploy.yml --env-file /home/debian/.env.deploy up -d --force-recreate --remove-orphans caddy
-
-            # Ensure Docker bridge can reach HTTPS (required for ACME from inside caddy)
-            if ! sudo docker exec caddy sh -c 'wget -q -O /dev/null https://acme-v02.api.letsencrypt.org/directory'; then
-              echo "Caddy container cannot reach ACME; applying Docker forwarding fixes"
-              WAN_IF=$(ip route show default | awk '/default/ {print $5; exit}')
-              DOCKER_CIDR=$(ip -4 addr show docker0 2>/dev/null | awk '/inet / {print $2; exit}')
-              sudo sysctl -w net.ipv4.ip_forward=1 >/dev/null
-              sudo iptables -P FORWARD ACCEPT || true
-              sudo iptables -C DOCKER-USER -j ACCEPT 2>/dev/null || sudo iptables -I DOCKER-USER 1 -j ACCEPT
-              if [ -n "$WAN_IF" ]; then
-                sudo iptables -C FORWARD -i docker0 -o "$WAN_IF" -j ACCEPT 2>/dev/null || sudo iptables -I FORWARD 1 -i docker0 -o "$WAN_IF" -j ACCEPT
-                sudo iptables -C FORWARD -i "$WAN_IF" -o docker0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || sudo iptables -I FORWARD 1 -i "$WAN_IF" -o docker0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
-                if [ -n "$DOCKER_CIDR" ]; then
-                  sudo iptables -t nat -C POSTROUTING -s "$DOCKER_CIDR" -o "$WAN_IF" -j MASQUERADE 2>/dev/null || sudo iptables -t nat -A POSTROUTING -s "$DOCKER_CIDR" -o "$WAN_IF" -j MASQUERADE
-                fi
-                if command -v ufw >/dev/null 2>&1 && sudo ufw status | grep -q "Status: active"; then
-                  sudo ufw route allow in on docker0 out on "$WAN_IF" >/dev/null 2>&1 || true
-                  sudo ufw route allow in on "$WAN_IF" out on docker0 >/dev/null 2>&1 || true
-                fi
-              fi
-              sudo docker restart caddy >/dev/null 2>&1 || true
-              sleep 4
-              if ! sudo docker exec caddy sh -c 'wget -q -O /dev/null https://acme-v02.api.letsencrypt.org/directory'; then
-                echo "WARN: ACME still unreachable from caddy after network remediation"
-                echo "DEBUG: sysctl net.ipv4.ip_forward=$(cat /proc/sys/net/ipv4/ip_forward 2>/dev/null || echo '?')"
-                sudo iptables -S FORWARD 2>/dev/null | sed -n '1,40p' || true
-                sudo iptables -S DOCKER-USER 2>/dev/null | sed -n '1,40p' || true
-                sudo iptables -t nat -S POSTROUTING 2>/dev/null | sed -n '1,40p' || true
-                sudo docker exec caddy sh -c 'wget -S -O /dev/null https://acme-v02.api.letsencrypt.org/directory' 2>&1 || true
-              fi
+            # Fix nftables INPUT: open ports 80/443 for ACME HTTP-01 challenge
+            if sudo nft list chain inet filter input 2>/dev/null | grep -q 'policy drop'; then
+              sudo nft add rule inet filter input tcp dport 80 accept 2>/dev/null || true
+              sudo nft add rule inet filter input tcp dport 443 accept 2>/dev/null || true
+              echo "nftables: opened ports 80 and 443 in INPUT chain"
             fi
+            # Fix nftables FORWARD: allow Docker bridge traffic without hardcoding the bridge name
+            if sudo nft list chain inet filter forward 2>/dev/null | grep -q 'policy drop'; then
+              # DNAT'd inbound (port-forwards from outside to Docker containers)
+              sudo nft add rule inet filter forward ct status dnat accept 2>/dev/null || true
+              # Return/reply traffic for container-initiated outbound connections
+              sudo nft add rule inet filter forward ct state established,related accept 2>/dev/null || true
+              # New outbound connections from Docker bridge subnets (172.16.0.0/12 covers all Docker ranges)
+              sudo nft add rule inet filter forward ip saddr 172.16.0.0/12 accept 2>/dev/null || true
+              echo "nftables: fixed Docker bridge forwarding"
+            fi
+            sudo nft list ruleset | sudo tee /etc/nftables.conf > /dev/null
+
+            # Bootstrap Caddy first (host network mode — no Docker bridge egress needed)
+            sudo -E docker compose -f /home/debian/docker-compose.deploy.yml --env-file /home/debian/.env.deploy up -d --force-recreate --remove-orphans caddy
 
             # Resolve cert path from Caddy storage and expose stable symlinks for services
             DOMAIN=$(grep '^DOMAIN_NAME=' .env.deploy | cut -d= -f2- | tr -d '\r')

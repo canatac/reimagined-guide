@@ -56,7 +56,7 @@ resource "scaleway_instance_security_group" "smtp_sg" {
   }
   outbound_rule {
     action   = "accept"
-    port     = 443
+    port     = 0
     ip_range = "0.0.0.0/0"
   }
 }
