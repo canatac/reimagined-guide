@@ -45,7 +45,7 @@ echo "=== Installation de Docker ==="
 if ! command -v docker &>/dev/null; then
   install -m 0755 -d /etc/apt/keyrings
   curl -fsSL https://download.docker.com/linux/debian/gpg \
-    | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    | sudo gpg --batch --yes --no-tty --dearmor -o /etc/apt/keyrings/docker.gpg
   sudo chmod a+r /etc/apt/keyrings/docker.gpg
 
   echo \
@@ -72,7 +72,7 @@ echo "=== Installation de MongoDB 7 ==="
 DISTRO_CODENAME=$(lsb_release -cs)
 if ! command -v mongod &>/dev/null; then
   curl -fsSL https://www.mongodb.org/static/pgp/server-7.0.asc \
-    | sudo gpg --dearmor -o /usr/share/keyrings/mongodb-server-7.0.gpg
+    | sudo gpg --batch --yes --no-tty --dearmor -o /usr/share/keyrings/mongodb-server-7.0.gpg
   echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/debian ${DISTRO_CODENAME}/mongodb-org/7.0 main" \
     | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
 
