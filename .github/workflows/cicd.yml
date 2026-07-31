@@ -234,6 +234,12 @@ jobs:
               exit 1
             fi
 
+            # Source .env.deploy so docker compose can resolve ${VAR} in the YAML
+            # (avoids misleading "variable is not set" warnings)
+            set -a
+            source /home/debian/.env.deploy
+            set +a
+
             sudo docker compose -f /home/debian/docker-compose.deploy.yml --env-file /home/debian/.env.deploy up -d --force-recreate --remove-orphans
 
             # Wait for misfits-web, then hot-patch baked Next rewrites if still
@@ -258,6 +264,15 @@ jobs:
 
             # Wait & check containers
             sudo docker compose -f /home/debian/docker-compose.deploy.yml ps
+          REMOTE
+
+      - name: Diagnose smtp-server logs
+        run: |
+          ssh -o StrictHostKeyChecking=no debian@${{ secrets.VM_IP }} bash << 'REMOTE'
+            echo "=== smtp-server status ==="
+            sudo docker inspect --format='{{.State.Status}} (restarts: {{.RestartCount}})' smtp-server 2>/dev/null || echo "container not found"
+            echo "=== smtp-server logs (last 50 lines) ==="
+            sudo docker logs smtp-server --tail 50 2>&1 || echo "no logs available"
           REMOTE
 
       - name: Smoke test - SMTP port 587 (STARTTLS)
