@@ -454,7 +454,7 @@ async fn auth_register(
             } else {
                 eprintln!("Register error ({}): {}", req.email, e);
                 HttpResponse::InternalServerError().json(serde_json::json!({
-                    "message": format!("Registration failed: {}", e)
+                    "message": "Registration failed. Please try again."
                 }))
             }
         }
