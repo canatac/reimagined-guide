@@ -127,20 +127,20 @@ jobs:
           # Write 1Password content locally on the runner first (avoids SSH escaping issues)
           printf '%s\n' "$DEPLOY_ENV_CONTENT" > /tmp/.env.deploy
 
-          # Inject the 3 secrets that only exist in GitHub Secrets (not in 1Password)
+          # upsert_env: safe for values containing = | and other special chars
           upsert_env() {
             local key="$1" val="$2" file="/tmp/.env.deploy"
-            if grep -q "^${key}=" "$file" 2>/dev/null; then
-              sed -i "s|^${key}=.*|${key}=${val}|" "$file"
-            else
-              echo "${key}=${val}" >> "$file"
-            fi
+            grep -v "^${key}=" "$file" > "$file.tmp" && mv "$file.tmp" "$file"
+            printf '%s=%s\n' "$key" "$val" >> "$file"
           }
           upsert_env GITHUB_CLIENT_ID     "${{ secrets.OAUTH_GITHUB_CLIENT_ID }}"
           upsert_env GITHUB_CLIENT_SECRET "${{ secrets.OAUTH_GITHUB_CLIENT_SECRET }}"
-          # Parse social-login note (same key=value format as scw-hermes-smtp)
-          while IFS='=' read -r key value; do
-            [[ -z "$key" || "$key" == \#* ]] && continue
+          # Parse social-login note: split only on first = to preserve values with = inside
+          while read -r line; do
+            [[ -z "$line" || "$line" == \#* ]] && continue
+            key="${line%%=*}"
+            value="${line#*=}"
+            [[ -z "$key" ]] && continue
             upsert_env "$key" "$value"
           done <<< "$SOCIAL_LOGIN_CONTENT"
           upsert_env SCW_REGISTRY_ENDPOINT "${{ secrets.SCW_REGISTRY_ENDPOINT }}"
