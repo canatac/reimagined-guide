@@ -694,105 +694,6 @@ async fn auth_oauth_callback(
 
             (subject, email, display)
         }
-        "google" => {
-            let client_id = env::var("GOOGLE_CLIENT_ID").unwrap_or_default();
-            let client_secret = env::var("GOOGLE_CLIENT_SECRET").unwrap_or_default();
-            if client_id.is_empty() || client_secret.is_empty() {
-                eprintln!("OAuth callback: GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET is not set");
-                return HttpResponse::InternalServerError().json(serde_json::json!({
-                    "message": "OAuth provider not configured."
-                }));
-            }
-            let redirect_uri = format!(
-                "{}/api/auth/oauth/google/callback",
-                callback_base.trim_end_matches('/')
-            );
-
-            // Exchange code for access_token
-            let token_resp = http_client
-                .post("https://oauth2.googleapis.com/token")
-                .json(&serde_json::json!({
-                    "client_id": client_id,
-                    "client_secret": client_secret,
-                    "code": code,
-                    "redirect_uri": redirect_uri,
-                    "grant_type": "authorization_code",
-                }))
-                .send()
-                .await;
-
-            let access_token = match token_resp {
-                Ok(r) => match r.json::<GoogleTokenResponse>().await {
-                    Ok(t) => {
-                        if let Some(err) = &t.error {
-                            eprintln!("Google OAuth error: {} — {}", err,
-                                t.error_description.as_deref().unwrap_or(""));
-                            return HttpResponse::Unauthorized().json(serde_json::json!({
-                                "message": "OAuth authentication failed."
-                            }));
-                        }
-                        match t.access_token {
-                            Some(tok) if !tok.is_empty() => tok,
-                            _ => {
-                                eprintln!("Google OAuth: missing access_token in response");
-                                return HttpResponse::Unauthorized().json(serde_json::json!({
-                                    "message": "OAuth authentication failed."
-                                }));
-                            }
-                        }
-                    },
-                    Err(e) => {
-                        eprintln!("Google OAuth token parse error: {}", e);
-                        return HttpResponse::Unauthorized().json(serde_json::json!({
-                            "message": "OAuth authentication failed."
-                        }));
-                    }
-                },
-                Err(e) => {
-                    eprintln!("Google OAuth token request error: {}", e);
-                    return HttpResponse::Unauthorized().json(serde_json::json!({
-                        "message": "OAuth authentication failed."
-                    }));
-                }
-            };
-
-            // Fetch user profile
-            let user_resp = http_client
-                .get("https://www.googleapis.com/oauth2/v2/userinfo")
-                .bearer_auth(&access_token)
-                .send()
-                .await;
-
-            let g_user = match user_resp {
-                Ok(r) => match r.json::<GoogleUser>().await {
-                    Ok(u) => u,
-                    Err(e) => {
-                        eprintln!("Google user profile parse error: {}", e);
-                        return HttpResponse::Unauthorized().json(serde_json::json!({
-                            "message": "OAuth authentication failed."
-                        }));
-                    }
-                },
-                Err(e) => {
-                    eprintln!("Google user profile request error: {}", e);
-                    return HttpResponse::Unauthorized().json(serde_json::json!({
-                        "message": "OAuth authentication failed."
-                    }));
-                }
-            };
-
-            let subject = g_user.id.clone();
-            let email = g_user
-                .email
-                .filter(|e| !e.is_empty())
-                .unwrap_or_else(|| format!("google+{}@misfits.ai", subject));
-            let display = g_user
-                .name
-                .filter(|n| !n.is_empty())
-                .unwrap_or_else(|| email.split('@').next().unwrap_or("user").to_string());
-
-            (subject, email, display)
-        }
         _ => {
             return HttpResponse::BadRequest().json(serde_json::json!({
                 "message": "Unsupported OAuth provider."
@@ -809,7 +710,7 @@ async fn auth_oauth_callback(
         Err(e) => {
             // MongoDB unavailable/auth failure — degrade gracefully like auth_register does.
             eprintln!("OAuth MongoDB error (degraded session): {}", e);
-            email.clone()
+            email.to_string()
         }
     };
 

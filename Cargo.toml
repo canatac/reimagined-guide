@@ -41,7 +41,7 @@ actix-cors = "0.7.0"
 bcrypt = "0.15"
 
 log = "0.4.33"
-env_logger = "0.11.11"
+env_logger = "0.10"
 rustls-native-certs = "0.8.4"
 
 rustls-pemfile = "2.0.0"
