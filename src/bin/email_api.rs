@@ -819,7 +819,7 @@ async fn auth_oauth_callback(
     localStorage.setItem('mfa.session', JSON.stringify(s));
     sessionStorage.setItem('mfa.session', JSON.stringify(s));
   }} catch(e) {{}}
-  window.location.replace('/');
+  window.location.replace('/mail');
 }})();</script>
 </body></html>"#,
         session_json = session_json,
