@@ -13,8 +13,6 @@ env:
   SCW_REGISTRY_ENDPOINT: ${{ secrets.SCW_REGISTRY_ENDPOINT }}
   VM_IP: ${{ secrets.VM_IP }}
   GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-  GITHUB_CLIENT_ID: ${{ secrets.OAUTH_GITHUB_CLIENT_ID }}
-  GITHUB_CLIENT_SECRET: ${{ secrets.OAUTH_GITHUB_CLIENT_SECRET }}
 
 jobs:
   # ============================================================
@@ -163,6 +161,15 @@ jobs:
             grep -v '^#' /home/debian/.env.deploy | grep '=' | cut -d'=' -f1 | sort
             echo "=== Keys with EMPTY values ==="
             grep -v '^#' /home/debian/.env.deploy | grep '^[^=]*=$' | cut -d'=' -f1 || echo "(none)"
+            echo "=== OAuth secrets present? ==="
+            for key in GITHUB_CLIENT_ID GITHUB_CLIENT_SECRET OAUTH_CALLBACK_BASE_URL; do
+              val=$(grep "^${key}=" /home/debian/.env.deploy | cut -d'=' -f2- | tr -d '\r')
+              if [ -z "$val" ]; then
+                echo "  MISSING or EMPTY: $key"
+              else
+                echo "  OK: $key (${#val} chars)"
+              fi
+            done
           REMOTE
 
       - name: Pull images & deploy

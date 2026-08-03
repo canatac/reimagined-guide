@@ -487,7 +487,15 @@ async fn auth_oauth_start(path: web::Path<String>) -> impl Responder {
 
     let auth_url = match provider.as_str() {
         "github" => {
-            let client_id = env::var("GITHUB_CLIENT_ID").unwrap_or_default();
+            let client_id = match env::var("GITHUB_CLIENT_ID").ok().filter(|v| !v.is_empty()) {
+                Some(id) => id,
+                None => {
+                    eprintln!("OAuth start: GITHUB_CLIENT_ID is not set");
+                    return HttpResponse::InternalServerError().json(serde_json::json!({
+                        "message": "OAuth provider not configured."
+                    }));
+                }
+            };
             let redirect_uri = format!(
                 "{}/api/auth/oauth/github/callback",
                 callback_base.trim_end_matches('/')
@@ -568,6 +576,12 @@ async fn auth_oauth_callback(
         "github" => {
             let client_id = env::var("GITHUB_CLIENT_ID").unwrap_or_default();
             let client_secret = env::var("GITHUB_CLIENT_SECRET").unwrap_or_default();
+            if client_id.is_empty() || client_secret.is_empty() {
+                eprintln!("OAuth callback: GITHUB_CLIENT_ID or GITHUB_CLIENT_SECRET is not set");
+                return HttpResponse::InternalServerError().json(serde_json::json!({
+                    "message": "OAuth provider not configured."
+                }));
+            }
             let redirect_uri = format!(
                 "{}/api/auth/oauth/github/callback",
                 callback_base.trim_end_matches('/')
@@ -773,30 +787,30 @@ async fn auth_oauth_callback(
         }
     };
 
-    match logic
+    // Resolve the username: from MongoDB if available, else fall back to the OAuth email.
+    let username = match logic
         .find_or_create_oauth_user(&provider, &subject, &email, Some(&display))
         .await
     {
-        Ok(user) => {
-            let session = make_session(&user.username, &display);
-            let session_json = serde_json::to_string(&session).unwrap_or_default();
-            let session_b64 = general_purpose::STANDARD.encode(session_json.as_bytes());
-            let redirect_url = format!(
-                "{}/auth/callback?session={}",
-                frontend_base.trim_end_matches('/'),
-                urlencoding::encode(&session_b64)
-            );
-            HttpResponse::Found()
-                .insert_header(("Location", redirect_url))
-                .finish()
-        }
+        Ok(user) => user.username,
         Err(e) => {
-            eprintln!("OAuth callback error: {}", e);
-            HttpResponse::Unauthorized().json(serde_json::json!({
-                "message": "OAuth authentication failed."
-            }))
+            // MongoDB unavailable/auth failure — degrade gracefully like auth_register does.
+            eprintln!("OAuth MongoDB error (degraded session): {}", e);
+            email.clone()
         }
-    }
+    };
+
+    let session = make_session(&username, &display);
+    let session_json = serde_json::to_string(&session).unwrap_or_default();
+    let session_b64 = general_purpose::STANDARD.encode(session_json.as_bytes());
+    let redirect_url = format!(
+        "{}/auth/callback?session={}",
+        frontend_base.trim_end_matches('/'),
+        urlencoding::encode(&session_b64)
+    );
+    HttpResponse::Found()
+        .insert_header(("Location", redirect_url))
+        .finish()
 }
 
 // --- Mail list (Phase A1, issue #166) -----------------------------------------
@@ -1731,7 +1745,12 @@ async fn main() -> std::io::Result<()> {
         env::var("MONGODB_CLUSTER_URL").unwrap_or_else(|_| "mongodb:27017".to_string());
     let mongo_app = env::var("MONGODB_APP_NAME").unwrap_or_else(|_| "mailserver".to_string());
 
-    let client_uri = if mongo_cluster.contains(".mongodb.net") {
+    // If MONGODB_CLUSTER_URL is already a full URI (e.g. from 1Password), use it directly.
+    let client_uri = if mongo_cluster.starts_with("mongodb://") || mongo_cluster.starts_with("mongodb+srv://") {
+        format!("{}&appName={}&serverSelectionTimeoutMS=5000",
+            mongo_cluster.trim_end_matches('&').trim_end_matches('?'),
+            mongo_app)
+    } else if mongo_cluster.contains(".mongodb.net") {
         format!("mongodb+srv://{}:{}@{}/?retryWrites=true&w=majority&appName={}&serverSelectionTimeoutMS=5000", mongo_user, mongo_pass, mongo_cluster, mongo_app)
     } else {
         format!(
