@@ -801,16 +801,38 @@ async fn auth_oauth_callback(
     };
 
     let session = make_session(&username, &display);
-    let session_json = serde_json::to_string(&session).unwrap_or_default();
-    let session_b64 = general_purpose::STANDARD.encode(session_json.as_bytes());
-    let redirect_url = format!(
-        "{}/auth/callback?session={}",
-        frontend_base.trim_end_matches('/'),
-        urlencoding::encode(&session_b64)
+    let access_token = session.session.access_token.clone();
+    // Escape session JSON for safe inline embedding in a <script> block.
+    let session_json = serde_json::to_string(&session)
+        .unwrap_or_default()
+        .replace('\\', "\\\\")
+        .replace('`', "\\`");
+
+    // Bridge page: stores session in mfa.session (localStorage + sessionStorage)
+    // and sets the mfa_session cookie, then redirects to /, matching the FE auth contract.
+    let html = format!(
+        r#"<!DOCTYPE html><html><head><meta charset="utf-8">
+<title>Connexion…</title></head><body>
+<script>(function(){{
+  try {{
+    const s = JSON.parse(`{session_json}`);
+    localStorage.setItem('mfa.session', JSON.stringify(s));
+    sessionStorage.setItem('mfa.session', JSON.stringify(s));
+  }} catch(e) {{}}
+  window.location.replace('/');
+}})();</script>
+</body></html>"#,
+        session_json = session_json,
     );
-    HttpResponse::Found()
-        .insert_header(("Location", redirect_url))
-        .finish()
+
+    HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        // mfa_session cookie matches what the backend sets on normal login
+        .insert_header(("Set-Cookie", format!(
+            "mfa_session={}; Path=/; HttpOnly; Secure; SameSite=Lax",
+            access_token
+        )))
+        .body(html)
 }
 
 // --- Mail list (Phase A1, issue #166) -----------------------------------------
