@@ -1780,9 +1780,10 @@ async fn main() -> std::io::Result<()> {
 
     // If MONGODB_CLUSTER_URL is already a full URI (e.g. from 1Password), use it directly.
     let client_uri = if mongo_cluster.starts_with("mongodb://") || mongo_cluster.starts_with("mongodb+srv://") {
-        format!("{}&appName={}&serverSelectionTimeoutMS=5000",
-            mongo_cluster.trim_end_matches('&').trim_end_matches('?'),
-            mongo_app)
+        let base = mongo_cluster.trim_end_matches('&').trim_end_matches('?');
+        // Use ? or & depending on whether query params already exist
+        let sep = if base.contains('?') { "&" } else { "?" };
+        format!("{}{}appName={}&serverSelectionTimeoutMS=5000", base, sep, mongo_app)
     } else if mongo_cluster.contains(".mongodb.net") {
         format!("mongodb+srv://{}:{}@{}/?retryWrites=true&w=majority&appName={}&serverSelectionTimeoutMS=5000", mongo_user, mongo_pass, mongo_cluster, mongo_app)
     } else {

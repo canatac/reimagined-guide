@@ -770,9 +770,9 @@ async fn main() -> Result<(), MainError> {
             env::var("MONGODB_APP_NAME").unwrap_or_else(|_| "mailserver".to_string());
         if cluster_url.starts_with("mongodb://") || cluster_url.starts_with("mongodb+srv://") {
             // Full URI from 1Password — use directly
-            format!("{}&appName={}&serverSelectionTimeoutMS=5000",
-                cluster_url.trim_end_matches('&').trim_end_matches('?'),
-                mongodb_app_name)
+            let base = cluster_url.trim_end_matches('&').trim_end_matches('?');
+            let sep = if base.contains('?') { "&" } else { "?" };
+            format!("{}{}appName={}&serverSelectionTimeoutMS=5000", base, sep, mongodb_app_name)
         } else if cluster_url.contains(".mongodb.net") {
             format!(
                 "mongodb+srv://{}:{}@{}/?retryWrites=true&w=majority&appName={}&serverSelectionTimeoutMS=5000",
