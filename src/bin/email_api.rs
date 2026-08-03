@@ -38,6 +38,7 @@ The API server will attempt to send the email using the SMTP client and return t
 use actix_cors::Cors;
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use base64::{engine::general_purpose, Engine as _};
+use bcrypt;
 use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 use serde::{Deserialize, Serialize};
 
@@ -103,20 +104,6 @@ struct GithubEmail {
     verified: bool,
 }
 
-#[derive(Deserialize)]
-struct GoogleTokenResponse {
-    access_token: Option<String>,
-    error: Option<String>,
-    error_description: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct GoogleUser {
-    id: String,
-    email: Option<String>,
-    name: Option<String>,
-}
-
 #[derive(Serialize)]
 struct UserResponse {
     id: String,
@@ -170,7 +157,7 @@ fn make_session(email: &str, display_name: &str) -> AuthResponse {
 fn normalize_oauth_provider(provider: &str) -> Option<String> {
     let p = provider.trim().to_ascii_lowercase();
     match p.as_str() {
-        "google" | "github" => Some(p),
+        "github" => Some(p),
         _ => None,
     }
 }
@@ -430,17 +417,39 @@ async fn auth_register(
     req: web::Json<RegisterRequest>,
     logic: web::Data<Arc<Logic>>,
 ) -> impl Responder {
+    if req.email.trim().is_empty() || req.password.len() < 8 {
+        return HttpResponse::BadRequest().json(serde_json::json!({
+            "message": "Email and password (min 8 chars) are required."
+        }));
+    }
     let display = req
         .display_name
         .clone()
         .unwrap_or_else(|| req.email.split('@').next().unwrap_or("user").to_string());
-    // Try to create user in MongoDB
-    match logic.create_user(&req.email, &req.password, "inbox").await {
+    let password_hash = match bcrypt::hash(&req.password, 12) {
+        Ok(h) => h,
+        Err(e) => {
+            eprintln!("bcrypt error: {}", e);
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "message": "Registration failed."
+            }));
+        }
+    };
+    match logic.create_user(&req.email, &password_hash, "inbox").await {
         Ok(_) => HttpResponse::Ok().json(make_session(&req.email, &display)),
         Err(e) => {
-            eprintln!("Register error: {}", e);
-            // Return success anyway (graceful degradation)
-            HttpResponse::Ok().json(make_session(&req.email, &display))
+            let msg = e.to_string();
+            // MongoDB duplicate key error codes: 11000 (BulkWriteError) or E11000 in message
+            if msg.contains("E11000") || msg.contains("duplicate key") {
+                HttpResponse::Conflict().json(serde_json::json!({
+                    "message": "An account with this email already exists."
+                }))
+            } else {
+                eprintln!("Register error: {}", e);
+                HttpResponse::InternalServerError().json(serde_json::json!({
+                    "message": "Registration failed. Please try again."
+                }))
+            }
         }
     }
 }
@@ -504,27 +513,6 @@ async fn auth_oauth_start(path: web::Path<String>) -> impl Responder {
             );
             format!(
                 "https://github.com/login/oauth/authorize?client_id={}&redirect_uri={}&state={}&scope=user:email",
-                client_id,
-                urlencoding::encode(&redirect_uri),
-                state
-            )
-        }
-        "google" => {
-            let client_id = match env::var("GOOGLE_CLIENT_ID").ok().filter(|v| !v.is_empty()) {
-                Some(id) => id,
-                None => {
-                    eprintln!("OAuth start: GOOGLE_CLIENT_ID is not set");
-                    return HttpResponse::InternalServerError().json(serde_json::json!({
-                        "message": "OAuth provider not configured."
-                    }));
-                }
-            };
-            let redirect_uri = format!(
-                "{}/api/auth/oauth/google/callback",
-                callback_base.trim_end_matches('/')
-            );
-            format!(
-                "https://accounts.google.com/o/oauth2/v2/auth?client_id={}&redirect_uri={}&state={}&scope=openid%20email%20profile&response_type=code",
                 client_id,
                 urlencoding::encode(&redirect_uri),
                 state

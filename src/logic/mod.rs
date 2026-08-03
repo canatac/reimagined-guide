@@ -145,12 +145,19 @@ impl Logic {
                 .database(&database_name)
                 .collection::<User>(&collection_name);
 
-            let filter = doc! {
-                "username": username,
-                "password": password
-            };
-            // Fast path: no noise log when missing (env fallback handles bootstrap admin).
-            Ok(collection.find_one(filter).await?)
+            let filter = doc! { "username": username };
+            match collection.find_one(filter).await? {
+                Some(user) => {
+                    // Verify bcrypt hash; fall back to plaintext for legacy accounts.
+                    let ok = if user.password.starts_with("$2") {
+                        bcrypt::verify(password, &user.password).unwrap_or(false)
+                    } else {
+                        constant_time_eq::constant_time_eq(password.as_bytes(), user.password.as_bytes())
+                    };
+                    Ok(if ok { Some(user) } else { None })
+                }
+                None => Ok(None),
+            }
         }
         #[cfg(test)]
         {
