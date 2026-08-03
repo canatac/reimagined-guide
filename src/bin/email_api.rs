@@ -84,6 +84,8 @@ struct OAuthCallbackQuery {
 #[derive(Deserialize)]
 struct GithubTokenResponse {
     access_token: Option<String>,
+    error: Option<String>,
+    error_description: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -566,6 +568,10 @@ async fn auth_oauth_callback(
         "github" => {
             let client_id = env::var("GITHUB_CLIENT_ID").unwrap_or_default();
             let client_secret = env::var("GITHUB_CLIENT_SECRET").unwrap_or_default();
+            let redirect_uri = format!(
+                "{}/api/auth/oauth/github/callback",
+                callback_base.trim_end_matches('/')
+            );
 
             // Exchange code for access_token
             let token_resp = http_client
@@ -575,19 +581,29 @@ async fn auth_oauth_callback(
                     "client_id": client_id,
                     "client_secret": client_secret,
                     "code": code,
+                    "redirect_uri": redirect_uri,
                 }))
                 .send()
                 .await;
 
             let access_token = match token_resp {
                 Ok(r) => match r.json::<GithubTokenResponse>().await {
-                    Ok(t) => match t.access_token {
-                        Some(tok) if !tok.is_empty() => tok,
-                        _ => {
-                            eprintln!("GitHub OAuth: missing access_token in response");
+                    Ok(t) => {
+                        if let Some(err) = &t.error {
+                            eprintln!("GitHub OAuth error: {} — {}", err,
+                                t.error_description.as_deref().unwrap_or(""));
                             return HttpResponse::Unauthorized().json(serde_json::json!({
                                 "message": "OAuth authentication failed."
                             }));
+                        }
+                        match t.access_token {
+                            Some(tok) if !tok.is_empty() => tok,
+                            _ => {
+                                eprintln!("GitHub OAuth: missing access_token in response");
+                                return HttpResponse::Unauthorized().json(serde_json::json!({
+                                    "message": "OAuth authentication failed."
+                                }));
+                            }
                         }
                     },
                     Err(e) => {
