@@ -99,8 +99,7 @@ jobs:
         env:
           VM_SSH_KEY: op://hermes/ssh-hermes-smtp/private-key
           DEPLOY_ENV_CONTENT: op://hermes/scw-hermes-smtp/texte
-          GOOGLE_CLIENT_ID: op://hermes/mailserver-social-login/GOOGLE_CLIENT_ID
-          GOOGLE_CLIENT_SECRET: op://hermes/mailserver-social-login/GOOGLE_CLIENT_SECRET
+          SOCIAL_LOGIN_CONTENT: op://hermes/mailserver-social-login/texte
 
       - name: Install SSH key
         uses: shimataro/ssh-key-action@v2
@@ -123,6 +122,7 @@ jobs:
       - name: Write .env.deploy to VM
         env:
           DEPLOY_ENV_CONTENT: ${{ env.DEPLOY_ENV_CONTENT }}
+          SOCIAL_LOGIN_CONTENT: ${{ env.SOCIAL_LOGIN_CONTENT }}
         run: |
           # Write 1Password content locally on the runner first (avoids SSH escaping issues)
           printf '%s\n' "$DEPLOY_ENV_CONTENT" > /tmp/.env.deploy
@@ -138,8 +138,11 @@ jobs:
           }
           upsert_env GITHUB_CLIENT_ID     "${{ secrets.OAUTH_GITHUB_CLIENT_ID }}"
           upsert_env GITHUB_CLIENT_SECRET "${{ secrets.OAUTH_GITHUB_CLIENT_SECRET }}"
-          upsert_env GOOGLE_CLIENT_ID     "$GOOGLE_CLIENT_ID"
-          upsert_env GOOGLE_CLIENT_SECRET "$GOOGLE_CLIENT_SECRET"
+          # Parse social-login note (same key=value format as scw-hermes-smtp)
+          while IFS='=' read -r key value; do
+            [[ -z "$key" || "$key" == \#* ]] && continue
+            upsert_env "$key" "$value"
+          done <<< "$SOCIAL_LOGIN_CONTENT"
           upsert_env SCW_REGISTRY_ENDPOINT "${{ secrets.SCW_REGISTRY_ENDPOINT }}"
           upsert_env OAUTH_CALLBACK_BASE_URL "https://mail.misfits.ai"
           upsert_env FRONTEND_BASE_URL       "https://mail.misfits.ai"
