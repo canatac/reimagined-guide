@@ -87,7 +87,7 @@ impl Logic {
             let database_name =
                 std::env::var("MONGODB_DATABASE").expect("MONGODB_DATABASE must be set");
             let collection_name =
-                std::env::var("MONGODB_COLLECTION").expect("MONGODB_COLLECTION must be set");
+                std::env::var("MONGODB_USERS_COLLECTION").unwrap_or_else(|_| "users".to_string());
             let collection = self
                 .client
                 .database(&database_name)
