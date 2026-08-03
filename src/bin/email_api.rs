@@ -454,6 +454,96 @@ async fn auth_register(
     }
 }
 
+async fn register_page() -> impl Responder {
+    let html = r#"<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Créer un compte — Misfits Mail</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #0f0f0f; color: #e5e5e5;
+           display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+    .card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 12px;
+            padding: 2.5rem; width: 100%; max-width: 400px; }
+    h1 { font-size: 1.4rem; margin-bottom: 1.75rem; }
+    label { display: block; font-size: .85rem; color: #aaa; margin-bottom: .4rem; }
+    input { width: 100%; background: #111; border: 1px solid #333; border-radius: 8px;
+            color: #e5e5e5; padding: .65rem .9rem; font-size: 1rem; outline: none;
+            margin-bottom: 1.1rem; }
+    input:focus { border-color: #6366f1; }
+    button { width: 100%; background: #6366f1; color: #fff; border: none;
+             border-radius: 8px; padding: .75rem; font-size: 1rem; cursor: pointer; }
+    button:disabled { opacity: .5; cursor: default; }
+    .error { color: #f87171; font-size: .85rem; margin-bottom: 1rem; display: none; }
+    .login-link { text-align: center; margin-top: 1.25rem; font-size: .85rem; color: #888; }
+    .login-link a { color: #818cf8; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Créer un compte</h1>
+    <div class="error" id="err"></div>
+    <form id="form">
+      <label for="display">Nom d'affichage</label>
+      <input id="display" type="text" placeholder="Votre nom" autocomplete="name">
+      <label for="email">Adresse e-mail</label>
+      <input id="email" type="email" placeholder="vous@exemple.com" required autocomplete="email">
+      <label for="password">Mot de passe</label>
+      <input id="password" type="password" placeholder="8 caractères minimum" required minlength="8" autocomplete="new-password">
+      <button type="submit" id="btn">Créer le compte</button>
+    </form>
+    <div class="login-link">Déjà un compte ? <a href="/login">Se connecter</a></div>
+  </div>
+  <script>
+    document.getElementById('form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('btn');
+      const errEl = document.getElementById('err');
+      errEl.style.display = 'none';
+      btn.disabled = true;
+      btn.textContent = 'Création…';
+      try {
+        const body = {
+          email: document.getElementById('email').value.trim(),
+          password: document.getElementById('password').value,
+        };
+        const display = document.getElementById('display').value.trim();
+        if (display) body.display_name = display;
+        const res = await fetch('/api/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          errEl.textContent = data.message || 'Erreur lors de la création du compte.';
+          errEl.style.display = 'block';
+          return;
+        }
+        const session = JSON.stringify(data);
+        localStorage.setItem('mfa.session', session);
+        sessionStorage.setItem('mfa.session', session);
+        document.cookie = 'mfa_session=' + (data.session?.access_token || '') +
+          '; Path=/; SameSite=Lax';
+        window.location.href = '/mail';
+      } catch (err) {
+        errEl.textContent = 'Erreur réseau. Veuillez réessayer.';
+        errEl.style.display = 'block';
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Créer le compte';
+      }
+    });
+  </script>
+</body>
+</html>"#;
+    HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(html)
+}
+
 async fn auth_logout() -> impl Responder {
     HttpResponse::Ok().json(serde_json::json!({}))
 }
@@ -1766,6 +1856,7 @@ async fn main() -> std::io::Result<()> {
                 .app_data(http_mongo.clone())
                 .route("/api/auth/login", web::post().to(auth_login))
                 .route("/api/auth/register", web::post().to(auth_register))
+                .route("/register", web::get().to(register_page))
                 .route("/api/auth/logout", web::post().to(auth_logout))
                 .route("/api/auth/refresh", web::post().to(auth_refresh))
                 .route(

@@ -2,6 +2,9 @@ mail.misfits.ai {
     # Route l'API vers email-api
     reverse_proxy /api/* localhost:8000
 
+    # Inscription — page servie par le backend
+    reverse_proxy /register localhost:8000
+
     # Route le reste vers le frontend Next.js
     reverse_proxy * localhost:3001
 }
