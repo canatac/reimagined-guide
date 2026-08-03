@@ -106,6 +106,8 @@ struct GithubEmail {
 #[derive(Deserialize)]
 struct GoogleTokenResponse {
     access_token: Option<String>,
+    error: Option<String>,
+    error_description: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -508,7 +510,15 @@ async fn auth_oauth_start(path: web::Path<String>) -> impl Responder {
             )
         }
         "google" => {
-            let client_id = env::var("GOOGLE_CLIENT_ID").unwrap_or_default();
+            let client_id = match env::var("GOOGLE_CLIENT_ID").ok().filter(|v| !v.is_empty()) {
+                Some(id) => id,
+                None => {
+                    eprintln!("OAuth start: GOOGLE_CLIENT_ID is not set");
+                    return HttpResponse::InternalServerError().json(serde_json::json!({
+                        "message": "OAuth provider not configured."
+                    }));
+                }
+            };
             let redirect_uri = format!(
                 "{}/api/auth/oauth/google/callback",
                 callback_base.trim_end_matches('/')
@@ -699,6 +709,12 @@ async fn auth_oauth_callback(
         "google" => {
             let client_id = env::var("GOOGLE_CLIENT_ID").unwrap_or_default();
             let client_secret = env::var("GOOGLE_CLIENT_SECRET").unwrap_or_default();
+            if client_id.is_empty() || client_secret.is_empty() {
+                eprintln!("OAuth callback: GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET is not set");
+                return HttpResponse::InternalServerError().json(serde_json::json!({
+                    "message": "OAuth provider not configured."
+                }));
+            }
             let redirect_uri = format!(
                 "{}/api/auth/oauth/google/callback",
                 callback_base.trim_end_matches('/')
@@ -719,13 +735,22 @@ async fn auth_oauth_callback(
 
             let access_token = match token_resp {
                 Ok(r) => match r.json::<GoogleTokenResponse>().await {
-                    Ok(t) => match t.access_token {
-                        Some(tok) if !tok.is_empty() => tok,
-                        _ => {
-                            eprintln!("Google OAuth: missing access_token in response");
+                    Ok(t) => {
+                        if let Some(err) = &t.error {
+                            eprintln!("Google OAuth error: {} — {}", err,
+                                t.error_description.as_deref().unwrap_or(""));
                             return HttpResponse::Unauthorized().json(serde_json::json!({
                                 "message": "OAuth authentication failed."
                             }));
+                        }
+                        match t.access_token {
+                            Some(tok) if !tok.is_empty() => tok,
+                            _ => {
+                                eprintln!("Google OAuth: missing access_token in response");
+                                return HttpResponse::Unauthorized().json(serde_json::json!({
+                                    "message": "OAuth authentication failed."
+                                }));
+                            }
                         }
                     },
                     Err(e) => {
