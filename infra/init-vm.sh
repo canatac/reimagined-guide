@@ -15,7 +15,7 @@
 #
 # Ce script installe et configure :
 #   1. Docker Engine (CE)
-#   2. MongoDB 7 (natif, pas en container)
+#   2. MongoDB 8 (natif, pas en container)
 #   3. Pare-feu nftables (INPUT + FORWARD)
 #   4. Permissions sudo pour l'utilisateur debian
 #
@@ -199,7 +199,8 @@ echo "nftables configuré."
 # =============================================================================
 echo "=== Configuration sudo pour CI/CD ==="
 cat << 'SUDOEOF' | sudo tee /etc/sudoers.d/docker-cicd
-debian ALL=(ALL) NOPASSWD: /usr/bin/docker, /usr/bin/nft, /usr/sbin/nft, /usr/bin/systemctl restart docker, /usr/bin/systemctl restart mongod, /bin/cp, /bin/chmod, /bin/chown, /usr/bin/tee
+# SETENV requis pour sudo -E (transmission des variables 1Password au CI/CD)
+debian ALL=(ALL) SETENV: NOPASSWD: /usr/bin/docker, /usr/bin/nft, /usr/sbin/nft, /usr/bin/systemctl, /bin/cp, /bin/chmod, /bin/chown, /usr/bin/tee
 SUDOEOF
 sudo chmod 0440 /etc/sudoers.d/docker-cicd
 
