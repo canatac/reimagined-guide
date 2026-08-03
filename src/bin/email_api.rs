@@ -1798,6 +1798,10 @@ async fn main() -> std::io::Result<()> {
                 .route("/api/auth/logout", web::post().to(auth_logout))
                 .route("/api/auth/refresh", web::post().to(auth_refresh))
                 .route(
+                    "/api/auth/oauth/{provider}",
+                    web::get().to(auth_oauth_start),
+                )
+                .route(
                     "/api/auth/oauth/{provider}/start",
                     web::get().to(auth_oauth_start),
                 )
