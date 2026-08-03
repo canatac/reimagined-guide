@@ -99,6 +99,8 @@ jobs:
         env:
           VM_SSH_KEY: op://hermes/ssh-hermes-smtp/private-key
           DEPLOY_ENV_CONTENT: op://hermes/scw-hermes-smtp/texte
+          GOOGLE_CLIENT_ID: op://hermes/mailserver-social-login/GOOGLE_CLIENT_ID
+          GOOGLE_CLIENT_SECRET: op://hermes/mailserver-social-login/GOOGLE_CLIENT_SECRET
 
       - name: Install SSH key
         uses: shimataro/ssh-key-action@v2
@@ -136,8 +138,8 @@ jobs:
           }
           upsert_env GITHUB_CLIENT_ID     "${{ secrets.OAUTH_GITHUB_CLIENT_ID }}"
           upsert_env GITHUB_CLIENT_SECRET "${{ secrets.OAUTH_GITHUB_CLIENT_SECRET }}"
-          upsert_env GOOGLE_CLIENT_ID     "${{ secrets.GOOGLE_CLIENT_ID }}"
-          upsert_env GOOGLE_CLIENT_SECRET "${{ secrets.GOOGLE_CLIENT_SECRET }}"
+          upsert_env GOOGLE_CLIENT_ID     "$GOOGLE_CLIENT_ID"
+          upsert_env GOOGLE_CLIENT_SECRET "$GOOGLE_CLIENT_SECRET"
           upsert_env SCW_REGISTRY_ENDPOINT "${{ secrets.SCW_REGISTRY_ENDPOINT }}"
           upsert_env OAUTH_CALLBACK_BASE_URL "https://mail.misfits.ai"
           upsert_env FRONTEND_BASE_URL       "https://mail.misfits.ai"
