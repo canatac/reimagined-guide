@@ -426,10 +426,17 @@ async fn auth_register(
         .display_name
         .clone()
         .unwrap_or_else(|| req.email.split('@').next().unwrap_or("user").to_string());
-    let password_hash = match bcrypt::hash(&req.password, 12) {
-        Ok(h) => h,
-        Err(e) => {
+    let password = req.password.clone();
+    let password_hash = match web::block(move || bcrypt::hash(&password, 12)).await {
+        Ok(Ok(h)) => h,
+        Ok(Err(e)) => {
             eprintln!("bcrypt error: {}", e);
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "message": "Registration failed."
+            }));
+        }
+        Err(e) => {
+            eprintln!("bcrypt task error: {}", e);
             return HttpResponse::InternalServerError().json(serde_json::json!({
                 "message": "Registration failed."
             }));
@@ -445,9 +452,9 @@ async fn auth_register(
                     "message": "An account with this email already exists."
                 }))
             } else {
-                eprintln!("Register error: {}", e);
+                eprintln!("Register error ({}): {}", req.email, e);
                 HttpResponse::InternalServerError().json(serde_json::json!({
-                    "message": "Registration failed. Please try again."
+                    "message": format!("Registration failed: {}", e)
                 }))
             }
         }

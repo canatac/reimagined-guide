@@ -85,7 +85,7 @@ impl Logic {
         #[cfg(not(test))]
         {
             let database_name =
-                std::env::var("MONGODB_DATABASE").expect("MONGODB_DATABASE must be set");
+                std::env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
             let collection_name =
                 std::env::var("MONGODB_USERS_COLLECTION").unwrap_or_else(|_| "users".to_string());
             let collection = self
@@ -136,7 +136,7 @@ impl Logic {
         #[cfg(not(test))]
         {
             let database_name =
-                std::env::var("MONGODB_DATABASE").expect("MONGODB_DATABASE must be set");
+                std::env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
             // Prefer dedicated users collection — never scan "emails" with a User shape.
             let collection_name =
                 std::env::var("MONGODB_USERS_COLLECTION").unwrap_or_else(|_| "users".to_string());
