@@ -1892,7 +1892,6 @@ async fn main() -> std::io::Result<()> {
                 .app_data(http_mongo.clone())
                 .route("/api/auth/login", web::post().to(auth_login))
                 .route("/api/auth/register", web::post().to(auth_register))
-                .route("/register", web::get().to(register_page))
                 .route("/api/auth/logout", web::post().to(auth_logout))
                 .route("/api/auth/refresh", web::post().to(auth_refresh))
                 .route(
