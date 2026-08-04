@@ -34,8 +34,8 @@ pub fn emit(event: SmtpEvent) {
 
 pub fn monitoring_enabled() -> bool {
     std::env::var("SMTP_MONITORING_ENABLED")
-        .map(|v| v == "true" || v == "1")
-        .unwrap_or(false)
+        .map(|v| v != "false" && v != "0")
+        .unwrap_or(true)
 }
 
 // ---------------------------------------------------------------------------

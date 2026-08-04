@@ -68,6 +68,7 @@ services:
       - SMTP_PASSWORD=${SMTP_PASSWORD}
       - RUST_LOG=${RUST_LOG}
       - DKIM_SERVICE_URL=${DKIM_SERVICE_URL}
+      - SMTP_MONITORING_ENABLED=${SMTP_MONITORING_ENABLED:-true}
     command: ["email_api"]
     restart: unless-stopped
     depends_on:
