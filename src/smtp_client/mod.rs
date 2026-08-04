@@ -46,7 +46,7 @@ use std::fs::File;
 use std::io::BufReader;
 use uuid::Uuid;
 use webpki_roots::TLS_SERVER_ROOTS;
-const SMTP_PORTS: [u16; 3] = [587, 465, 25];
+const SMTP_PORTS: [u16; 3] = [25, 587, 465];
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(5);
 use crate::entities::Email;
 use std::collections::HashMap;
@@ -278,7 +278,10 @@ pub async fn send_outgoing_email(email: &Email) -> std::io::Result<()> {
     println!("Connected successfully");
 
     expect_code(&mut stream, "220").await?;
-    stream.write_all(b"EHLO misfits.ai\r\n").await?;
+    let ehlo_hostname = std::env::var("SMTP_HOSTNAME")
+        .or_else(|_| std::env::var("DOMAIN_NAME"))
+        .unwrap_or_else(|_| "misfits.ai".to_string());
+    stream.write_all(format!("EHLO {}\r\n", ehlo_hostname).as_bytes()).await?;
     expect_code(&mut stream, "250").await?;
 
     // --- STARTTLS / TLS handshake ---
@@ -330,11 +333,11 @@ pub async fn send_outgoing_email(email: &Email) -> std::io::Result<()> {
 
     match &mut stream_type {
         StreamType::Plain(ref mut s) => {
-            s.write_all(b"EHLO misfits.ai\r\n").await?;
+            s.write_all(format!("EHLO {}\r\n", ehlo_hostname).as_bytes()).await?;
             expect_code(s, "250").await?;
         }
         StreamType::Tls(ref mut s) => {
-            s.write_all(b"EHLO misfits.ai\r\n").await?;
+            s.write_all(format!("EHLO {}\r\n", ehlo_hostname).as_bytes()).await?;
             expect_code(s, "250").await?;
         }
     }
@@ -416,15 +419,15 @@ async fn send_email_content(stream: &mut StreamType, email_content: &str) -> std
 // Helper function to extract email address from headers
 
 pub fn extract_email_address(content: &str, header: &str) -> Option<String> {
-    content
-        .lines()
-        .find(|line| line.starts_with(header))
-        .and_then(|line| line.split(':').nth(1))
-        .map(|addr| {
-            addr.trim()
-                .trim_matches(|c| c == '<' || c == '>')
-                .to_string()
-        })
+    let line = content.lines().find(|line| line.starts_with(header))?;
+    let value = line.splitn(2, ':').nth(1)?.trim();
+    // Handle "Display Name <email@example.com>" format
+    if let (Some(start), Some(end)) = (value.rfind('<'), value.rfind('>')) {
+        if start < end {
+            return Some(value[start + 1..end].trim().to_string());
+        }
+    }
+    Some(value.to_string())
 }
 async fn send_email_content_inner<T: AsyncWriteExt + AsyncReadExt + Unpin>(
     stream: &mut T,
