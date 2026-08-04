@@ -567,7 +567,7 @@ async fn auth_register(
         internal_date: mongodb::bson::DateTime::from_millis(Utc::now().timestamp_millis()),
         dkim_signature: None,
     };
-    if let Err(e) = logic.deliver_to_inbox(&primary_email, &welcome).await {
+    if let Err(e) = logic.deliver_to_inbox(&local_part, &welcome).await {
         eprintln!("Welcome email delivery error ({}): {}", primary_email, e);
     }
 
