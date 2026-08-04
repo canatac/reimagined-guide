@@ -243,6 +243,14 @@ async fn handle_tls_client(
                                             .await?;
                                     } else {
                                         println!("Email stored successfully in MongoDB");
+                                        let _ = logic.log_mail_event(
+                                            "received",
+                                            &user,
+                                            &email_to_store.id,
+                                            &email_to_store.subject,
+                                            &email_to_store.from,
+                                            &email_to_store.to,
+                                        ).await;
                                         write_response(&mut stream, "250 OK\r\n").await?;
                                     }
                                 } else {
@@ -428,6 +436,14 @@ async fn handle_plain_client(
                                             .await?;
                                     } else {
                                         println!("Email stored successfully in MongoDB");
+                                        let _ = logic.log_mail_event(
+                                            "received",
+                                            &user,
+                                            &email_to_store.id,
+                                            &email_to_store.subject,
+                                            &email_to_store.from,
+                                            &email_to_store.to,
+                                        ).await;
                                         write_response(&mut stream, "250 OK\r\n").await?;
                                     }
                                 } else {

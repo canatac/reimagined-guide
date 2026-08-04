@@ -49,6 +49,7 @@ use mongodb::bson::doc;
 use reqwest;
 use simple_smtp_server::entities::{CalendarEvent, Email};
 use simple_smtp_server::logic::Logic;
+use futures_util::{stream, TryStreamExt};
 use simple_smtp_server::smtp_client::send_outgoing_email;
 use std::collections::HashMap;
 use std::env;
@@ -56,7 +57,33 @@ use std::fs::{create_dir_all, File};
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::sync::Arc;
+use tokio::sync::broadcast;
 use uuid::Uuid;
+
+// --- Mail event monitoring ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum MailEventKind {
+    Sent,
+    Received,
+    Read,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MailEvent {
+    id: String,
+    kind: MailEventKind,
+    user_id: String,
+    email_id: String,
+    subject: String,
+    from: String,
+    to: String,
+    timestamp: String,
+}
+
+type EventBus = broadcast::Sender<MailEvent>;
 
 // --- Auth types ---
 
@@ -158,6 +185,406 @@ fn make_session(email: &str, display_name: &str) -> AuthResponse {
             issued_at: now,
         },
     }
+}
+
+async fn persist_event(mongo: &mongodb::Client, event: &MailEvent) {
+    let db = env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
+    let coll = mongo
+        .database(&db)
+        .collection::<bson::Document>("mail_events");
+    if let Ok(doc) = bson::to_document(event) {
+        if let Err(e) = coll.insert_one(doc).await {
+            eprintln!("persist_event error: {}", e);
+        }
+    }
+}
+
+async fn emit_event(bus: &EventBus, mongo: &mongodb::Client, event: MailEvent) {
+    persist_event(mongo, &event).await;
+    let _ = bus.send(event);
+}
+
+async fn api_events(
+    req: actix_web::HttpRequest,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    let user_id = resolve_user_id(&req);
+    let db = env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
+    let coll = mongo
+        .database(&db)
+        .collection::<bson::Document>("mail_events");
+    let filter = doc! { "user_id": &user_id };
+    match coll
+        .find(filter)
+        .sort(doc! { "timestamp": -1 })
+        .limit(200)
+        .await
+    {
+        Ok(cursor) => match cursor.try_collect::<Vec<_>>().await {
+            Ok(docs) => {
+                let events: Vec<serde_json::Value> = docs
+                    .into_iter()
+                    .filter_map(|d| bson::from_document::<MailEvent>(d).ok())
+                    .filter_map(|e| serde_json::to_value(&e).ok())
+                    .collect();
+                HttpResponse::Ok().json(serde_json::json!({ "events": events }))
+            }
+            Err(e) => HttpResponse::InternalServerError()
+                .json(serde_json::json!({ "error": e.to_string() })),
+        },
+        Err(e) => HttpResponse::InternalServerError()
+            .json(serde_json::json!({ "error": e.to_string() })),
+    }
+}
+
+async fn api_events_stream(
+    bus: web::Data<EventBus>,
+    req: actix_web::HttpRequest,
+) -> HttpResponse {
+    let user_id = resolve_user_id(&req);
+    let rx = bus.subscribe();
+    let event_stream = stream::unfold((rx, user_id), |(mut rx, uid)| async move {
+        loop {
+            match rx.recv().await {
+                Ok(event) if event.user_id == uid => {
+                    let data = serde_json::to_string(&event).unwrap_or_default();
+                    let chunk = format!("data: {}\n\n", data);
+                    return Some((
+                        Ok::<web::Bytes, actix_web::Error>(web::Bytes::from(chunk)),
+                        (rx, uid),
+                    ));
+                }
+                Ok(_) => continue,
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => return None,
+            }
+        }
+    });
+    HttpResponse::Ok()
+        .content_type("text/event-stream")
+        .insert_header(("Cache-Control", "no-cache"))
+        .insert_header(("X-Accel-Buffering", "no"))
+        .streaming(event_stream)
+}
+
+// ===========================================================================
+// SMTP Monitoring endpoints
+// ===========================================================================
+
+use simple_smtp_server::monitoring;
+use simple_smtp_server::monitoring::alerts::AlertConfig;
+use simple_smtp_server::monitoring::storage;
+
+fn parse_window(s: &str) -> chrono::Duration {
+    let s = s.trim();
+    if let Some(n) = s.strip_suffix('m').and_then(|n| n.parse::<i64>().ok()) {
+        chrono::Duration::minutes(n)
+    } else if let Some(n) = s.strip_suffix('h').and_then(|n| n.parse::<i64>().ok()) {
+        chrono::Duration::hours(n)
+    } else if let Some(n) = s.strip_suffix('d').and_then(|n| n.parse::<i64>().ok()) {
+        chrono::Duration::days(n)
+    } else {
+        chrono::Duration::minutes(15)
+    }
+}
+
+fn since_str(window: &str) -> String {
+    let dur = parse_window(window);
+    (Utc::now() - dur).to_rfc3339()
+}
+
+#[derive(Deserialize)]
+struct MonitoringWindowQuery {
+    #[serde(default = "default_monitoring_window")]
+    window: String,
+}
+fn default_monitoring_window() -> String {
+    "15m".into()
+}
+
+#[derive(Deserialize)]
+struct MonitoringEventsQuery {
+    status: Option<String>,
+    from: Option<String>,
+    to: Option<String>,
+    provider: Option<String>,
+    country: Option<String>,
+    since: Option<String>,
+    until: Option<String>,
+    message_id: Option<String>,
+    #[serde(default = "default_mon_page")]
+    page: u32,
+    #[serde(default = "default_mon_page_size")]
+    page_size: u32,
+}
+fn default_mon_page() -> u32 { 1 }
+fn default_mon_page_size() -> u32 { 50 }
+
+#[derive(Deserialize)]
+struct MonitoringLiveQuery {
+    message_id: Option<String>,
+}
+
+/// GET /api/monitoring/summary?window=15m
+async fn api_monitoring_summary(
+    query: web::Query<MonitoringWindowQuery>,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    let since = since_str(&query.window);
+    let base_filter = doc! { "ts": { "$gte": &since } };
+
+    let total = storage::count_events(&mongo, base_filter.clone()).await;
+
+    let by_status_docs = storage::aggregate(&mongo, vec![
+        doc! { "$match": base_filter.clone() },
+        doc! { "$group": { "_id": "$status", "count": { "$sum": 1 }, "avg_ms": { "$avg": "$total_ms" } } },
+    ]).await;
+
+    let mut by_status = serde_json::Map::new();
+    let mut total_delivered = 0u64;
+    let mut total_bounced = 0u64;
+    let mut avg_total_ms_sum = 0f64;
+    let mut avg_count = 0u32;
+
+    for doc in &by_status_docs {
+        let status = doc.get_str("_id").unwrap_or("unknown").to_string();
+        let count = doc.get_i64("count").unwrap_or(0) as u64;
+        let avg_ms = doc.get_f64("avg_ms").unwrap_or(0.0);
+        if status == "delivered" { total_delivered = count; }
+        if status == "bounced" { total_bounced = count; }
+        avg_total_ms_sum += avg_ms * count as f64;
+        avg_count += count as u32;
+        by_status.insert(status, serde_json::json!(count));
+    }
+
+    let delivery_rate = if total > 0 { total_delivered as f64 / total as f64 } else { 0.0 };
+    let bounce_rate = if total > 0 { total_bounced as f64 / total as f64 } else { 0.0 };
+    let avg_total_ms = if avg_count > 0 { avg_total_ms_sum / avg_count as f64 } else { 0.0 };
+    let p95 = storage::p95_total_ms(&mongo, base_filter.clone(), 1000).await;
+
+    // Average risk score
+    let risk_docs = storage::aggregate(&mongo, vec![
+        doc! { "$match": base_filter.clone() },
+        doc! { "$group": { "_id": null, "avg_risk": { "$avg": "$risk_score" } } },
+    ]).await;
+    let avg_risk = risk_docs.first()
+        .and_then(|d| d.get_f64("avg_risk").ok())
+        .unwrap_or(0.0);
+
+    HttpResponse::Ok().json(serde_json::json!({
+        "window": query.window,
+        "since": since,
+        "total_events": total,
+        "by_status": by_status,
+        "delivery_rate": (delivery_rate * 1000.0).round() / 1000.0,
+        "bounce_rate": (bounce_rate * 1000.0).round() / 1000.0,
+        "avg_total_ms": avg_total_ms.round(),
+        "p95_total_ms": p95,
+        "avg_risk_score": (avg_risk * 10.0).round() / 10.0,
+    }))
+}
+
+/// GET /api/monitoring/events?status=&from=&to=&provider=&country=&since=&until=&page=
+async fn api_monitoring_events(
+    query: web::Query<MonitoringEventsQuery>,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    let mut filter = doc! {};
+
+    if let Some(ref s) = query.status { filter.insert("status", s); }
+    if let Some(ref f) = query.from   { filter.insert("from", doc! { "$regex": f.as_str(), "$options": "i" }); }
+    if let Some(ref t) = query.to     { filter.insert("to", doc! { "$regex": t.as_str(), "$options": "i" }); }
+    if let Some(ref p) = query.provider { filter.insert("company", doc! { "$regex": p.as_str(), "$options": "i" }); }
+    if let Some(ref c) = query.country { filter.insert("country", c); }
+    if let Some(ref m) = query.message_id { filter.insert("message_id", m); }
+
+    let mut ts_filter = doc! {};
+    if let Some(ref s) = query.since { ts_filter.insert("$gte", s); }
+    if let Some(ref u) = query.until { ts_filter.insert("$lte", u); }
+    if !ts_filter.is_empty() { filter.insert("ts", ts_filter); }
+
+    let total = storage::count_events(&mongo, filter.clone()).await;
+    let events = storage::query_events(&mongo, filter, query.page, query.page_size).await;
+    let has_more = (query.page * query.page_size) < total as u32;
+
+    HttpResponse::Ok().json(serde_json::json!({
+        "events": events,
+        "total": total,
+        "page": query.page,
+        "page_size": query.page_size,
+        "has_more": has_more,
+    }))
+}
+
+/// GET /api/monitoring/messages/{message_id}/trace
+async fn api_monitoring_trace(
+    path: web::Path<String>,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    let message_id = path.into_inner();
+    let filter = doc! { "message_id": &message_id };
+    let mut events = storage::query_events(&mongo, filter, 1, 200).await;
+    // Chronological order for trace view
+    events.sort_by(|a, b| a.ts.cmp(&b.ts));
+
+    if events.is_empty() {
+        return HttpResponse::NotFound().json(serde_json::json!({ "message": "Trace not found" }));
+    }
+
+    let status = events.last().map(|e| format!("{:?}", e.status)).unwrap_or_default();
+    let total_ms = events.iter().filter_map(|e| e.total_ms).max();
+
+    HttpResponse::Ok().json(serde_json::json!({
+        "message_id": message_id,
+        "status": status,
+        "total_ms": total_ms,
+        "steps": events.len(),
+        "trace": events,
+    }))
+}
+
+/// GET /api/monitoring/bounces?window=24h
+async fn api_monitoring_bounces(
+    query: web::Query<MonitoringWindowQuery>,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    let since = since_str(&query.window);
+    let filter = doc! { "ts": { "$gte": &since }, "status": "bounced" };
+    let events = storage::query_events(&mongo, filter.clone(), 1, 100).await;
+    let total = storage::count_events(&mongo, filter).await;
+
+    let hard = events.iter().filter(|e| matches!(e.bounce_type, Some(monitoring::BounceType::Hard))).count();
+    let soft = events.iter().filter(|e| matches!(e.bounce_type, Some(monitoring::BounceType::Soft))).count();
+    let policy = events.iter().filter(|e| matches!(e.bounce_type, Some(monitoring::BounceType::Policy))).count();
+
+    HttpResponse::Ok().json(serde_json::json!({
+        "window": query.window,
+        "since": since,
+        "total": total,
+        "hard": hard,
+        "soft": soft,
+        "policy": policy,
+        "bounces": events,
+    }))
+}
+
+/// GET /api/monitoring/providers/top?window=24h
+async fn api_monitoring_providers_top(
+    query: web::Query<MonitoringWindowQuery>,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    let since = since_str(&query.window);
+    let pipeline = vec![
+        doc! { "$match": { "ts": { "$gte": &since } } },
+        doc! { "$group": {
+            "_id": { "company": "$company", "datacenter": "$datacenter", "country": "$country" },
+            "count":     { "$sum": 1 },
+            "delivered": { "$sum": { "$cond": { "if": { "$eq": ["$status", "delivered"] }, "then": 1, "else": 0 } } },
+            "bounced":   { "$sum": { "$cond": { "if": { "$eq": ["$status", "bounced"] },   "then": 1, "else": 0 } } },
+            "avg_total_ms": { "$avg": "$total_ms" },
+            "avg_risk":     { "$avg": "$risk_score" },
+        }},
+        doc! { "$sort": { "count": -1 } },
+        doc! { "$limit": 20 },
+    ];
+    let docs = storage::aggregate(&mongo, pipeline).await;
+
+    let providers: Vec<serde_json::Value> = docs.iter().map(|d| {
+        let id = d.get_document("_id").ok();
+        let company = id.and_then(|i| i.get_str("company").ok()).unwrap_or("unknown");
+        let datacenter = id.and_then(|i| i.get_str("datacenter").ok()).unwrap_or("unknown");
+        let country = id.and_then(|i| i.get_str("country").ok()).unwrap_or("unknown");
+        serde_json::json!({
+            "company":      company,
+            "datacenter":   datacenter,
+            "country":      country,
+            "count":        d.get_i64("count").unwrap_or(0),
+            "delivered":    d.get_i64("delivered").unwrap_or(0),
+            "bounced":      d.get_i64("bounced").unwrap_or(0),
+            "avg_total_ms": d.get_f64("avg_total_ms").unwrap_or(0.0).round(),
+            "avg_risk_score": d.get_f64("avg_risk").unwrap_or(0.0).round(),
+        })
+    }).collect();
+
+    HttpResponse::Ok().json(serde_json::json!({
+        "window": query.window,
+        "since": since,
+        "providers": providers,
+    }))
+}
+
+/// GET /api/monitoring/live?message_id=<optional>  — SSE
+async fn api_monitoring_live(query: web::Query<MonitoringLiveQuery>) -> HttpResponse {
+    let filter_mid = query.message_id.clone();
+
+    let rx = match monitoring::get_bus() {
+        Some(tx) => tx.subscribe(),
+        None => {
+            return HttpResponse::ServiceUnavailable()
+                .body("Monitoring bus not initialized (SMTP_MONITORING_ENABLED=true required)");
+        }
+    };
+
+    let event_stream = stream::unfold(
+        (rx, filter_mid, tokio::time::interval(std::time::Duration::from_secs(15))),
+        |(mut rx, mid, mut hb)| async move {
+            loop {
+                tokio::select! {
+                    result = rx.recv() => {
+                        match result {
+                            Ok(event) => {
+                                if let Some(ref f) = mid {
+                                    if &event.message_id != f { continue; }
+                                }
+                                let data = serde_json::to_string(&event).unwrap_or_default();
+                                let chunk = format!("event: smtp_event\ndata: {}\nretry: 3000\n\n", data);
+                                return Some((
+                                    Ok::<web::Bytes, actix_web::Error>(web::Bytes::from(chunk)),
+                                    (rx, mid, hb),
+                                ));
+                            }
+                            Err(broadcast::error::RecvError::Lagged(n)) => {
+                                eprintln!("monitoring SSE: lagged {} events", n);
+                                continue;
+                            }
+                            Err(broadcast::error::RecvError::Closed) => return None,
+                        }
+                    }
+                    _ = hb.tick() => {
+                        return Some((
+                            Ok::<web::Bytes, actix_web::Error>(
+                                web::Bytes::from(": heartbeat\n\n")
+                            ),
+                            (rx, mid, hb),
+                        ));
+                    }
+                }
+            }
+        },
+    );
+
+    HttpResponse::Ok()
+        .content_type("text/event-stream")
+        .insert_header(("Cache-Control", "no-cache"))
+        .insert_header(("X-Accel-Buffering", "no"))
+        .insert_header(("Connection", "keep-alive"))
+        .streaming(event_stream)
+}
+
+/// GET /api/monitoring/alerts/active
+async fn api_monitoring_alerts_active(
+    query: web::Query<MonitoringWindowQuery>,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    let window_minutes = parse_window(&query.window).num_minutes();
+    let config = AlertConfig::default();
+    let alerts = monitoring::alerts::evaluate_alerts(&mongo, window_minutes, &config).await;
+
+    HttpResponse::Ok().json(serde_json::json!({
+        "window": query.window,
+        "alert_count": alerts.len(),
+        "alerts": alerts,
+    }))
 }
 
 /// Accents → ASCII, non-alphanumériques supprimés, minuscules.
@@ -452,6 +879,8 @@ async fn auth_login(req: web::Json<LoginRequest>, logic: web::Data<Arc<Logic>>) 
 async fn auth_register(
     req: web::Json<RegisterRequest>,
     logic: web::Data<Arc<Logic>>,
+    bus: web::Data<EventBus>,
+    mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
     if !req.condition_accepted {
         return HttpResponse::BadRequest().json(serde_json::json!({
@@ -569,6 +998,22 @@ async fn auth_register(
     };
     if let Err(e) = logic.deliver_to_inbox(&local_part, &welcome).await {
         eprintln!("Welcome email delivery error ({}): {}", primary_email, e);
+    } else {
+        emit_event(
+            &bus,
+            &mongo,
+            MailEvent {
+                id: Uuid::new_v4().to_string(),
+                kind: MailEventKind::Received,
+                user_id: local_part.clone(),
+                email_id: welcome.id.clone(),
+                subject: welcome.subject.clone(),
+                from: welcome.from.clone(),
+                to: welcome.to.clone(),
+                timestamp: Utc::now().to_rfc3339(),
+            },
+        )
+        .await;
     }
 
     let session = make_session(&primary_email, &display_name);
@@ -1249,6 +1694,8 @@ async fn api_send(
     body: web::Json<ComposeSendRequest>,
     req: actix_web::HttpRequest,
     logic: web::Data<Arc<Logic>>,
+    bus: web::Data<EventBus>,
+    mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
     let user_id = resolve_user_id(&req);
     let from = body
@@ -1380,6 +1827,21 @@ async fn api_send(
             if let Err(e) = logic.store_email(&user_id, "sent", &email).await {
                 eprintln!("store sent copy failed: {}", e);
             }
+            emit_event(
+                &bus,
+                &mongo,
+                MailEvent {
+                    id: Uuid::new_v4().to_string(),
+                    kind: MailEventKind::Sent,
+                    user_id: user_id.clone(),
+                    email_id: id.clone(),
+                    subject: subject.clone(),
+                    from: from.clone(),
+                    to: to.clone(),
+                    timestamp: Utc::now().to_rfc3339(),
+                },
+            )
+            .await;
             HttpResponse::Ok().json(serde_json::json!({
                 "sent": true,
                 "id": id,
@@ -1400,12 +1862,28 @@ async fn api_email_by_id(
     path: web::Path<String>,
     req: actix_web::HttpRequest,
     logic: web::Data<Arc<Logic>>,
+    bus: web::Data<EventBus>,
+    mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
     let user_id = resolve_user_id(&req);
     let email_id = path.into_inner();
     match logic.fetch_email(&user_id, &email_id).await {
         Ok(Some(email)) => {
-            // Infer folder best-effort — FE mostly uses list; detail uses body
+            emit_event(
+                &bus,
+                &mongo,
+                MailEvent {
+                    id: Uuid::new_v4().to_string(),
+                    kind: MailEventKind::Read,
+                    user_id: user_id.clone(),
+                    email_id: email.id.clone(),
+                    subject: email.subject.clone(),
+                    from: email.from.clone(),
+                    to: email.to.clone(),
+                    timestamp: Utc::now().to_rfc3339(),
+                },
+            )
+            .await;
             let dto = email_to_detail_dto(&email, "inbox");
             HttpResponse::Ok().json(dto)
         }
@@ -1860,7 +2338,18 @@ async fn main() -> std::io::Result<()> {
     let logic = web::Data::new(Arc::new(Logic::new(
         mongo_client.unwrap_or(fallback_client),
     )));
-    let mongo_data = web::Data::new(shared_mongo);
+    let mongo_data = web::Data::new(shared_mongo.clone());
+
+    let (event_tx, _) = broadcast::channel::<MailEvent>(256);
+    let event_bus = web::Data::new(event_tx);
+
+    // Init global SMTP monitoring bus + background persistence task
+    monitoring::init_bus();
+    monitoring::storage::start_persistence_task(shared_mongo.clone());
+    let shared_mongo_idx = shared_mongo.clone();
+    tokio::spawn(async move {
+        monitoring::storage::ensure_indexes(&shared_mongo_idx).await;
+    });
 
     let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
     builder
@@ -1876,6 +2365,7 @@ async fn main() -> std::io::Result<()> {
     // Start HTTP server on 8000 (for frontend proxy, no TLS)
     let http_logic = logic.clone();
     let http_mongo = mongo_data.clone();
+    let http_event_bus = event_bus.clone();
     let http_addr = env::var("API_SERVER_ADDR").unwrap_or_else(|_| "0.0.0.0:8000".to_string());
     let http_server = actix_web::rt::spawn(async move {
         HttpServer::new(move || {
@@ -1890,6 +2380,7 @@ async fn main() -> std::io::Result<()> {
                 .wrap(cors)
                 .app_data(http_logic.clone())
                 .app_data(http_mongo.clone())
+                .app_data(http_event_bus.clone())
                 .route("/api/auth/login", web::post().to(auth_login))
                 .route("/api/auth/register", web::post().to(auth_register))
                 .route("/api/auth/logout", web::post().to(auth_logout))
@@ -1940,6 +2431,16 @@ async fn main() -> std::io::Result<()> {
                     "/send-to-mailing-list",
                     web::post().to(send_to_mailing_list),
                 )
+                .route("/api/events", web::get().to(api_events))
+                .route("/api/events/stream", web::get().to(api_events_stream))
+                // SMTP monitoring
+                .route("/api/monitoring/summary", web::get().to(api_monitoring_summary))
+                .route("/api/monitoring/events", web::get().to(api_monitoring_events))
+                .route("/api/monitoring/messages/{message_id}/trace", web::get().to(api_monitoring_trace))
+                .route("/api/monitoring/bounces", web::get().to(api_monitoring_bounces))
+                .route("/api/monitoring/providers/top", web::get().to(api_monitoring_providers_top))
+                .route("/api/monitoring/live", web::get().to(api_monitoring_live))
+                .route("/api/monitoring/alerts/active", web::get().to(api_monitoring_alerts_active))
         })
         .bind(http_addr)
         .expect("Failed to bind HTTP on 8000")

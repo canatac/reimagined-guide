@@ -198,6 +198,44 @@ impl Logic {
         }
     }
 
+    pub async fn log_mail_event(
+        &self,
+        kind: &str,
+        user_id: &str,
+        email_id: &str,
+        subject: &str,
+        from: &str,
+        to: &str,
+    ) -> Result<()> {
+        #[cfg(not(test))]
+        {
+            let database_name =
+                std::env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
+            let collection = self
+                .client
+                .database(&database_name)
+                .collection::<bson::Document>("mail_events");
+            let now = bson::DateTime::from_millis(chrono::Utc::now().timestamp_millis());
+            collection
+                .insert_one(doc! {
+                    "kind": kind,
+                    "user_id": user_id,
+                    "email_id": email_id,
+                    "subject": subject,
+                    "from": from,
+                    "to": to,
+                    "timestamp": now,
+                })
+                .await?;
+            Ok(())
+        }
+        #[cfg(test)]
+        {
+            let _ = (kind, user_id, email_id, subject, from, to);
+            Ok(())
+        }
+    }
+
     pub async fn authenticate_user(&self, username: &str, password: &str) -> Result<Option<User>> {
         #[cfg(not(test))]
         {
