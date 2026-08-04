@@ -15,6 +15,8 @@ pub struct User {
     pub password: String,
     #[serde(default = "default_mailbox")]
     pub mailbox: String,
+    #[serde(default)]
+    pub condition_accepted: bool,
 }
 
 fn default_mailbox() -> String {
@@ -41,6 +43,7 @@ fn user_from_document(doc: &bson::Document, fallback_username: &str) -> User {
         username,
         password,
         mailbox,
+        condition_accepted: false,
     }
 }
 
@@ -81,6 +84,7 @@ impl Logic {
             username: username.to_string(),
             password: password.to_string(),
             mailbox: mailbox.to_string(),
+            condition_accepted: false,
         };
         #[cfg(not(test))]
         {
@@ -236,6 +240,7 @@ impl Logic {
                     username: email.to_string(),
                     password: String::new(),
                     mailbox: default_mailbox(),
+                    condition_accepted: false,
                 })
             }
         }
@@ -247,6 +252,7 @@ impl Logic {
                 username: email.to_string(),
                 password: String::new(),
                 mailbox: default_mailbox(),
+                condition_accepted: false,
             })
         }
     }
@@ -1076,6 +1082,7 @@ mod tests {
                     username: "testuser".to_string(),
                     password: expected_password.clone(),
                     mailbox: "testmailbox".to_string(),
+                    condition_accepted: false,
                 }))
             });
 
