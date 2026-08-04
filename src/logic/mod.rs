@@ -136,6 +136,68 @@ impl Logic {
         }
     }
 
+    /// Enregistre alias → target dans la collection `aliases`.
+    pub async fn create_alias(&self, alias: &str, target: &str) -> Result<()> {
+        #[cfg(not(test))]
+        {
+            let database_name =
+                std::env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
+            let collection = self
+                .client
+                .database(&database_name)
+                .collection::<bson::Document>("aliases");
+            let now = bson::DateTime::from_millis(chrono::Utc::now().timestamp_millis());
+            collection
+                .insert_one(doc! {
+                    "alias": alias,
+                    "target": target,
+                    "created_at": now,
+                })
+                .await?;
+            Ok(())
+        }
+        #[cfg(test)]
+        {
+            let _ = (alias, target);
+            Ok(())
+        }
+    }
+
+    /// Dépose un email directement dans l'inbox MongoDB d'un utilisateur (sans SMTP).
+    pub async fn deliver_to_inbox(&self, username: &str, email: &crate::entities::Email) -> Result<()> {
+        #[cfg(not(test))]
+        {
+            let database_name =
+                std::env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
+            let collection = self
+                .client
+                .database(&database_name)
+                .collection::<bson::Document>("emails");
+            let now = bson::DateTime::from_millis(chrono::Utc::now().timestamp_millis());
+            collection
+                .insert_one(doc! {
+                    "id": &email.id,
+                    "user_id": username,
+                    "mailbox": "inbox",
+                    "from": &email.from,
+                    "to": &email.to,
+                    "subject": &email.subject,
+                    "body": &email.body,
+                    "flags": bson::Array::new(),
+                    "internal_date": now,
+                    "sequence_number": 1i64,
+                    "uid": 1i64,
+                })
+                .await?;
+            Ok(())
+        }
+        #[cfg(test)]
+        {
+            let _ = (username, email);
+            Ok(())
+        }
+    }
+
     pub async fn authenticate_user(&self, username: &str, password: &str) -> Result<Option<User>> {
         #[cfg(not(test))]
         {

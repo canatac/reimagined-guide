@@ -68,10 +68,16 @@ struct LoginRequest {
 
 #[derive(Deserialize)]
 struct RegisterRequest {
-    email: String,
+    #[serde(default)]
+    first_name: String,
+    #[serde(default)]
+    last_name: String,
+    /// Alias optionnel → adresse alias@misfits.ai redirigeant vers prenom.nom@misfits.ai
+    #[serde(default)]
+    alias: Option<String>,
     password: String,
     #[serde(default)]
-    display_name: Option<String>,
+    condition_accepted: bool,
 }
 
 #[derive(Deserialize)]
@@ -152,6 +158,36 @@ fn make_session(email: &str, display_name: &str) -> AuthResponse {
             issued_at: now,
         },
     }
+}
+
+/// Accents → ASCII, non-alphanumériques supprimés, minuscules.
+fn normalize_segment(s: &str) -> String {
+    s.chars()
+        .map(|c| match c {
+            'à' | 'â' | 'ä' => 'a',
+            'é' | 'è' | 'ê' | 'ë' => 'e',
+            'î' | 'ï' => 'i',
+            'ô' | 'ö' => 'o',
+            'ù' | 'û' | 'ü' => 'u',
+            'ç' => 'c',
+            'ñ' => 'n',
+            'æ' => 'a',
+            'œ' => 'o',
+            _ => c,
+        })
+        .filter(|c| c.is_ascii_alphanumeric())
+        .map(|c| c.to_ascii_lowercase())
+        .collect()
+}
+
+/// Retourne `prenom.nom` normalisé, ou None si prénom ou nom est absent.
+fn build_misfits_local(first_name: &str, last_name: &str) -> Option<String> {
+    let first = normalize_segment(first_name.trim());
+    let last = normalize_segment(last_name.trim());
+    if first.is_empty() || last.is_empty() {
+        return None;
+    }
+    Some(format!("{}.{}", first, last))
 }
 
 fn normalize_oauth_provider(provider: &str) -> Option<String> {
@@ -417,138 +453,130 @@ async fn auth_register(
     req: web::Json<RegisterRequest>,
     logic: web::Data<Arc<Logic>>,
 ) -> impl Responder {
-    if req.email.trim().is_empty() || req.password.len() < 8 {
+    if !req.condition_accepted {
         return HttpResponse::BadRequest().json(serde_json::json!({
-            "message": "Email and password (min 8 chars) are required."
+            "code": "CONDITIONS_NOT_ACCEPTED",
+            "message": "Vous devez accepter les conditions d'utilisation."
         }));
     }
-    let display = req
-        .display_name
-        .clone()
-        .unwrap_or_else(|| req.email.split('@').next().unwrap_or("user").to_string());
+    if req.password.len() < 8 {
+        return HttpResponse::BadRequest().json(serde_json::json!({
+            "code": "INVALID_PASSWORD",
+            "message": "Le mot de passe doit contenir au moins 8 caractères."
+        }));
+    }
+
+    let local_part = match build_misfits_local(&req.first_name, &req.last_name) {
+        Some(l) => l,
+        None => {
+            return HttpResponse::BadRequest().json(serde_json::json!({
+                "code": "MISSING_IDENTITY",
+                "message": "Prénom et nom sont requis pour créer votre adresse mail."
+            }));
+        }
+    };
+
+    // Adresse principale : prenom.nom@misfits.ai
+    let primary_email = format!("{}@misfits.ai", local_part);
+    // Alias éventuel : alias@misfits.ai → redirige vers primary_email
+    let alias_email: Option<String> = req
+        .alias
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|a| normalize_segment(a))
+        .filter(|n| !n.is_empty() && *n != local_part)
+        .map(|n| format!("{}@misfits.ai", n));
+
+    let display_name = {
+        let first = req.first_name.trim();
+        let last = req.last_name.trim();
+        if first.is_empty() && last.is_empty() {
+            local_part.clone()
+        } else {
+            format!("{} {}", first, last).trim().to_string()
+        }
+    };
+
     let password = req.password.clone();
     let password_hash = match web::block(move || bcrypt::hash(&password, 12)).await {
         Ok(Ok(h)) => h,
         Ok(Err(e)) => {
             eprintln!("bcrypt error: {}", e);
             return HttpResponse::InternalServerError().json(serde_json::json!({
-                "message": "Registration failed."
+                "code": "INTERNAL_ERROR",
+                "message": "La création du compte a échoué. Veuillez réessayer."
             }));
         }
         Err(e) => {
             eprintln!("bcrypt task error: {}", e);
             return HttpResponse::InternalServerError().json(serde_json::json!({
-                "message": "Registration failed."
+                "code": "INTERNAL_ERROR",
+                "message": "La création du compte a échoué. Veuillez réessayer."
             }));
         }
     };
-    match logic.create_user(&req.email, &password_hash, "inbox").await {
-        Ok(_) => HttpResponse::Ok().json(make_session(&req.email, &display)),
+
+    match logic.create_user(&primary_email, &password_hash, "inbox").await {
+        Ok(_) => {}
         Err(e) => {
             let msg = e.to_string();
-            // MongoDB duplicate key error codes: 11000 (BulkWriteError) or E11000 in message
             if msg.contains("E11000") || msg.contains("duplicate key") {
-                HttpResponse::Conflict().json(serde_json::json!({
-                    "message": "An account with this email already exists."
-                }))
-            } else {
-                eprintln!("Register error ({}): {}", req.email, e);
-                HttpResponse::InternalServerError().json(serde_json::json!({
-                    "message": "Registration failed. Please try again."
-                }))
+                return HttpResponse::Conflict().json(serde_json::json!({
+                    "code": "EMAIL_TAKEN",
+                    "message": format!(
+                        "L'adresse {} est déjà utilisée. Choisissez un alias différent.",
+                        primary_email
+                    )
+                }));
             }
+            eprintln!("Register error ({}): {}", primary_email, e);
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "code": "INTERNAL_ERROR",
+                "message": "La création du compte a échoué. Veuillez réessayer."
+            }));
         }
     }
-}
 
-async fn register_page() -> impl Responder {
-    let html = r#"<!DOCTYPE html>
-<html lang="fr">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Créer un compte — Misfits Mail</title>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: system-ui, sans-serif; background: #0f0f0f; color: #e5e5e5;
-           display: flex; align-items: center; justify-content: center; min-height: 100vh; }
-    .card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 12px;
-            padding: 2.5rem; width: 100%; max-width: 400px; }
-    h1 { font-size: 1.4rem; margin-bottom: 1.75rem; }
-    label { display: block; font-size: .85rem; color: #aaa; margin-bottom: .4rem; }
-    input { width: 100%; background: #111; border: 1px solid #333; border-radius: 8px;
-            color: #e5e5e5; padding: .65rem .9rem; font-size: 1rem; outline: none;
-            margin-bottom: 1.1rem; }
-    input:focus { border-color: #6366f1; }
-    button { width: 100%; background: #6366f1; color: #fff; border: none;
-             border-radius: 8px; padding: .75rem; font-size: 1rem; cursor: pointer; }
-    button:disabled { opacity: .5; cursor: default; }
-    .error { color: #f87171; font-size: .85rem; margin-bottom: 1rem; display: none; }
-    .login-link { text-align: center; margin-top: 1.25rem; font-size: .85rem; color: #888; }
-    .login-link a { color: #818cf8; text-decoration: none; }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <h1>Créer un compte</h1>
-    <div class="error" id="err"></div>
-    <form id="form">
-      <label for="display">Nom d'affichage</label>
-      <input id="display" type="text" placeholder="Votre nom" autocomplete="name">
-      <label for="email">Adresse e-mail</label>
-      <input id="email" type="email" placeholder="vous@exemple.com" required autocomplete="email">
-      <label for="password">Mot de passe</label>
-      <input id="password" type="password" placeholder="8 caractères minimum" required minlength="8" autocomplete="new-password">
-      <button type="submit" id="btn">Créer le compte</button>
-    </form>
-    <div class="login-link">Déjà un compte ? <a href="/login">Se connecter</a></div>
-  </div>
-  <script>
-    document.getElementById('form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const btn = document.getElementById('btn');
-      const errEl = document.getElementById('err');
-      errEl.style.display = 'none';
-      btn.disabled = true;
-      btn.textContent = 'Création…';
-      try {
-        const body = {
-          email: document.getElementById('email').value.trim(),
-          password: document.getElementById('password').value,
-        };
-        const display = document.getElementById('display').value.trim();
-        if (display) body.display_name = display;
-        const res = await fetch('/api/auth/register', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          errEl.textContent = data.message || 'Erreur lors de la création du compte.';
-          errEl.style.display = 'block';
-          return;
+    // Créer l'alias → primary si fourni
+    if let Some(ref alias) = alias_email {
+        if let Err(e) = logic.create_alias(alias, &primary_email).await {
+            eprintln!("Alias creation error ({} → {}): {}", alias, primary_email, e);
+            // Non bloquant : le compte est créé, l'alias sera à recréer
         }
-        const session = JSON.stringify(data);
-        localStorage.setItem('mfa.session', session);
-        sessionStorage.setItem('mfa.session', session);
-        document.cookie = 'mfa_session=' + (data.session?.access_token || '') +
-          '; Path=/; SameSite=Lax';
-        window.location.href = '/mail';
-      } catch (err) {
-        errEl.textContent = 'Erreur réseau. Veuillez réessayer.';
-        errEl.style.display = 'block';
-      } finally {
-        btn.disabled = false;
-        btn.textContent = 'Créer le compte';
-      }
-    });
-  </script>
-</body>
-</html>"#;
-    HttpResponse::Ok()
-        .content_type("text/html; charset=utf-8")
-        .body(html)
+    }
+
+    // Email de bienvenue déposé directement dans l'inbox
+    let alias_line = alias_email.as_deref().map(|a| {
+        format!("\n• Alias : {} (redirige vers votre boîte principale)", a)
+    }).unwrap_or_default();
+    let welcome_body = format!(
+        "Bonjour {} 👋\n\nBienvenue sur Misfits Mail !\n\nVotre adresse mail est prête :\n• Adresse principale : {}{}\n\nVous pouvez dès maintenant envoyer et recevoir des emails.\n\nL'équipe Misfits",
+        display_name, primary_email, alias_line
+    );
+    let welcome = Email {
+        id: Uuid::new_v4().to_string(),
+        from: "noreply@misfits.ai".to_string(),
+        to: primary_email.clone(),
+        subject: "Bienvenue sur Misfits Mail 🎉".to_string(),
+        body: welcome_body,
+        headers: vec![],
+        flags: vec![],
+        sequence_number: 1,
+        uid: 1,
+        internal_date: mongodb::bson::DateTime::from_millis(Utc::now().timestamp_millis()),
+        dkim_signature: None,
+    };
+    if let Err(e) = logic.deliver_to_inbox(&primary_email, &welcome).await {
+        eprintln!("Welcome email delivery error ({}): {}", primary_email, e);
+    }
+
+    let session = make_session(&primary_email, &display_name);
+    HttpResponse::Created().json(serde_json::json!({
+        "email": primary_email,
+        "alias": alias_email,
+        "session": session.session,
+    }))
 }
 
 async fn auth_logout() -> impl Responder {
