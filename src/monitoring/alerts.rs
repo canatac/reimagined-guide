@@ -13,6 +13,8 @@ pub struct AlertConfig {
     pub smtp_spike_threshold: u64,
     pub forbidden_countries: Vec<String>,
     pub forbidden_companies: Vec<String>,
+    /// Fraction 0–1: (sent - delivered) / sent above which we alert for silent delivery failures.
+    pub undelivered_ratio_threshold: f32,
 }
 
 impl Default for AlertConfig {
@@ -23,6 +25,7 @@ impl Default for AlertConfig {
             smtp_spike_threshold: env_u64("MONITORING_SMTP_SPIKE_THRESHOLD", 10),
             forbidden_countries: env_list("MONITORING_FORBIDDEN_COUNTRIES"),
             forbidden_companies: env_list("MONITORING_RISKY_COMPANIES"),
+            undelivered_ratio_threshold: env_f32("MONITORING_UNDELIVERED_RATIO_THRESHOLD", 0.1),
         }
     }
 }
@@ -150,6 +153,38 @@ pub async fn evaluate_alerts(
                 ),
                 value: serde_json::json!(count),
                 threshold: serde_json::json!(0),
+                ts: Utc::now().to_rfc3339(),
+            });
+        }
+    }
+
+    // --- Silent delivery failures: mail_events.sent with no smtp delivery ---
+    // Catches emails the API recorded as "sent" but that never reached send_outgoing_email.
+    let mail_coll = client
+        .database(&db)
+        .collection::<mongodb::bson::Document>("mail_events");
+    let api_sent = mail_coll
+        .count_documents(doc! { "timestamp": { "$gte": &since_str }, "kind": "sent" })
+        .await
+        .unwrap_or(0);
+    if api_sent > 0 {
+        let smtp_delivered = coll
+            .count_documents(doc! { "ts": { "$gte": &since_str }, "event_type": "delivered" })
+            .await
+            .unwrap_or(0);
+        let undelivered = api_sent.saturating_sub(smtp_delivered);
+        let ratio = undelivered as f32 / api_sent as f32;
+        if ratio > config.undelivered_ratio_threshold {
+            alerts.push(ActiveAlert {
+                kind: "silent_delivery_failure".into(),
+                severity: "critical".into(),
+                message: format!(
+                    "{} email(s) recorded as sent by API but no SMTP delivery event ({:.1}% undelivered)",
+                    undelivered,
+                    ratio * 100.0
+                ),
+                value: serde_json::json!(undelivered),
+                threshold: serde_json::json!(config.undelivered_ratio_threshold),
                 ts: Utc::now().to_rfc3339(),
             });
         }

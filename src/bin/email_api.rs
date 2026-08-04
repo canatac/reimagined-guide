@@ -1981,12 +1981,7 @@ async fn api_send(
         },
     };
 
-    let send_result = if already_delivered {
-        // dkim-service already handed off to SMTP (Nodemailer).
-        Ok(())
-    } else {
-        send_outgoing_email(&email).await
-    };
+    let send_result = send_outgoing_email(&email).await;
 
     match send_result {
         Ok(_) => {
@@ -2734,7 +2729,8 @@ pub struct RealDkimService;
 #[async_trait::async_trait]
 impl DkimService for RealDkimService {
     async fn sign_email(&self, email: &EmailRequest) -> Result<serde_json::Value, std::io::Error> {
-        let dkim_service_url = env::var("DKIM_SERVICE_URL").expect("DKIM_SERVICE_URL not set");
+        let dkim_service_url = env::var("DKIM_SERVICE_URL")
+            .map_err(|_| std::io::Error::new(std::io::ErrorKind::NotFound, "DKIM_SERVICE_URL not set"))?;
         let client = reqwest::Client::new();
 
         let response = client
@@ -2743,7 +2739,7 @@ impl DkimService for RealDkimService {
                 "from": email.from,
                 "to": email.to,
                 "subject": email.subject,
-                "text": email.body
+                "html": email.body
             }))
             .send()
             .await
