@@ -274,6 +274,7 @@ async fn api_events_stream(
 use simple_smtp_server::monitoring;
 use simple_smtp_server::monitoring::alerts::AlertConfig;
 use simple_smtp_server::monitoring::storage;
+use simple_smtp_server::security;
 
 fn parse_window(s: &str) -> chrono::Duration {
     let s = s.trim();
@@ -300,6 +301,10 @@ struct MonitoringWindowQuery {
 }
 fn default_monitoring_window() -> String {
     "15m".into()
+}
+
+fn default_window() -> String {
+    "1h".into()
 }
 
 #[derive(Deserialize)]
@@ -587,6 +592,149 @@ async fn api_monitoring_alerts_active(
     }))
 }
 
+// ---------------------------------------------------------------------------
+// Security endpoints
+// ---------------------------------------------------------------------------
+
+#[derive(serde::Deserialize)]
+struct SecurityAlertsQuery {
+    #[serde(default = "default_window")]
+    window: String,
+    severity: Option<String>,
+    tenant_id: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct SecurityIncidentsQuery {
+    #[serde(default = "one")]
+    page: u32,
+    #[serde(default = "twenty")]
+    page_size: u32,
+    tenant_id: Option<String>,
+    severity: Option<String>,
+}
+
+fn one() -> u32 { 1 }
+fn twenty() -> u32 { 20 }
+
+async fn api_security_alerts_active(
+    query: web::Query<SecurityAlertsQuery>,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    use simple_smtp_server::security::audit;
+
+    let limit = 100i64;
+    let mut alerts = audit::query_active_alerts(&mongo, limit).await;
+
+    // Optional filters
+    if let Some(ref sev) = query.severity {
+        let sev_lc = sev.to_lowercase();
+        alerts.retain(|a| format!("{:?}", a.severity).to_lowercase() == sev_lc);
+    }
+    if let Some(ref tid) = query.tenant_id {
+        alerts.retain(|a| a.tenant_id.as_deref() == Some(tid.as_str()));
+    }
+
+    HttpResponse::Ok().json(serde_json::json!({
+        "window": query.window,
+        "alert_count": alerts.len(),
+        "alerts": alerts,
+    }))
+}
+
+async fn api_security_incidents(
+    query: web::Query<SecurityIncidentsQuery>,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    use mongodb::bson::doc;
+    use simple_smtp_server::security::audit;
+
+    let mut filter = doc! {};
+    if let Some(ref tid) = query.tenant_id {
+        filter.insert("tenant_id", tid.as_str());
+    }
+    if let Some(ref sev) = query.severity {
+        filter.insert("severity", sev.as_str());
+    }
+
+    let alerts = audit::query_alerts(&mongo, filter, query.page, query.page_size).await;
+    HttpResponse::Ok().json(serde_json::json!({
+        "page": query.page,
+        "page_size": query.page_size,
+        "count": alerts.len(),
+        "alerts": alerts,
+    }))
+}
+
+async fn api_security_tenant_status(
+    path: web::Path<String>,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    use mongodb::bson::doc;
+    let tenant_id = path.into_inner();
+    let db = std::env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
+    let coll = mongo
+        .database(&db)
+        .collection::<mongodb::bson::Document>("tenant_state");
+
+    match coll.find_one(doc! { "tenant_id": &tenant_id }).await {
+        Ok(Some(doc)) => HttpResponse::Ok().json(serde_json::json!({
+            "tenant_id": tenant_id,
+            "state": doc,
+        })),
+        Ok(None) => HttpResponse::Ok().json(serde_json::json!({
+            "tenant_id": tenant_id,
+            "state": null,
+        })),
+        Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({ "error": e.to_string() })),
+    }
+}
+
+async fn api_security_rollback(
+    path: web::Path<String>,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    use simple_smtp_server::security::remediation;
+    let alert_id = path.into_inner();
+    match remediation::rollback_remediation(&mongo, &alert_id).await {
+        Ok(()) => HttpResponse::Ok().json(serde_json::json!({ "rolled_back": true, "alert_id": alert_id })),
+        Err(e) => HttpResponse::BadRequest().json(serde_json::json!({ "error": e })),
+    }
+}
+
+async fn api_security_live(mongo: web::Data<Arc<mongodb::Client>>) -> impl Responder {
+    use futures_util::stream;
+    use simple_smtp_server::security;
+    use std::time::Duration;
+
+    let rx = match security::get_bus() {
+        Some(tx) => tx.subscribe(),
+        None => return HttpResponse::ServiceUnavailable().body("security bus unavailable"),
+    };
+
+    let stream = stream::unfold(
+        (rx, tokio::time::interval(Duration::from_secs(15)), mongo.clone()),
+        |(mut rx, mut hb, mongo)| async move {
+            tokio::select! {
+                Ok(alert) = rx.recv() => {
+                    let data = serde_json::to_string(&alert).unwrap_or_default();
+                    let msg = format!("event: security_alert\ndata: {}\nretry: 3000\n\n", data);
+                    Some((Ok::<_, actix_web::Error>(actix_web::web::Bytes::from(msg)), (rx, hb, mongo)))
+                }
+                _ = hb.tick() => {
+                    Some((Ok(actix_web::web::Bytes::from_static(b": heartbeat\n\n")), (rx, hb, mongo)))
+                }
+            }
+        },
+    );
+
+    HttpResponse::Ok()
+        .content_type("text/event-stream")
+        .insert_header(("Cache-Control", "no-cache"))
+        .insert_header(("X-Accel-Buffering", "no"))
+        .streaming(stream)
+}
+
 /// Accents → ASCII, non-alphanumériques supprimés, minuscules.
 fn normalize_segment(s: &str) -> String {
     s.chars()
@@ -835,7 +983,22 @@ async fn send_email_handler(
 
 // --- Auth handlers ---
 
-async fn auth_login(req: web::Json<LoginRequest>, logic: web::Data<Arc<Logic>>) -> impl Responder {
+fn req_ip_str(req: &actix_web::HttpRequest) -> String {
+    req.connection_info()
+        .realip_remote_addr()
+        .unwrap_or("unknown")
+        .split(':')
+        .next()
+        .unwrap_or("unknown")
+        .to_string()
+}
+
+async fn auth_login(
+    req: web::Json<LoginRequest>,
+    req_http: actix_web::HttpRequest,
+    logic: web::Data<Arc<Logic>>,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
     // Try to authenticate against MongoDB
     match logic.authenticate_user(&req.email, &req.password).await {
         Ok(Some(user)) => {
@@ -847,7 +1010,6 @@ async fn auth_login(req: web::Json<LoginRequest>, logic: web::Data<Arc<Logic>>) 
             HttpResponse::Ok().json(make_session(&req.email, &display))
         }
         Ok(None) => {
-            // Fallback: check env vars (SMTP_USERNAME/SMTP_PASSWORD)
             let env_user = env::var("SMTP_USERNAME").unwrap_or_default();
             let env_pass = env::var("SMTP_PASSWORD").unwrap_or_default();
             if req.email == env_user || req.email == format!("{}@misfits.ai", env_user) {
@@ -855,13 +1017,20 @@ async fn auth_login(req: web::Json<LoginRequest>, logic: web::Data<Arc<Logic>>) 
                     return HttpResponse::Ok().json(make_session(&req.email, &env_user));
                 }
             }
+            // Emit auth failure event for brute-force detection
+            let ip = req_ip_str(&req_http);
+            let ev = simple_smtp_server::security::AuthEvent::new(
+                simple_smtp_server::security::AuthEventKind::ApiLogin, &ip, false);
+            let mc = mongo.clone();
+            tokio::spawn(async move {
+                simple_smtp_server::security::log_auth_event(&mc, ev).await;
+            });
             HttpResponse::Unauthorized().json(serde_json::json!({
                 "message": "Incorrect email or password."
             }))
         }
         Err(e) => {
             eprintln!("Auth error: {}", e);
-            // Fallback to env vars on MongoDB error
             let env_user = env::var("SMTP_USERNAME").unwrap_or_default();
             let env_pass = env::var("SMTP_PASSWORD").unwrap_or_default();
             if req.email == env_user || req.email == format!("{}@misfits.ai", env_user) {
@@ -2351,6 +2520,14 @@ async fn main() -> std::io::Result<()> {
         monitoring::storage::ensure_indexes(&shared_mongo_idx).await;
     });
 
+    // Init security monitoring bus + background evaluation engine
+    security::init_bus();
+    let sec_mongo = shared_mongo.clone();
+    tokio::spawn(async move {
+        security::audit::ensure_indexes(&sec_mongo).await;
+    });
+    security::audit::start_engine(shared_mongo.clone());
+
     let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
     builder
         .set_private_key_file(
@@ -2441,6 +2618,12 @@ async fn main() -> std::io::Result<()> {
                 .route("/api/monitoring/providers/top", web::get().to(api_monitoring_providers_top))
                 .route("/api/monitoring/live", web::get().to(api_monitoring_live))
                 .route("/api/monitoring/alerts/active", web::get().to(api_monitoring_alerts_active))
+                // Security endpoints
+                .route("/api/security/alerts/active", web::get().to(api_security_alerts_active))
+                .route("/api/security/incidents", web::get().to(api_security_incidents))
+                .route("/api/security/live", web::get().to(api_security_live))
+                .route("/api/security/tenant/{id}/status", web::get().to(api_security_tenant_status))
+                .route("/api/security/remediation/{alert_id}/rollback", web::post().to(api_security_rollback))
         })
         .bind(http_addr)
         .expect("Failed to bind HTTP on 8000")
