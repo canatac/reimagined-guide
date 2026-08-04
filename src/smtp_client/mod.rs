@@ -200,22 +200,43 @@ pub async fn send_outgoing_email(email: &Email) -> std::io::Result<()> {
         .to_ascii()
         .trim_end_matches('.')
         .to_string();
-    let smtp_port = find_smtp_port(&smtp_server)
-        .await
-        .ok_or_else(|| IoError::new(ErrorKind::Other, "No open SMTP ports found"))?;
 
-    if mon {
-        let mut ev = crate::monitoring::SmtpEvent::new(
-            &message_id,
-            crate::monitoring::SmtpEventType::MxSelected,
-            &email.from,
-            &email.to,
-        );
-        ev.correlation_id = correlation_id.clone();
-        ev.mx_host = Some(smtp_server.clone());
-        ev.remote_port = Some(smtp_port);
-        crate::monitoring::emit(ev);
-    }
+    let smtp_port = match find_smtp_port(&smtp_server).await {
+        Some(port) => {
+            if mon {
+                let mut ev = crate::monitoring::SmtpEvent::new(
+                    &message_id,
+                    crate::monitoring::SmtpEventType::MxSelected,
+                    &email.from,
+                    &email.to,
+                );
+                ev.correlation_id = correlation_id.clone();
+                ev.mx_host = Some(smtp_server.clone());
+                ev.remote_port = Some(port);
+                crate::monitoring::emit(ev);
+            }
+            port
+        }
+        None => {
+            if mon {
+                let mut ev = crate::monitoring::SmtpEvent::new(
+                    &message_id,
+                    crate::monitoring::SmtpEventType::Bounced,
+                    &email.from,
+                    &email.to,
+                );
+                ev.correlation_id = correlation_id.clone();
+                ev.mx_host = Some(smtp_server.clone());
+                ev.dns_ms = Some(dns_ms);
+                ev.total_ms = Some(t_total.elapsed().as_millis() as u64);
+                ev.status = crate::monitoring::SmtpStatus::Failed;
+                ev.bounce_type = Some(crate::monitoring::BounceType::Soft);
+                ev.bounce_reason = Some("No open SMTP ports found".into());
+                crate::monitoring::emit(ev);
+            }
+            return Err(IoError::new(ErrorKind::Other, "No open SMTP ports found"));
+        }
+    };
 
     // --- TCP connect ---
     println!("Connecting to {}:{}", smtp_server, smtp_port);
