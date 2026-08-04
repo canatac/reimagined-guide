@@ -118,7 +118,8 @@ services:
     container_name: dkim-service
     restart: always
     ports:
-      - "3000:3000"
+      # Accessible uniquement en local — email-api passe par le réseau Docker interne
+      - "127.0.0.1:3000:3000"
     volumes:
       - ./dkim:/app/dkim
     environment:
@@ -131,6 +132,12 @@ services:
       - DOMAIN_NAME=${DOMAIN_NAME}
       - KEY_SELECTOR=${KEY_SELECTOR:-default}
       - PRIVATE_KEY_PATH=dkim/dkim-private.pem
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
     depends_on:
       - smtp-server
     networks:

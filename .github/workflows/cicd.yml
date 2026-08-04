@@ -264,6 +264,18 @@ jobs:
             fi
             sudo nft list ruleset | sudo tee /etc/nftables.conf > /dev/null
 
+            # Générer la clé privée DKIM si elle n'existe pas encore
+            mkdir -p /home/debian/dkim
+            if [ ! -f /home/debian/dkim/dkim-private.pem ]; then
+              openssl genrsa -out /home/debian/dkim/dkim-private.pem 2048
+              openssl rsa -in /home/debian/dkim/dkim-private.pem \
+                -pubout -out /home/debian/dkim/dkim-public.pem
+              chmod 600 /home/debian/dkim/dkim-private.pem
+              echo "DKIM key pair generated."
+            else
+              echo "DKIM private key already present, skipping generation."
+            fi
+
             # Bootstrap Caddy first (host network mode — no Docker bridge egress needed)
             sudo -E docker compose -f /home/debian/docker-compose.deploy.yml --env-file /home/debian/.env.deploy up -d --force-recreate --remove-orphans caddy
 
