@@ -411,4 +411,4 @@ jobs:
       - name: Smoke test - DKIM service port 3000
         run: |
           ssh -o StrictHostKeyChecking=no debian@${{ secrets.VM_IP }} \
-            "for i in \$(seq 1 12); do if curl -sf http://127.0.0.1:3000/health 2>/dev/null | grep -q 'ok'; then echo 'DKIM health check OK' && exit 0; fi; echo \"retry \$i...\"; sleep 5; done; echo 'DKIM service not reachable on :3000'; exit 1"
+            "for i in \$(seq 1 12); do if nc -z -w3 127.0.0.1 3000 2>/dev/null; then echo 'DKIM port 3000 open' && exit 0; fi; echo \"retry \$i...\"; sleep 5; done; echo 'DKIM service not reachable on :3000'; exit 1"

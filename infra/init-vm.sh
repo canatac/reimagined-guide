@@ -99,7 +99,13 @@ fi
 PRIVATE_IP=$(ip route get 8.8.8.8 | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1); exit}')
 echo "IP privée détectée : $PRIVATE_IP"
 
-sudo sed -i "s|bindIp: 127.0.0.1|bindIp: 127.0.0.1,$PRIVATE_IP|g" /etc/mongod.conf
+# Remplace bindIp quelle que soit sa valeur courante (idempotent)
+if grep -q "^  bindIp:" /etc/mongod.conf; then
+  sudo sed -i "s|^  bindIp:.*|  bindIp: 127.0.0.1,$PRIVATE_IP|" /etc/mongod.conf
+else
+  sudo sed -i "/^net:/a\\  bindIp: 127.0.0.1,$PRIVATE_IP" /etc/mongod.conf
+fi
+echo "bindIp configuré : $(grep bindIp /etc/mongod.conf)"
 
 # Activer l'authentification MongoDB
 if ! grep -q "^security:" /etc/mongod.conf; then
