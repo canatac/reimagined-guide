@@ -57,6 +57,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     libssl3 \
     wget \
+    gosu \
+    netcat-openbsd \
     && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --gid ${GID} default_user && \
@@ -65,6 +67,9 @@ RUN groupadd --gid ${GID} default_user && \
 COPY --from=builder /app/target/release/smtp_server /usr/local/bin/smtp_server
 COPY --from=builder /app/target/release/email_api /usr/local/bin/email_api
 COPY --from=builder /app/target/release/imap_server /usr/local/bin/imap_server
+
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
 
 RUN mkdir -p /app/emails /app/dkim /app/certs && \
     chown -R default_user:default_user /app
@@ -77,6 +82,14 @@ RUN openssl req -x509 -newkey rsa:2048 -nodes \
 
 USER default_user
 WORKDIR /app
+
+# TCP-based probe: avoids sending HTTP traffic to the SMTP port (which would
+# cause "500 Syntax error, command unrecognized" log noise).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD nc -z 127.0.0.1 8025 || exit 1
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["smtp_server"]
 
 ENV USE_MONGODB=false \
     SMTP_PLAIN_ADDR=0.0.0.0:8025 \

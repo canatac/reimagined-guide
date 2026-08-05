@@ -18,10 +18,20 @@ provider "scaleway" {
 # Groupe de sécurité
 resource "scaleway_instance_security_group" "smtp_sg" {
   name        = "smtp-security-group"
-  description = "Allow SMTP, IMAP, API, and SSH"
+  description = "Allow SMTP, IMAP, API, SSH, and HTTPS web traffic"
   inbound_rule {
     action   = "accept"
     port     = 22
+    ip_range = "0.0.0.0/0"
+  }
+  inbound_rule {
+    action   = "accept"
+    port     = 80
+    ip_range = "0.0.0.0/0"
+  }
+  inbound_rule {
+    action   = "accept"
+    port     = 443
     ip_range = "0.0.0.0/0"
   }
   inbound_rule {
@@ -46,7 +56,7 @@ resource "scaleway_instance_security_group" "smtp_sg" {
   }
   outbound_rule {
     action   = "accept"
-    port     = 0  # 0 = any port
+    port     = 0
     ip_range = "0.0.0.0/0"
   }
 }

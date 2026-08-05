@@ -1,12 +1,12 @@
-use tokio::net::TcpListener;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use std::sync::{Arc, Mutex};
-use std::collections::HashMap;
+use crate::entities::Email;
 use crate::logic::Logic;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
 use tokio::time::sleep;
 use uuid::Uuid;
-use crate::entities::Email;
 
 #[derive(Clone)]
 pub struct ImapServer {
@@ -67,7 +67,9 @@ impl ImapServer {
                     };
 
                     println!("expecting_message: {}", server_clone.expecting_message);
-                    let response = server_clone.process_imap_command(&buffer[..n], &sessions, &mut session_id, &mut socket).await;
+                    let response = server_clone
+                        .process_imap_command(&buffer[..n], &sessions, &mut session_id, &mut socket)
+                        .await;
                     println!("Response: {}", response);
                     if let Err(e) = socket.write_all(response.as_bytes()).await {
                         eprintln!("Failed to write to socket; err = {:?}", e);
@@ -98,13 +100,25 @@ impl ImapServer {
             // Traiter le contenu du message
             let (headers, body) = parse_email(&message_str);
             let to = headers.get("To").unwrap_or(&"unknown".to_string()).clone();
-            let from = headers.get("From").unwrap_or(&"unknown".to_string()).clone();
-            let subject = headers.get("Subject").unwrap_or(&"No Subject".to_string()).clone();
+            let from = headers
+                .get("From")
+                .unwrap_or(&"unknown".to_string())
+                .clone();
+            let subject = headers
+                .get("Subject")
+                .unwrap_or(&"No Subject".to_string())
+                .clone();
 
             if let Some(id) = session_id {
                 let username = sessions.lock().unwrap().get(id).cloned();
                 if let Some(user) = username {
-                    let message = Email::new(&String::from(uuid::Uuid::new_v4()), &from, &to, &subject, &body);
+                    let message = Email::new(
+                        &String::from(uuid::Uuid::new_v4()),
+                        &from,
+                        &to,
+                        &subject,
+                        &body,
+                    );
 
                     match self.logic.store_email(&user, &self.mailbox, &message).await {
                         Ok(_) => {
@@ -128,7 +142,11 @@ impl ImapServer {
 
             let tag = command_parts[0];
             let command_name = command_parts[1].to_uppercase();
-            println!("Command name: {}, Arguments: {:?}", command_name, &command_parts[2..]);
+            println!(
+                "Command name: {}, Arguments: {:?}",
+                command_name,
+                &command_parts[2..]
+            );
 
             match command_name.as_str() {
                 "APPEND" => {

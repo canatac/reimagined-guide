@@ -67,6 +67,12 @@ services:
       - SMTP_USERNAME=${SMTP_USERNAME}
       - SMTP_PASSWORD=${SMTP_PASSWORD}
       - RUST_LOG=${RUST_LOG}
+      - DKIM_SERVICE_URL=${DKIM_SERVICE_URL}
+      - SMTP_MONITORING_ENABLED=${SMTP_MONITORING_ENABLED:-true}
+      - SMTP_RELAY_HOST=${SMTP_RELAY_HOST}
+      - SMTP_RELAY_PORT=${SMTP_RELAY_PORT:-587}
+      - SMTP_RELAY_USER=${SMTP_RELAY_USER}
+      - SMTP_RELAY_PASSWORD=${SMTP_RELAY_PASSWORD}
     command: ["email_api"]
     restart: unless-stopped
     depends_on:

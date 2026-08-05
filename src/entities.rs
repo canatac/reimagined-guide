@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use mongodb::bson;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct CalendarEvent {
