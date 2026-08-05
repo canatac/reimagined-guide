@@ -78,6 +78,11 @@ RUN openssl req -x509 -newkey rsa:2048 -nodes \
 USER default_user
 WORKDIR /app
 
+# TCP-based probe: avoids sending HTTP traffic to the SMTP port (which would
+# cause "500 Syntax error, command unrecognized" log noise).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD nc -z 127.0.0.1 8025 || exit 1
+
 ENV USE_MONGODB=false \
     SMTP_PLAIN_ADDR=0.0.0.0:8025 \
     SMTP_TLS_ADDR=0.0.0.0:8465 \

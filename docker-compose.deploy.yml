@@ -37,6 +37,14 @@ services:
       - USE_MONGODB=${USE_MONGODB:-true}
       - RUST_LOG=${RUST_LOG:-info}
     command: ["smtp_server"]
+    # Override the image's HTTP-based healthcheck (which sends HTTP traffic to the SMTP port).
+    # Use a TCP connect so the probe is protocol-agnostic.
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 8025 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
     networks:
       - mailnet
 

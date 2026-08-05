@@ -47,7 +47,7 @@ use std::io::BufReader;
 use uuid::Uuid;
 use webpki_roots::TLS_SERVER_ROOTS;
 const SMTP_PORTS: [u16; 3] = [25, 587, 465];
-const CONNECTION_TIMEOUT: Duration = Duration::from_secs(5);
+const CONNECTION_TIMEOUT: Duration = Duration::from_secs(3);
 use crate::entities::Email;
 use std::collections::HashMap;
 
@@ -89,6 +89,89 @@ async fn expect_code<T: AsyncReadExt + Unpin>(
     Ok(())
 }
 pub async fn send_outgoing_email(email: &Email) -> std::io::Result<()> {
+    if let Ok(relay_host) = env::var("SMTP_RELAY_HOST") {
+        return send_via_relay(email, &relay_host).await;
+    }
+    send_via_mx(email).await
+}
+
+async fn send_via_relay(email: &Email, relay_host: &str) -> std::io::Result<()> {
+    use base64::{engine::general_purpose, Engine as _};
+
+    let relay_port: u16 = env::var("SMTP_RELAY_PORT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(587);
+    let relay_user = env::var("SMTP_RELAY_USER").unwrap_or_default();
+    let relay_pass = env::var("SMTP_RELAY_PASSWORD").unwrap_or_default();
+
+    let mut email_content = format!(
+        "From: {}\r\nTo: {}\r\nSubject: {}\r\n",
+        email.from, email.to, email.subject
+    );
+    for (key, value) in &email.headers {
+        email_content.push_str(&format!("{}: {}\r\n", key, value));
+    }
+    email_content.push_str(&format!("\r\n{}", email.body));
+
+    let ehlo_hostname = env::var("SMTP_HOSTNAME")
+        .or_else(|_| env::var("DOMAIN_NAME"))
+        .unwrap_or_else(|_| "misfits.ai".to_string());
+
+    let mut stream = timeout(
+        Duration::from_secs(10),
+        TcpStream::connect((relay_host, relay_port)),
+    )
+    .await
+    .map_err(|_| IoError::new(ErrorKind::TimedOut, "Relay connection timed out"))?
+    .map_err(|e| IoError::new(e.kind(), format!("Relay connect failed: {}", e)))?;
+
+    expect_code(&mut stream, "220").await?;
+    stream.write_all(format!("EHLO {}\r\n", ehlo_hostname).as_bytes()).await?;
+    expect_code(&mut stream, "250").await?;
+
+    // STARTTLS on port 587; skip on 465 (implicit TLS not yet supported for relay)
+    let mut stream_type = if relay_port != 465 {
+        stream.write_all(b"STARTTLS\r\n").await?;
+        expect_code(&mut stream, "220").await?;
+
+        let mut root_store = RootCertStore::empty();
+        for cert in load_native_certs().certs {
+            root_store.add_parsable_certificates([cert]);
+        }
+        root_store.add_parsable_certificates(
+            TLS_SERVER_ROOTS.iter().map(|ta| ta.subject.to_vec().into()),
+        );
+        let config = ClientConfig::builder()
+            .with_root_certificates(root_store)
+            .with_no_client_auth();
+        let connector = TlsConnector::from(Arc::new(config));
+        let server_name = ServerName::try_from(relay_host.to_string())
+            .map_err(|_| IoError::new(ErrorKind::InvalidInput, "Invalid relay hostname"))?;
+        let tls_stream = connector.connect(server_name, stream).await?;
+        let mut s = tls_stream;
+        s.write_all(format!("EHLO {}\r\n", ehlo_hostname).as_bytes()).await?;
+        expect_code(&mut s, "250").await?;
+        StreamType::Tls(s)
+    } else {
+        StreamType::Plain(stream)
+    };
+
+    // AUTH PLAIN: base64("\0user\0password")
+    if !relay_user.is_empty() {
+        let cred = general_purpose::STANDARD
+            .encode(format!("\0{}\0{}", relay_user, relay_pass));
+        let auth_cmd = format!("AUTH PLAIN {}\r\n", cred);
+        match &mut stream_type {
+            StreamType::Plain(ref mut s) => { s.write_all(auth_cmd.as_bytes()).await?; expect_code(s, "235").await?; }
+            StreamType::Tls(ref mut s)   => { s.write_all(auth_cmd.as_bytes()).await?; expect_code(s, "235").await?; }
+        }
+    }
+
+    send_email_content(&mut stream_type, &email_content).await
+}
+
+async fn send_via_mx(email: &Email) -> std::io::Result<()> {
     let t_total = Instant::now();
     let mon = crate::monitoring::monitoring_enabled();
 
@@ -277,45 +360,80 @@ pub async fn send_outgoing_email(email: &Email) -> std::io::Result<()> {
 
     println!("Connected successfully");
 
-    expect_code(&mut stream, "220").await?;
-    let ehlo_hostname = std::env::var("SMTP_HOSTNAME")
-        .or_else(|_| std::env::var("DOMAIN_NAME"))
-        .unwrap_or_else(|_| "misfits.ai".to_string());
-    stream.write_all(format!("EHLO {}\r\n", ehlo_hostname).as_bytes()).await?;
-    expect_code(&mut stream, "250").await?;
-
-    // --- STARTTLS / TLS handshake ---
-    let t_tls = Instant::now();
-    let mut stream_type = if smtp_port != 465 {
-        let smtp_server_clone = smtp_server.clone();
-        stream.write_all(b"STARTTLS\r\n").await?;
+    // Wrap all pre-send SMTP steps so errors still emit a Bounced monitoring event.
+    let handshake_result: std::io::Result<(StreamType, u64, String)> = async {
         expect_code(&mut stream, "220").await?;
+        let ehlo_hostname = std::env::var("SMTP_HOSTNAME")
+            .or_else(|_| std::env::var("DOMAIN_NAME"))
+            .unwrap_or_else(|_| "misfits.ai".to_string());
+        stream.write_all(format!("EHLO {}\r\n", ehlo_hostname).as_bytes()).await?;
+        expect_code(&mut stream, "250").await?;
 
-        let mut root_store = RootCertStore::empty();
-        for cert in load_native_certs().certs {
-            root_store.add_parsable_certificates([cert]);
+        // --- STARTTLS / TLS handshake ---
+        let t_tls = Instant::now();
+        let mut stream_type = if smtp_port != 465 {
+            let smtp_server_clone = smtp_server.clone();
+            stream.write_all(b"STARTTLS\r\n").await?;
+            expect_code(&mut stream, "220").await?;
+
+            let mut root_store = RootCertStore::empty();
+            for cert in load_native_certs().certs {
+                root_store.add_parsable_certificates([cert]);
+            }
+            root_store.add_parsable_certificates(
+                TLS_SERVER_ROOTS.iter().map(|ta| ta.subject.to_vec().into()),
+            );
+            let config = ClientConfig::builder()
+                .with_root_certificates(root_store)
+                .with_no_client_auth();
+            let connector = TlsConnector::from(Arc::new(config));
+            let server_name = ServerName::try_from(smtp_server_clone)
+                .map_err(|_| IoError::new(ErrorKind::InvalidInput, "Invalid server name"))?;
+            let tls_stream = connector.connect(server_name, stream).await?;
+            let mut s = tls_stream;
+            s.write_all(format!("EHLO {}\r\n", ehlo_hostname).as_bytes()).await?;
+            expect_code(&mut s, "250").await?;
+            StreamType::Tls(s)
+        } else {
+            StreamType::Plain(stream)
+        };
+        let tls_ms = t_tls.elapsed().as_millis() as u64;
+
+        if smtp_port == 465 {
+            match &mut stream_type {
+                StreamType::Plain(ref mut s) => {
+                    s.write_all(format!("EHLO {}\r\n", ehlo_hostname).as_bytes()).await?;
+                    expect_code(s, "250").await?;
+                }
+                StreamType::Tls(_) => {}
+            }
         }
-        let fullchain_path = env::var("FULLCHAIN_PATH").expect("FULLCHAIN_PATH must be set");
-        let mut fullchain_file = BufReader::new(File::open(fullchain_path)?);
-        let certs = rustls_pemfile::certs(&mut fullchain_file);
-        for cert in certs {
-            root_store.add_parsable_certificates(cert);
+
+        Ok((stream_type, tls_ms, ehlo_hostname))
+    }.await;
+
+    let (mut stream_type, tls_ms, _ehlo_hostname) = match handshake_result {
+        Ok(v) => v,
+        Err(e) => {
+            if mon {
+                let mut ev = crate::monitoring::SmtpEvent::new(
+                    &message_id,
+                    crate::monitoring::SmtpEventType::Bounced,
+                    &email.from,
+                    &email.to,
+                );
+                ev.correlation_id = correlation_id.clone();
+                ev.mx_host = Some(smtp_server.clone());
+                ev.remote_ip = Some(remote_ip.clone());
+                ev.total_ms = Some(t_total.elapsed().as_millis() as u64);
+                ev.status = crate::monitoring::SmtpStatus::Failed;
+                ev.bounce_type = Some(crate::monitoring::BounceType::Soft);
+                ev.bounce_reason = Some(format!("TLS/SMTP handshake failed: {}", e));
+                crate::monitoring::emit(ev);
+            }
+            return Err(e);
         }
-        root_store.add_parsable_certificates(
-            TLS_SERVER_ROOTS.iter().map(|ta| ta.subject.to_vec().into()),
-        );
-        let config = ClientConfig::builder()
-            .with_root_certificates(root_store)
-            .with_no_client_auth();
-        let connector = TlsConnector::from(Arc::new(config));
-        let server_name = ServerName::try_from(smtp_server_clone)
-            .map_err(|_| IoError::new(ErrorKind::InvalidInput, "Invalid server name"))?;
-        let tls_stream = connector.connect(server_name, stream).await?;
-        StreamType::Tls(tls_stream)
-    } else {
-        StreamType::Plain(stream)
     };
-    let tls_ms = t_tls.elapsed().as_millis() as u64;
 
     if mon {
         let mut ev = crate::monitoring::SmtpEvent::new(
@@ -329,17 +447,6 @@ pub async fn send_outgoing_email(email: &Email) -> std::io::Result<()> {
         ev.remote_ip = Some(remote_ip.clone());
         ev.tls_ms = Some(tls_ms);
         crate::monitoring::emit(ev);
-    }
-
-    match &mut stream_type {
-        StreamType::Plain(ref mut s) => {
-            s.write_all(format!("EHLO {}\r\n", ehlo_hostname).as_bytes()).await?;
-            expect_code(s, "250").await?;
-        }
-        StreamType::Tls(ref mut s) => {
-            s.write_all(format!("EHLO {}\r\n", ehlo_hostname).as_bytes()).await?;
-            expect_code(s, "250").await?;
-        }
     }
 
     let result = send_email_content(&mut stream_type, &email_content).await;

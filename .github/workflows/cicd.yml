@@ -346,6 +346,14 @@ jobs:
 
             sudo -E docker compose -f /home/debian/docker-compose.deploy.yml --env-file /home/debian/.env.deploy up -d --force-recreate --remove-orphans
 
+            # Re-apply cert permissions after services start: Caddy may have re-issued
+            # the certificate between the initial chmod and container startup, which
+            # would reset the key file to 0600 root:root (unreadable by UID 10001).
+            sleep 8
+            sudo chmod -R o+rX "${CADDY_DATA_HOST}/caddy"
+            sudo docker restart smtp-server email-api
+            echo "Re-applied cert permissions and restarted cert-reading services."
+
             # Wait for misfits-web, then hot-patch baked Next rewrites if still
             # pointing at imap-server:8080 (old image). BACKEND_URL env is not
             # enough — rewrites are baked into server.js / routes-manifest.
@@ -383,7 +391,7 @@ jobs:
             sudo ls -la "${LIVE}/live/" 2>/dev/null || echo "live/ dir not found"
             echo "=== symlink targets + permissions ==="
             for f in "${LIVE}/live/"*.crt "${LIVE}/live/"*.key; do
-              [ -e "$f" ] || continue
+              sudo test -e "$f" || continue
               TARGET=$(sudo readlink -f "$f" 2>/dev/null || echo "broken")
               PERMS=$(sudo stat -c '%a %U:%G %n' "$TARGET" 2>/dev/null || echo "stat failed")
               echo "  $f -> $TARGET  [$PERMS]"
