@@ -1106,6 +1106,10 @@ struct HermesChatProxyRequest {
     #[serde(default)]
     user_id: Option<String>,
     #[serde(default)]
+    session_id: Option<String>,
+    #[serde(default)]
+    session_key: Option<String>,
+    #[serde(default)]
     temperature: Option<f32>,
     #[serde(default)]
     max_tokens: Option<u32>,
@@ -1151,6 +1155,18 @@ async fn api_hermes_chat(
         .filter(|s| !s.trim().is_empty())
         .unwrap_or(fallback_user_id);
 
+    let session_id = body
+        .session_id
+        .clone()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| format!("mail-thread-{}", thread_id));
+
+    let session_key = body
+        .session_key
+        .clone()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| format!("user-{}", user_id));
+
     let mut payload = serde_json::json!({
         "model": model,
         "messages": body.messages,
@@ -1167,8 +1183,8 @@ async fn api_hermes_chat(
     let response = match client
         .post(url)
         .bearer_auth(api_key)
-        .header("X-Hermes-Session-Id", format!("mail-thread-{}", thread_id))
-        .header("X-Hermes-Session-Key", format!("user-{}", user_id))
+        .header("X-Hermes-Session-Id", session_id)
+        .header("X-Hermes-Session-Key", session_key)
         .json(&payload)
         .send()
         .await
@@ -1665,6 +1681,25 @@ mod tests {
 
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), actix_web::http::StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn test_hermes_chat_request_accepts_explicit_session_overrides() {
+        let parsed: HermesChatProxyRequest = serde_json::from_value(serde_json::json!({
+            "messages": [{"role":"user","content":"hello"}],
+            "threadId": "thread-123",
+            "userId": "admin",
+            "sessionId": "mail-thread-explicit",
+            "sessionKey": "user-explicit",
+            "maxTokens": 1200
+        }))
+        .expect("HermesChatProxyRequest should deserialize");
+
+        assert_eq!(parsed.thread_id.as_deref(), Some("thread-123"));
+        assert_eq!(parsed.user_id.as_deref(), Some("admin"));
+        assert_eq!(parsed.session_id.as_deref(), Some("mail-thread-explicit"));
+        assert_eq!(parsed.session_key.as_deref(), Some("user-explicit"));
+        assert_eq!(parsed.max_tokens, Some(1200));
     }
 }
 

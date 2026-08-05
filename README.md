@@ -18,7 +18,7 @@ This project implements **robust, secure, and efficient SMTP and IMAP servers** 
 - **Email storage** (MongoDB or local filesystem).
 - **DKIM signature handling** (optional).
 - **Environment variable configuration** (`.env.example` provided).
-- **Hermes chat gateway** (`POST /api/hermes/chat`) for secure server-to-server AI calls.
+- **Hermes chat gateway** (`POST /api/hermes/chat`) for secure server-to-server AI calls, including optional explicit `sessionId`/`sessionKey` overrides for cross-service thread continuity.
 
 ### 1.3 Technology Stack
 - **Rust** (2021 edition)
