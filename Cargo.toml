@@ -36,7 +36,7 @@ rustls = { version = "0.23.12", default-features = false, features = ["std", "aw
 webpki-roots = "1.0.9"
 trust-dns-resolver = "0.23.2"
 clap = "4.6.4"
-reqwest = { version = "0.13.4", features = ["json"] }
+reqwest = { version = "0.13.4", features = ["json", "stream"] }
 actix-cors = "0.7.0"
 bcrypt = "0.15"
 
