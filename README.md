@@ -18,7 +18,7 @@ This project implements **robust, secure, and efficient SMTP and IMAP servers** 
 - **Email storage** (MongoDB or local filesystem).
 - **DKIM signature handling** (optional).
 - **Environment variable configuration** (`.env.example` provided).
-- **Hermes gateway** (`POST /api/hermes/chat` and `POST /api/hermes/runs`) for secure server-to-server AI calls, including optional explicit `sessionId`/`sessionKey` overrides for cross-service thread continuity.
+- **Hermes gateway** (`POST /api/hermes/chat`, `POST /api/hermes/runs`, `GET /api/hermes/runs/{run_id}`, `GET /api/hermes/runs/{run_id}/events`) for secure server-to-server AI calls, including optional explicit `sessionId`/`sessionKey` overrides for cross-service thread continuity and SSE passthrough.
 
 ### 1.3 Technology Stack
 - **Rust** (2021 edition)
@@ -126,6 +126,7 @@ DKIM_SERVICE_URL=http://your-dkim-service:3000/sign
 
 # Hermes gateway (server-to-server)
 # Keep HERMES_BASE_URL on private VPC address only (no public 8642)
+# `/v1` suffix is accepted and normalized internally
 HERMES_BASE_URL=http://172.16.12.2:8642
 HERMES_API_KEY=your_hermes_api_key
 HERMES_MODEL=hermes-agent
