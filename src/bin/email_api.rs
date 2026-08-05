@@ -44,12 +44,12 @@ use serde::{Deserialize, Serialize};
 
 use chrono::Utc;
 use dotenv::dotenv;
+use futures_util::{stream, TryStreamExt};
 use mongodb::bson;
 use mongodb::bson::doc;
 use reqwest;
 use simple_smtp_server::entities::{CalendarEvent, Email};
 use simple_smtp_server::logic::Logic;
-use futures_util::{stream, TryStreamExt};
 use simple_smtp_server::smtp_client::send_outgoing_email;
 use std::collections::HashMap;
 use std::env;
@@ -232,15 +232,13 @@ async fn api_events(
             Err(e) => HttpResponse::InternalServerError()
                 .json(serde_json::json!({ "error": e.to_string() })),
         },
-        Err(e) => HttpResponse::InternalServerError()
-            .json(serde_json::json!({ "error": e.to_string() })),
+        Err(e) => {
+            HttpResponse::InternalServerError().json(serde_json::json!({ "error": e.to_string() }))
+        }
     }
 }
 
-async fn api_events_stream(
-    bus: web::Data<EventBus>,
-    req: actix_web::HttpRequest,
-) -> HttpResponse {
+async fn api_events_stream(bus: web::Data<EventBus>, req: actix_web::HttpRequest) -> HttpResponse {
     let user_id = resolve_user_id(&req);
     let rx = bus.subscribe();
     let event_stream = stream::unfold((rx, user_id), |(mut rx, uid)| async move {
@@ -322,8 +320,12 @@ struct MonitoringEventsQuery {
     #[serde(default = "default_mon_page_size")]
     page_size: u32,
 }
-fn default_mon_page() -> u32 { 1 }
-fn default_mon_page_size() -> u32 { 50 }
+fn default_mon_page() -> u32 {
+    1
+}
+fn default_mon_page_size() -> u32 {
+    50
+}
 
 #[derive(Deserialize)]
 struct MonitoringLiveQuery {
@@ -355,24 +357,45 @@ async fn api_monitoring_summary(
         let status = doc.get_str("_id").unwrap_or("unknown").to_string();
         let count = doc.get_i64("count").unwrap_or(0) as u64;
         let avg_ms = doc.get_f64("avg_ms").unwrap_or(0.0);
-        if status == "delivered" { total_delivered = count; }
-        if status == "bounced" { total_bounced = count; }
+        if status == "delivered" {
+            total_delivered = count;
+        }
+        if status == "bounced" {
+            total_bounced = count;
+        }
         avg_total_ms_sum += avg_ms * count as f64;
         avg_count += count as u32;
         by_status.insert(status, serde_json::json!(count));
     }
 
-    let delivery_rate = if total > 0 { total_delivered as f64 / total as f64 } else { 0.0 };
-    let bounce_rate = if total > 0 { total_bounced as f64 / total as f64 } else { 0.0 };
-    let avg_total_ms = if avg_count > 0 { avg_total_ms_sum / avg_count as f64 } else { 0.0 };
+    let delivery_rate = if total > 0 {
+        total_delivered as f64 / total as f64
+    } else {
+        0.0
+    };
+    let bounce_rate = if total > 0 {
+        total_bounced as f64 / total as f64
+    } else {
+        0.0
+    };
+    let avg_total_ms = if avg_count > 0 {
+        avg_total_ms_sum / avg_count as f64
+    } else {
+        0.0
+    };
     let p95 = storage::p95_total_ms(&mongo, base_filter.clone(), 1000).await;
 
     // Average risk score
-    let risk_docs = storage::aggregate(&mongo, vec![
-        doc! { "$match": base_filter.clone() },
-        doc! { "$group": { "_id": null, "avg_risk": { "$avg": "$risk_score" } } },
-    ]).await;
-    let avg_risk = risk_docs.first()
+    let risk_docs = storage::aggregate(
+        &mongo,
+        vec![
+            doc! { "$match": base_filter.clone() },
+            doc! { "$group": { "_id": null, "avg_risk": { "$avg": "$risk_score" } } },
+        ],
+    )
+    .await;
+    let avg_risk = risk_docs
+        .first()
         .and_then(|d| d.get_f64("avg_risk").ok())
         .unwrap_or(0.0);
 
@@ -396,17 +419,35 @@ async fn api_monitoring_events(
 ) -> impl Responder {
     let mut filter = doc! {};
 
-    if let Some(ref s) = query.status { filter.insert("status", s); }
-    if let Some(ref f) = query.from   { filter.insert("from", doc! { "$regex": f.as_str(), "$options": "i" }); }
-    if let Some(ref t) = query.to     { filter.insert("to", doc! { "$regex": t.as_str(), "$options": "i" }); }
-    if let Some(ref p) = query.provider { filter.insert("company", doc! { "$regex": p.as_str(), "$options": "i" }); }
-    if let Some(ref c) = query.country { filter.insert("country", c); }
-    if let Some(ref m) = query.message_id { filter.insert("message_id", m); }
+    if let Some(ref s) = query.status {
+        filter.insert("status", s);
+    }
+    if let Some(ref f) = query.from {
+        filter.insert("from", doc! { "$regex": f.as_str(), "$options": "i" });
+    }
+    if let Some(ref t) = query.to {
+        filter.insert("to", doc! { "$regex": t.as_str(), "$options": "i" });
+    }
+    if let Some(ref p) = query.provider {
+        filter.insert("company", doc! { "$regex": p.as_str(), "$options": "i" });
+    }
+    if let Some(ref c) = query.country {
+        filter.insert("country", c);
+    }
+    if let Some(ref m) = query.message_id {
+        filter.insert("message_id", m);
+    }
 
     let mut ts_filter = doc! {};
-    if let Some(ref s) = query.since { ts_filter.insert("$gte", s); }
-    if let Some(ref u) = query.until { ts_filter.insert("$lte", u); }
-    if !ts_filter.is_empty() { filter.insert("ts", ts_filter); }
+    if let Some(ref s) = query.since {
+        ts_filter.insert("$gte", s);
+    }
+    if let Some(ref u) = query.until {
+        ts_filter.insert("$lte", u);
+    }
+    if !ts_filter.is_empty() {
+        filter.insert("ts", ts_filter);
+    }
 
     let total = storage::count_events(&mongo, filter.clone()).await;
     let events = storage::query_events(&mongo, filter, query.page, query.page_size).await;
@@ -436,7 +477,10 @@ async fn api_monitoring_trace(
         return HttpResponse::NotFound().json(serde_json::json!({ "message": "Trace not found" }));
     }
 
-    let status = events.last().map(|e| format!("{:?}", e.status)).unwrap_or_default();
+    let status = events
+        .last()
+        .map(|e| format!("{:?}", e.status))
+        .unwrap_or_default();
     let total_ms = events.iter().filter_map(|e| e.total_ms).max();
 
     HttpResponse::Ok().json(serde_json::json!({
@@ -458,9 +502,18 @@ async fn api_monitoring_bounces(
     let events = storage::query_events(&mongo, filter.clone(), 1, 100).await;
     let total = storage::count_events(&mongo, filter).await;
 
-    let hard = events.iter().filter(|e| matches!(e.bounce_type, Some(monitoring::BounceType::Hard))).count();
-    let soft = events.iter().filter(|e| matches!(e.bounce_type, Some(monitoring::BounceType::Soft))).count();
-    let policy = events.iter().filter(|e| matches!(e.bounce_type, Some(monitoring::BounceType::Policy))).count();
+    let hard = events
+        .iter()
+        .filter(|e| matches!(e.bounce_type, Some(monitoring::BounceType::Hard)))
+        .count();
+    let soft = events
+        .iter()
+        .filter(|e| matches!(e.bounce_type, Some(monitoring::BounceType::Soft)))
+        .count();
+    let policy = events
+        .iter()
+        .filter(|e| matches!(e.bounce_type, Some(monitoring::BounceType::Policy)))
+        .count();
 
     HttpResponse::Ok().json(serde_json::json!({
         "window": query.window,
@@ -494,22 +547,31 @@ async fn api_monitoring_providers_top(
     ];
     let docs = storage::aggregate(&mongo, pipeline).await;
 
-    let providers: Vec<serde_json::Value> = docs.iter().map(|d| {
-        let id = d.get_document("_id").ok();
-        let company = id.and_then(|i| i.get_str("company").ok()).unwrap_or("unknown");
-        let datacenter = id.and_then(|i| i.get_str("datacenter").ok()).unwrap_or("unknown");
-        let country = id.and_then(|i| i.get_str("country").ok()).unwrap_or("unknown");
-        serde_json::json!({
-            "company":      company,
-            "datacenter":   datacenter,
-            "country":      country,
-            "count":        d.get_i64("count").unwrap_or(0),
-            "delivered":    d.get_i64("delivered").unwrap_or(0),
-            "bounced":      d.get_i64("bounced").unwrap_or(0),
-            "avg_total_ms": d.get_f64("avg_total_ms").unwrap_or(0.0).round(),
-            "avg_risk_score": d.get_f64("avg_risk").unwrap_or(0.0).round(),
+    let providers: Vec<serde_json::Value> = docs
+        .iter()
+        .map(|d| {
+            let id = d.get_document("_id").ok();
+            let company = id
+                .and_then(|i| i.get_str("company").ok())
+                .unwrap_or("unknown");
+            let datacenter = id
+                .and_then(|i| i.get_str("datacenter").ok())
+                .unwrap_or("unknown");
+            let country = id
+                .and_then(|i| i.get_str("country").ok())
+                .unwrap_or("unknown");
+            serde_json::json!({
+                "company":      company,
+                "datacenter":   datacenter,
+                "country":      country,
+                "count":        d.get_i64("count").unwrap_or(0),
+                "delivered":    d.get_i64("delivered").unwrap_or(0),
+                "bounced":      d.get_i64("bounced").unwrap_or(0),
+                "avg_total_ms": d.get_f64("avg_total_ms").unwrap_or(0.0).round(),
+                "avg_risk_score": d.get_f64("avg_risk").unwrap_or(0.0).round(),
+            })
         })
-    }).collect();
+        .collect();
 
     HttpResponse::Ok().json(serde_json::json!({
         "window": query.window,
@@ -531,7 +593,11 @@ async fn api_monitoring_live(query: web::Query<MonitoringLiveQuery>) -> HttpResp
     };
 
     let event_stream = stream::unfold(
-        (rx, filter_mid, tokio::time::interval(std::time::Duration::from_secs(15))),
+        (
+            rx,
+            filter_mid,
+            tokio::time::interval(std::time::Duration::from_secs(15)),
+        ),
         |(mut rx, mid, mut hb)| async move {
             loop {
                 tokio::select! {
@@ -614,8 +680,12 @@ struct SecurityIncidentsQuery {
     severity: Option<String>,
 }
 
-fn one() -> u32 { 1 }
-fn twenty() -> u32 { 20 }
+fn one() -> u32 {
+    1
+}
+fn twenty() -> u32 {
+    20
+}
 
 async fn api_security_alerts_active(
     query: web::Query<SecurityAlertsQuery>,
@@ -686,7 +756,9 @@ async fn api_security_tenant_status(
             "tenant_id": tenant_id,
             "state": null,
         })),
-        Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({ "error": e.to_string() })),
+        Err(e) => {
+            HttpResponse::InternalServerError().json(serde_json::json!({ "error": e.to_string() }))
+        }
     }
 }
 
@@ -697,7 +769,8 @@ async fn api_security_rollback(
     use simple_smtp_server::security::remediation;
     let alert_id = path.into_inner();
     match remediation::rollback_remediation(&mongo, &alert_id).await {
-        Ok(()) => HttpResponse::Ok().json(serde_json::json!({ "rolled_back": true, "alert_id": alert_id })),
+        Ok(()) => HttpResponse::Ok()
+            .json(serde_json::json!({ "rolled_back": true, "alert_id": alert_id })),
         Err(e) => HttpResponse::BadRequest().json(serde_json::json!({ "error": e })),
     }
 }
@@ -713,7 +786,11 @@ async fn api_security_live(mongo: web::Data<Arc<mongodb::Client>>) -> impl Respo
     };
 
     let stream = stream::unfold(
-        (rx, tokio::time::interval(Duration::from_secs(15)), mongo.clone()),
+        (
+            rx,
+            tokio::time::interval(Duration::from_secs(15)),
+            mongo.clone(),
+        ),
         |(mut rx, mut hb, mongo)| async move {
             tokio::select! {
                 Ok(alert) = rx.recv() => {
@@ -1020,7 +1097,10 @@ async fn auth_login(
             // Emit auth failure event for brute-force detection
             let ip = req_ip_str(&req_http);
             let ev = simple_smtp_server::security::AuthEvent::new(
-                simple_smtp_server::security::AuthEventKind::ApiLogin, &ip, false);
+                simple_smtp_server::security::AuthEventKind::ApiLogin,
+                &ip,
+                false,
+            );
             let mc = mongo.clone();
             tokio::spawn(async move {
                 simple_smtp_server::security::log_auth_event(&mc, ev).await;
@@ -1115,7 +1195,10 @@ async fn auth_register(
         }
     };
 
-    match logic.create_user(&primary_email, &password_hash, "inbox").await {
+    match logic
+        .create_user(&primary_email, &password_hash, "inbox")
+        .await
+    {
         Ok(_) => {}
         Err(e) => {
             let msg = e.to_string();
@@ -1139,15 +1222,19 @@ async fn auth_register(
     // Créer l'alias → primary si fourni
     if let Some(ref alias) = alias_email {
         if let Err(e) = logic.create_alias(alias, &primary_email).await {
-            eprintln!("Alias creation error ({} → {}): {}", alias, primary_email, e);
+            eprintln!(
+                "Alias creation error ({} → {}): {}",
+                alias, primary_email, e
+            );
             // Non bloquant : le compte est créé, l'alias sera à recréer
         }
     }
 
     // Email de bienvenue déposé directement dans l'inbox
-    let alias_line = alias_email.as_deref().map(|a| {
-        format!("\n• Alias : {} (redirige vers votre boîte principale)", a)
-    }).unwrap_or_default();
+    let alias_line = alias_email
+        .as_deref()
+        .map(|a| format!("\n• Alias : {} (redirige vers votre boîte principale)", a))
+        .unwrap_or_default();
     let welcome_body = format!(
         "Bonjour {} 👋\n\nBienvenue sur Misfits Mail !\n\nVotre adresse mail est prête :\n• Adresse principale : {}{}\n\nVous pouvez dès maintenant envoyer et recevoir des emails.\n\nL'équipe Misfits",
         display_name, primary_email, alias_line
@@ -1301,8 +1388,8 @@ async fn auth_oauth_callback(
     let _state = query.state.clone().unwrap_or_default();
     let callback_base = env::var("OAUTH_CALLBACK_BASE_URL")
         .unwrap_or_else(|_| "https://mail.misfits.ai".to_string());
-    let frontend_base = env::var("FRONTEND_BASE_URL")
-        .unwrap_or_else(|_| "https://mail.misfits.ai".to_string());
+    let frontend_base =
+        env::var("FRONTEND_BASE_URL").unwrap_or_else(|_| "https://mail.misfits.ai".to_string());
 
     let http_client = reqwest::Client::builder()
         .user_agent("misfits-email-api/1.0")
@@ -1341,8 +1428,11 @@ async fn auth_oauth_callback(
                 Ok(r) => match r.json::<GithubTokenResponse>().await {
                     Ok(t) => {
                         if let Some(err) = &t.error {
-                            eprintln!("GitHub OAuth error: {} — {}", err,
-                                t.error_description.as_deref().unwrap_or(""));
+                            eprintln!(
+                                "GitHub OAuth error: {} — {}",
+                                err,
+                                t.error_description.as_deref().unwrap_or("")
+                            );
                             return HttpResponse::Unauthorized().json(serde_json::json!({
                                 "message": "OAuth authentication failed."
                             }));
@@ -1356,7 +1446,7 @@ async fn auth_oauth_callback(
                                 }));
                             }
                         }
-                    },
+                    }
                     Err(e) => {
                         eprintln!("GitHub OAuth token parse error: {}", e);
                         return HttpResponse::Unauthorized().json(serde_json::json!({
@@ -1422,9 +1512,7 @@ async fn auth_oauth_callback(
                             .into_iter()
                             .find(|e| e.primary && e.verified)
                             .map(|e| e.email)
-                            .unwrap_or_else(|| {
-                                format!("github+{}@misfits.ai", subject)
-                            }),
+                            .unwrap_or_else(|| format!("github+{}@misfits.ai", subject)),
                         Err(_) => format!("github+{}@misfits.ai", subject),
                     },
                     Err(_) => format!("github+{}@misfits.ai", subject),
@@ -1481,10 +1569,13 @@ async fn auth_oauth_callback(
     HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
         // mfa_session cookie matches what the backend sets on normal login
-        .insert_header(("Set-Cookie", format!(
-            "mfa_session={}; Path=/; HttpOnly; Secure; SameSite=Lax",
-            access_token
-        )))
+        .insert_header((
+            "Set-Cookie",
+            format!(
+                "mfa_session={}; Path=/; HttpOnly; Secure; SameSite=Lax",
+                access_token
+            ),
+        ))
         .body(html)
 }
 
@@ -2239,6 +2330,21 @@ struct HermesRunsProxyRequest {
     session_key: Option<String>,
 }
 
+fn normalize_hermes_base_url(raw: &str) -> String {
+    let trimmed = raw.trim().trim_end_matches('/');
+    if let Some(without_v1) = trimmed.strip_suffix("/v1") {
+        without_v1.to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn resolve_hermes_base_url() -> String {
+    let base =
+        env::var("HERMES_BASE_URL").unwrap_or_else(|_| "http://172.16.12.2:8642".to_string());
+    normalize_hermes_base_url(&base)
+}
+
 async fn api_hermes_chat(
     req: HttpRequest,
     body: web::Json<HermesChatProxyRequest>,
@@ -2249,8 +2355,7 @@ async fn api_hermes_chat(
         }));
     }
 
-    let base =
-        env::var("HERMES_BASE_URL").unwrap_or_else(|_| "http://172.16.12.2:8642".to_string());
+    let base = resolve_hermes_base_url();
     let api_key = match env::var("HERMES_API_KEY") {
         Ok(v) if !v.trim().is_empty() => v,
         _ => {
@@ -2260,7 +2365,7 @@ async fn api_hermes_chat(
         }
     };
 
-    let url = format!("{}/v1/chat/completions", base.trim_end_matches('/'));
+    let url = format!("{}/v1/chat/completions", base);
     let model = body
         .model
         .clone()
@@ -2353,8 +2458,7 @@ async fn api_hermes_runs(
         }
     };
 
-    let base =
-        env::var("HERMES_BASE_URL").unwrap_or_else(|_| "http://172.16.12.2:8642".to_string());
+    let base = resolve_hermes_base_url();
     let api_key = match env::var("HERMES_API_KEY") {
         Ok(v) if !v.trim().is_empty() => v,
         _ => {
@@ -2364,7 +2468,7 @@ async fn api_hermes_runs(
         }
     };
 
-    let url = format!("{}/v1/runs", base.trim_end_matches('/'));
+    let url = format!("{}/v1/runs", base);
     let model = body
         .model
         .clone()
@@ -2435,6 +2539,122 @@ async fn api_hermes_runs(
             .unwrap_or(actix_web::http::StatusCode::BAD_GATEWAY),
     )
     .json(body_json)
+}
+
+#[derive(Deserialize)]
+struct HermesRunPath {
+    run_id: String,
+}
+
+async fn api_hermes_run_status(path: web::Path<HermesRunPath>) -> impl Responder {
+    let base = resolve_hermes_base_url();
+    let api_key = match env::var("HERMES_API_KEY") {
+        Ok(v) if !v.trim().is_empty() => v,
+        _ => {
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": "HERMES_API_KEY is not configured"
+            }))
+        }
+    };
+
+    let url = format!("{}/v1/runs/{}", base, path.run_id);
+    let client = reqwest::Client::new();
+    let response = match client.get(url).bearer_auth(api_key).send().await {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Hermes upstream request error: {}", e);
+            return HttpResponse::BadGateway().json(serde_json::json!({
+                "error": "Hermes upstream unavailable"
+            }));
+        }
+    };
+
+    let status = response.status();
+    let body_json = match response.json::<serde_json::Value>().await {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("Hermes upstream JSON parse error: {}", e);
+            return HttpResponse::BadGateway().json(serde_json::json!({
+                "error": "Invalid Hermes upstream response"
+            }));
+        }
+    };
+
+    HttpResponse::build(
+        actix_web::http::StatusCode::from_u16(status.as_u16())
+            .unwrap_or(actix_web::http::StatusCode::BAD_GATEWAY),
+    )
+    .json(body_json)
+}
+
+async fn api_hermes_run_events(path: web::Path<HermesRunPath>, req: HttpRequest) -> impl Responder {
+    let base = resolve_hermes_base_url();
+    let api_key = match env::var("HERMES_API_KEY") {
+        Ok(v) if !v.trim().is_empty() => v,
+        _ => {
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": "HERMES_API_KEY is not configured"
+            }))
+        }
+    };
+
+    let query_suffix = req
+        .uri()
+        .query()
+        .filter(|q| !q.is_empty())
+        .map(|q| format!("?{}", q))
+        .unwrap_or_default();
+    let url = format!("{}/v1/runs/{}/events{}", base, path.run_id, query_suffix);
+
+    let client = reqwest::Client::new();
+    let upstream = match client
+        .get(url)
+        .bearer_auth(api_key)
+        .header("Accept", "text/event-stream")
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Hermes upstream request error: {}", e);
+            return HttpResponse::BadGateway().json(serde_json::json!({
+                "error": "Hermes upstream unavailable"
+            }));
+        }
+    };
+
+    let status = upstream.status();
+    if !status.is_success() {
+        let body_json = match upstream.json::<serde_json::Value>().await {
+            Ok(v) => v,
+            Err(_) => serde_json::json!({ "error": "Hermes upstream error" }),
+        };
+        return HttpResponse::build(
+            actix_web::http::StatusCode::from_u16(status.as_u16())
+                .unwrap_or(actix_web::http::StatusCode::BAD_GATEWAY),
+        )
+        .json(body_json);
+    }
+
+    let content_type = upstream
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("text/event-stream")
+        .to_string();
+
+    let bytes_stream = upstream
+        .bytes_stream()
+        .map_err(actix_web::error::ErrorBadGateway);
+
+    HttpResponse::build(
+        actix_web::http::StatusCode::from_u16(status.as_u16())
+            .unwrap_or(actix_web::http::StatusCode::BAD_GATEWAY),
+    )
+    .content_type(content_type)
+    .insert_header(("Cache-Control", "no-cache"))
+    .insert_header(("X-Accel-Buffering", "no"))
+    .streaming(bytes_stream)
 }
 
 // --- Calendar types ---
@@ -2684,11 +2904,16 @@ async fn main() -> std::io::Result<()> {
     let mongo_app = env::var("MONGODB_APP_NAME").unwrap_or_else(|_| "mailserver".to_string());
 
     // If MONGODB_CLUSTER_URL is already a full URI (e.g. from 1Password), use it directly.
-    let client_uri = if mongo_cluster.starts_with("mongodb://") || mongo_cluster.starts_with("mongodb+srv://") {
+    let client_uri = if mongo_cluster.starts_with("mongodb://")
+        || mongo_cluster.starts_with("mongodb+srv://")
+    {
         let base = mongo_cluster.trim_end_matches('&').trim_end_matches('?');
         // Use ? or & depending on whether query params already exist
         let sep = if base.contains('?') { "&" } else { "?" };
-        format!("{}{}appName={}&serverSelectionTimeoutMS=5000", base, sep, mongo_app)
+        format!(
+            "{}{}appName={}&serverSelectionTimeoutMS=5000",
+            base, sep, mongo_app
+        )
     } else if mongo_cluster.contains(".mongodb.net") {
         format!("mongodb+srv://{}:{}@{}/?retryWrites=true&w=majority&appName={}&serverSelectionTimeoutMS=5000", mongo_user, mongo_pass, mongo_cluster, mongo_app)
     } else {
@@ -2815,6 +3040,14 @@ async fn main() -> std::io::Result<()> {
                 .route("/api/settings/ai", web::put().to(api_put_ai_settings))
                 .route("/api/hermes/chat", web::post().to(api_hermes_chat))
                 .route("/api/hermes/runs", web::post().to(api_hermes_runs))
+                .route(
+                    "/api/hermes/runs/{run_id}",
+                    web::get().to(api_hermes_run_status),
+                )
+                .route(
+                    "/api/hermes/runs/{run_id}/events",
+                    web::get().to(api_hermes_run_events),
+                )
                 .route("/api/send/undo", web::post().to(api_send))
                 .route("/api/send/schedule", web::post().to(api_send))
                 .route(
@@ -2843,19 +3076,49 @@ async fn main() -> std::io::Result<()> {
                 .route("/api/events", web::get().to(api_events))
                 .route("/api/events/stream", web::get().to(api_events_stream))
                 // SMTP monitoring
-                .route("/api/monitoring/summary", web::get().to(api_monitoring_summary))
-                .route("/api/monitoring/events", web::get().to(api_monitoring_events))
-                .route("/api/monitoring/messages/{message_id}/trace", web::get().to(api_monitoring_trace))
-                .route("/api/monitoring/bounces", web::get().to(api_monitoring_bounces))
-                .route("/api/monitoring/providers/top", web::get().to(api_monitoring_providers_top))
+                .route(
+                    "/api/monitoring/summary",
+                    web::get().to(api_monitoring_summary),
+                )
+                .route(
+                    "/api/monitoring/events",
+                    web::get().to(api_monitoring_events),
+                )
+                .route(
+                    "/api/monitoring/messages/{message_id}/trace",
+                    web::get().to(api_monitoring_trace),
+                )
+                .route(
+                    "/api/monitoring/bounces",
+                    web::get().to(api_monitoring_bounces),
+                )
+                .route(
+                    "/api/monitoring/providers/top",
+                    web::get().to(api_monitoring_providers_top),
+                )
                 .route("/api/monitoring/live", web::get().to(api_monitoring_live))
-                .route("/api/monitoring/alerts/active", web::get().to(api_monitoring_alerts_active))
+                .route(
+                    "/api/monitoring/alerts/active",
+                    web::get().to(api_monitoring_alerts_active),
+                )
                 // Security endpoints
-                .route("/api/security/alerts/active", web::get().to(api_security_alerts_active))
-                .route("/api/security/incidents", web::get().to(api_security_incidents))
+                .route(
+                    "/api/security/alerts/active",
+                    web::get().to(api_security_alerts_active),
+                )
+                .route(
+                    "/api/security/incidents",
+                    web::get().to(api_security_incidents),
+                )
                 .route("/api/security/live", web::get().to(api_security_live))
-                .route("/api/security/tenant/{id}/status", web::get().to(api_security_tenant_status))
-                .route("/api/security/remediation/{alert_id}/rollback", web::post().to(api_security_rollback))
+                .route(
+                    "/api/security/tenant/{id}/status",
+                    web::get().to(api_security_tenant_status),
+                )
+                .route(
+                    "/api/security/remediation/{alert_id}/rollback",
+                    web::post().to(api_security_rollback),
+                )
         })
         .bind(http_addr)
         .expect("Failed to bind HTTP on 8000")
@@ -3024,6 +3287,22 @@ mod tests {
         assert_eq!(parsed.session_key.as_deref(), Some("user-explicit"));
         assert_eq!(parsed.model.as_deref(), Some("hermes-agent"));
     }
+
+    #[test]
+    fn test_normalize_hermes_base_url_strips_v1_and_slashes() {
+        assert_eq!(
+            normalize_hermes_base_url("http://172.16.12.2:8642/v1/"),
+            "http://172.16.12.2:8642"
+        );
+        assert_eq!(
+            normalize_hermes_base_url("http://172.16.12.2:8642/v1"),
+            "http://172.16.12.2:8642"
+        );
+        assert_eq!(
+            normalize_hermes_base_url("http://172.16.12.2:8642"),
+            "http://172.16.12.2:8642"
+        );
+    }
 }
 
 #[async_trait::async_trait]
@@ -3036,8 +3315,9 @@ pub struct RealDkimService;
 #[async_trait::async_trait]
 impl DkimService for RealDkimService {
     async fn sign_email(&self, email: &EmailRequest) -> Result<serde_json::Value, std::io::Error> {
-        let dkim_service_url = env::var("DKIM_SERVICE_URL")
-            .map_err(|_| std::io::Error::new(std::io::ErrorKind::NotFound, "DKIM_SERVICE_URL not set"))?;
+        let dkim_service_url = env::var("DKIM_SERVICE_URL").map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::NotFound, "DKIM_SERVICE_URL not set")
+        })?;
         let client = reqwest::Client::new();
 
         let response = client
