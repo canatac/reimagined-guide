@@ -1330,6 +1330,133 @@ async fn api_hermes_runs(
     .json(body_json)
 }
 
+#[derive(Deserialize)]
+struct HermesRunPath {
+    run_id: String,
+}
+
+async fn api_hermes_run_status(path: web::Path<HermesRunPath>) -> impl Responder {
+    let run_id = path.into_inner().run_id;
+    if run_id.trim().is_empty() {
+        return HttpResponse::BadRequest().json(serde_json::json!({
+            "error": "runId is required"
+        }));
+    }
+
+    let base =
+        env::var("HERMES_BASE_URL").unwrap_or_else(|_| "http://172.16.12.2:8642".to_string());
+    let api_key = match env::var("HERMES_API_KEY") {
+        Ok(v) if !v.trim().is_empty() => v,
+        _ => {
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": "HERMES_API_KEY is not configured"
+            }))
+        }
+    };
+
+    let url = format!("{}/v1/runs/{}", base.trim_end_matches('/'), run_id);
+
+    let client = reqwest::Client::new();
+    let response = match client.get(url).bearer_auth(api_key).send().await {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Hermes upstream request error: {}", e);
+            return HttpResponse::BadGateway().json(serde_json::json!({
+                "error": "Hermes upstream unavailable"
+            }));
+        }
+    };
+
+    let status = response.status();
+    let body_json = match response.json::<serde_json::Value>().await {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("Hermes upstream JSON parse error: {}", e);
+            return HttpResponse::BadGateway().json(serde_json::json!({
+                "error": "Invalid Hermes upstream response"
+            }));
+        }
+    };
+
+    HttpResponse::build(
+        actix_web::http::StatusCode::from_u16(status.as_u16())
+            .unwrap_or(actix_web::http::StatusCode::BAD_GATEWAY),
+    )
+    .json(body_json)
+}
+
+async fn api_hermes_run_events(path: web::Path<HermesRunPath>, req: HttpRequest) -> impl Responder {
+    let run_id = path.into_inner().run_id;
+    if run_id.trim().is_empty() {
+        return HttpResponse::BadRequest().json(serde_json::json!({
+            "error": "runId is required"
+        }));
+    }
+
+    let base =
+        env::var("HERMES_BASE_URL").unwrap_or_else(|_| "http://172.16.12.2:8642".to_string());
+    let api_key = match env::var("HERMES_API_KEY") {
+        Ok(v) if !v.trim().is_empty() => v,
+        _ => {
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": "HERMES_API_KEY is not configured"
+            }))
+        }
+    };
+
+    let query = req.query_string();
+    let mut url = format!(
+        "{}/v1/runs/{}/events",
+        base.trim_end_matches('/'),
+        urlencoding::encode(&run_id)
+    );
+    if !query.trim().is_empty() {
+        url = format!("{}?{}", url, query);
+    }
+
+    let client = reqwest::Client::new();
+    let response = match client
+        .get(url)
+        .bearer_auth(api_key)
+        .header("Accept", "text/event-stream")
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Hermes upstream request error: {}", e);
+            return HttpResponse::BadGateway().json(serde_json::json!({
+                "error": "Hermes upstream unavailable"
+            }));
+        }
+    };
+
+    let status = response.status();
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("text/event-stream")
+        .to_string();
+
+    let body_bytes = match response.bytes().await {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("Hermes upstream body read error: {}", e);
+            return HttpResponse::BadGateway().json(serde_json::json!({
+                "error": "Invalid Hermes upstream response"
+            }));
+        }
+    };
+
+    HttpResponse::build(
+        actix_web::http::StatusCode::from_u16(status.as_u16())
+            .unwrap_or(actix_web::http::StatusCode::BAD_GATEWAY),
+    )
+    .content_type(content_type)
+    .body(body_bytes)
+}
+
 // --- Calendar types ---
 
 #[derive(Deserialize)]
@@ -1658,6 +1785,14 @@ async fn main() -> std::io::Result<()> {
                 .route("/api/settings/ai", web::put().to(api_put_ai_settings))
                 .route("/api/hermes/chat", web::post().to(api_hermes_chat))
                 .route("/api/hermes/runs", web::post().to(api_hermes_runs))
+                .route(
+                    "/api/hermes/runs/{run_id}",
+                    web::get().to(api_hermes_run_status),
+                )
+                .route(
+                    "/api/hermes/runs/{run_id}/events",
+                    web::get().to(api_hermes_run_events),
+                )
                 .route("/api/send/undo", web::post().to(api_send))
                 .route("/api/send/schedule", web::post().to(api_send))
                 .route(
@@ -1851,6 +1986,36 @@ mod tests {
         assert_eq!(parsed.session_id.as_deref(), Some("mail-thread-explicit"));
         assert_eq!(parsed.session_key.as_deref(), Some("user-explicit"));
         assert_eq!(parsed.model.as_deref(), Some("hermes-agent"));
+    }
+
+    #[actix_web::test]
+    async fn test_api_hermes_run_status_requires_run_id() {
+        let app = test::init_service(App::new().route(
+            "/api/hermes/runs/{run_id}",
+            web::get().to(api_hermes_run_status),
+        ))
+        .await;
+
+        let req = test::TestRequest::get()
+            .uri("/api/hermes/runs/%20")
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), actix_web::http::StatusCode::BAD_REQUEST);
+    }
+
+    #[actix_web::test]
+    async fn test_api_hermes_run_events_requires_run_id() {
+        let app = test::init_service(App::new().route(
+            "/api/hermes/runs/{run_id}/events",
+            web::get().to(api_hermes_run_events),
+        ))
+        .await;
+
+        let req = test::TestRequest::get()
+            .uri("/api/hermes/runs/%20/events")
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), actix_web::http::StatusCode::BAD_REQUEST);
     }
 }
 
