@@ -383,30 +383,32 @@ jobs:
           ssh -o StrictHostKeyChecking=no debian@${{ secrets.VM_IP }} bash << 'REMOTE'
             echo "=== smtp-server status ==="
             sudo docker inspect --format='{{.State.Status}} (restarts: {{.RestartCount}})' smtp-server 2>/dev/null || echo "container not found"
-            echo "=== cert paths from container env ==="
-            CERT_PATH=$(sudo docker inspect smtp-server --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | grep -E '^CERT_PATH=|^KEY_PATH=' || true)
-            echo "$CERT_PATH"
+            echo "=== cert paths from container config (pre-entrypoint values) ==="
+            sudo docker inspect smtp-server --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | grep -E '^CERT_PATH=|^KEY_PATH=' || true
             echo "=== symlinks in caddy live dir ==="
             LIVE=$(sudo docker inspect caddy --format '{{ range .Mounts }}{{ if eq .Destination "/data" }}{{ .Source }}{{ end }}{{ end }}' 2>/dev/null || true)
             sudo ls -la "${LIVE}/live/" 2>/dev/null || echo "live/ dir not found"
-            echo "=== symlink targets + permissions ==="
-            for f in "${LIVE}/live/"*.crt "${LIVE}/live/"*.key; do
-              sudo test -e "$f" || continue
+            echo "=== symlink targets + permissions (caddy host volume) ==="
+            sudo find "${LIVE}/live" -maxdepth 1 -type l 2>/dev/null | while read f; do
               TARGET=$(sudo readlink -f "$f" 2>/dev/null || echo "broken")
-              PERMS=$(sudo stat -c '%a %U:%G %n' "$TARGET" 2>/dev/null || echo "stat failed")
-              echo "  $f -> $TARGET  [$PERMS]"
+              PERMS=$(sudo stat -c '%a %U:%G' "$TARGET" 2>/dev/null || echo "stat-failed")
+              echo "  $(basename $f) -> $TARGET  [$PERMS]"
             done
-            echo "=== smtp-server container user ==="
-            sudo docker inspect smtp-server --format='User: {{.Config.User}}' 2>/dev/null || true
-            echo "=== test read from inside smtp-server ==="
-            CERT_ENV=$(sudo docker inspect smtp-server --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | grep '^CERT_PATH=' | cut -d= -f2-)
-            KEY_ENV=$(sudo docker inspect smtp-server --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | grep '^KEY_PATH=' | cut -d= -f2-)
-            sudo docker run --rm \
-              --volumes-from smtp-server \
-              --user 10001 \
-              debian:bookworm-slim \
-              sh -c "ls -la '$CERT_ENV' '$KEY_ENV' 2>&1; cat '$CERT_ENV' > /dev/null && echo 'cert readable' || echo 'cert NOT readable'; cat '$KEY_ENV' > /dev/null && echo 'key readable' || echo 'key NOT readable'" \
-              2>/dev/null || echo "read-test container failed"
+            echo "=== smtp-server: entrypoint cert copies in /tmp ==="
+            # The entrypoint (running as root) copies caddy certs to /tmp/smtp-certs/
+            # and chowns them to UID 10001 before exec-ing gosu default_user smtp_server.
+            # NOTE: caddy certs are 0600 root:root BY DESIGN — they should NOT be
+            # world-readable. smtp_server reads its own /tmp copies instead.
+            sudo docker exec smtp-server sh -c '
+              if ls -la /tmp/smtp-certs/ 2>/dev/null; then
+                echo "entrypoint cert copy: OK"
+                cat /tmp/smtp-certs/server.crt > /dev/null 2>&1 && echo "server.crt readable by root" || echo "server.crt NOT readable"
+              else
+                echo "WARN: /tmp/smtp-certs absent — entrypoint may not have run"
+              fi
+            ' 2>/dev/null || echo "docker exec failed"
+            echo "=== smtp-server running process UID ==="
+            sudo docker exec smtp-server sh -c 'cat /proc/1/status 2>/dev/null | grep -E "^(Name|Uid):"' 2>/dev/null || true
             echo "=== smtp-server logs (last 20 lines) ==="
             sudo docker logs smtp-server --tail 20 2>&1 || echo "no logs available"
           REMOTE
