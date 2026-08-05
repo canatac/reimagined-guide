@@ -126,6 +126,7 @@ DKIM_SERVICE_URL=http://your-dkim-service:3000/sign
 
 # Hermes gateway (server-to-server)
 # Keep HERMES_BASE_URL on private VPC address only (no public 8642)
+# `/v1` suffix is accepted too (normalized internally to avoid /v1/v1)
 HERMES_BASE_URL=http://172.16.12.2:8642
 HERMES_API_KEY=your_hermes_api_key
 HERMES_MODEL=hermes-agent

@@ -1133,6 +1133,21 @@ struct HermesRunsProxyRequest {
     session_key: Option<String>,
 }
 
+fn normalize_hermes_base_url(raw: &str) -> String {
+    let trimmed = raw.trim().trim_end_matches('/');
+    if let Some(without_v1) = trimmed.strip_suffix("/v1") {
+        without_v1.to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn resolve_hermes_base_url() -> String {
+    let base =
+        env::var("HERMES_BASE_URL").unwrap_or_else(|_| "http://172.16.12.2:8642".to_string());
+    normalize_hermes_base_url(&base)
+}
+
 async fn api_hermes_chat(
     req: HttpRequest,
     body: web::Json<HermesChatProxyRequest>,
@@ -1143,8 +1158,7 @@ async fn api_hermes_chat(
         }));
     }
 
-    let base =
-        env::var("HERMES_BASE_URL").unwrap_or_else(|_| "http://172.16.12.2:8642".to_string());
+    let base = resolve_hermes_base_url();
     let api_key = match env::var("HERMES_API_KEY") {
         Ok(v) if !v.trim().is_empty() => v,
         _ => {
@@ -1154,7 +1168,7 @@ async fn api_hermes_chat(
         }
     };
 
-    let url = format!("{}/v1/chat/completions", base.trim_end_matches('/'));
+    let url = format!("{}/v1/chat/completions", base);
     let model = body
         .model
         .clone()
@@ -1247,8 +1261,7 @@ async fn api_hermes_runs(
         }
     };
 
-    let base =
-        env::var("HERMES_BASE_URL").unwrap_or_else(|_| "http://172.16.12.2:8642".to_string());
+    let base = resolve_hermes_base_url();
     let api_key = match env::var("HERMES_API_KEY") {
         Ok(v) if !v.trim().is_empty() => v,
         _ => {
@@ -1258,7 +1271,7 @@ async fn api_hermes_runs(
         }
     };
 
-    let url = format!("{}/v1/runs", base.trim_end_matches('/'));
+    let url = format!("{}/v1/runs", base);
     let model = body
         .model
         .clone()
@@ -1344,8 +1357,7 @@ async fn api_hermes_run_status(path: web::Path<HermesRunPath>) -> impl Responder
         }));
     }
 
-    let base =
-        env::var("HERMES_BASE_URL").unwrap_or_else(|_| "http://172.16.12.2:8642".to_string());
+    let base = resolve_hermes_base_url();
     let api_key = match env::var("HERMES_API_KEY") {
         Ok(v) if !v.trim().is_empty() => v,
         _ => {
@@ -1355,7 +1367,7 @@ async fn api_hermes_run_status(path: web::Path<HermesRunPath>) -> impl Responder
         }
     };
 
-    let url = format!("{}/v1/runs/{}", base.trim_end_matches('/'), run_id);
+    let url = format!("{}/v1/runs/{}", base, run_id);
 
     let client = reqwest::Client::new();
     let response = match client.get(url).bearer_auth(api_key).send().await {
@@ -1394,8 +1406,7 @@ async fn api_hermes_run_events(path: web::Path<HermesRunPath>, req: HttpRequest)
         }));
     }
 
-    let base =
-        env::var("HERMES_BASE_URL").unwrap_or_else(|_| "http://172.16.12.2:8642".to_string());
+    let base = resolve_hermes_base_url();
     let api_key = match env::var("HERMES_API_KEY") {
         Ok(v) if !v.trim().is_empty() => v,
         _ => {
@@ -1406,7 +1417,7 @@ async fn api_hermes_run_events(path: web::Path<HermesRunPath>, req: HttpRequest)
     };
 
     let query = req.query_string();
-    let mut url = format!("{}/v1/runs/{}/events", base.trim_end_matches('/'), run_id);
+    let mut url = format!("{}/v1/runs/{}/events", base, run_id);
     if !query.trim().is_empty() {
         url = format!("{}?{}", url, query);
     }
@@ -1996,6 +2007,30 @@ mod tests {
         assert_eq!(parsed.session_id.as_deref(), Some("mail-thread-explicit"));
         assert_eq!(parsed.session_key.as_deref(), Some("user-explicit"));
         assert_eq!(parsed.model.as_deref(), Some("hermes-agent"));
+    }
+
+    #[test]
+    fn test_normalize_hermes_base_url_strips_trailing_v1_and_slash() {
+        assert_eq!(
+            normalize_hermes_base_url("http://172.16.12.2:8642/v1/"),
+            "http://172.16.12.2:8642"
+        );
+        assert_eq!(
+            normalize_hermes_base_url("http://172.16.12.2:8642/v1"),
+            "http://172.16.12.2:8642"
+        );
+    }
+
+    #[test]
+    fn test_normalize_hermes_base_url_keeps_base_without_v1() {
+        assert_eq!(
+            normalize_hermes_base_url("http://172.16.12.2:8642"),
+            "http://172.16.12.2:8642"
+        );
+        assert_eq!(
+            normalize_hermes_base_url(" http://172.16.12.2:8642/ "),
+            "http://172.16.12.2:8642"
+        );
     }
 
     #[actix_web::test]
