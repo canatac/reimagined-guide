@@ -42,6 +42,7 @@ use serde::{Deserialize, Serialize};
 
 use chrono::Utc;
 use dotenv::dotenv;
+use futures_util::TryStreamExt;
 use mongodb::bson;
 use mongodb::bson::doc;
 use reqwest;
@@ -1405,11 +1406,7 @@ async fn api_hermes_run_events(path: web::Path<HermesRunPath>, req: HttpRequest)
     };
 
     let query = req.query_string();
-    let mut url = format!(
-        "{}/v1/runs/{}/events",
-        base.trim_end_matches('/'),
-        urlencoding::encode(&run_id)
-    );
+    let mut url = format!("{}/v1/runs/{}/events", base.trim_end_matches('/'), run_id);
     if !query.trim().is_empty() {
         url = format!("{}?{}", url, query);
     }
@@ -1439,22 +1436,35 @@ async fn api_hermes_run_events(path: web::Path<HermesRunPath>, req: HttpRequest)
         .unwrap_or("text/event-stream")
         .to_string();
 
-    let body_bytes = match response.bytes().await {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("Hermes upstream body read error: {}", e);
-            return HttpResponse::BadGateway().json(serde_json::json!({
-                "error": "Invalid Hermes upstream response"
-            }));
-        }
-    };
+    if !status.is_success() {
+        let body_text = match response.text().await {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("Hermes upstream body read error: {}", e);
+                return HttpResponse::BadGateway().json(serde_json::json!({
+                    "error": "Invalid Hermes upstream response"
+                }));
+            }
+        };
+
+        return HttpResponse::build(
+            actix_web::http::StatusCode::from_u16(status.as_u16())
+                .unwrap_or(actix_web::http::StatusCode::BAD_GATEWAY),
+        )
+        .content_type(content_type)
+        .body(body_text);
+    }
+
+    let stream = response.bytes_stream().map_err(|e| {
+        actix_web::error::ErrorBadGateway(format!("Hermes upstream stream error: {}", e))
+    });
 
     HttpResponse::build(
         actix_web::http::StatusCode::from_u16(status.as_u16())
             .unwrap_or(actix_web::http::StatusCode::BAD_GATEWAY),
     )
     .content_type(content_type)
-    .body(body_bytes)
+    .streaming(stream)
 }
 
 // --- Calendar types ---
