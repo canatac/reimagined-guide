@@ -163,15 +163,21 @@ jobs:
             grep -v '^#' /home/debian/.env.deploy | grep '=' | cut -d'=' -f1 | sort
             echo "=== Keys with EMPTY values ==="
             grep -v '^#' /home/debian/.env.deploy | grep '^[^=]*=$' | cut -d'=' -f1 || echo "(none)"
-            echo "=== OAuth secrets present? ==="
-            for key in GITHUB_CLIENT_ID GITHUB_CLIENT_SECRET OAUTH_CALLBACK_BASE_URL; do
+            echo "=== Required deploy secrets present? ==="
+            missing=0
+            for key in GITHUB_CLIENT_ID GITHUB_CLIENT_SECRET OAUTH_CALLBACK_BASE_URL HERMES_API_KEY; do
               val=$(grep "^${key}=" /home/debian/.env.deploy | cut -d'=' -f2- | tr -d '\r')
               if [ -z "$val" ]; then
                 echo "  MISSING or EMPTY: $key"
+                missing=1
               else
                 echo "  OK: $key (${#val} chars)"
               fi
             done
+            if [ "$missing" -ne 0 ]; then
+              echo "ERROR: required deploy secrets are missing in /home/debian/.env.deploy"
+              exit 1
+            fi
           REMOTE
 
       - name: Pull images & deploy
@@ -407,6 +413,24 @@ jobs:
 
             # Wait & check containers
             sudo -E docker compose -f /home/debian/docker-compose.deploy.yml --env-file /home/debian/.env.deploy ps
+
+            # Guardrail: ensure email-api received non-empty Hermes env vars from .env.deploy
+            HERMES_API_KEY_LEN=$(sudo docker inspect email-api --format '{{range .Config.Env}}{{println .}}{{end}}' \
+              | awk -F= '/^HERMES_API_KEY=/{print length(substr($0,index($0,"=")+1))}' \
+              | tail -n1)
+            HERMES_BASE_URL_VAL=$(sudo docker inspect email-api --format '{{range .Config.Env}}{{println .}}{{end}}' \
+              | awk -F= '/^HERMES_BASE_URL=/{print substr($0,index($0,"=")+1)}' \
+              | tail -n1)
+
+            if [ -z "${HERMES_API_KEY_LEN:-}" ] || [ "$HERMES_API_KEY_LEN" -le 0 ]; then
+              echo "ERROR: email-api missing non-empty HERMES_API_KEY in container env"
+              exit 1
+            fi
+            if [ -z "${HERMES_BASE_URL_VAL:-}" ]; then
+              echo "ERROR: email-api missing HERMES_BASE_URL in container env"
+              exit 1
+            fi
+            echo "email-api Hermes env injection OK (HERMES_API_KEY length: ${HERMES_API_KEY_LEN}, HERMES_BASE_URL: ${HERMES_BASE_URL_VAL})"
           REMOTE
 
       - name: Diagnose smtp-server logs
