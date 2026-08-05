@@ -201,6 +201,29 @@ jobs:
             # Pull latest images from Scaleway Container Registry
             sudo docker pull "$INJECT_SCW_REGISTRY_ENDPOINT/smtp-server:latest"
             sudo docker pull "$INJECT_SCW_REGISTRY_ENDPOINT/dkim-service:latest"
+            sudo docker pull "$INJECT_SCW_REGISTRY_ENDPOINT/misfits-web:latest"
+
+            # Persist concrete deployed image digests into .env.deploy for footer traceability
+            upsert_env_file() {
+              key="$1"
+              val="$2"
+              file="/home/debian/.env.deploy"
+              if grep -q "^${key}=" "$file"; then
+                sed -i "s|^${key}=.*|${key}=${val}|" "$file"
+              else
+                printf "\n%s=%s\n" "$key" "$val" >> "$file"
+              fi
+            }
+
+            MISFITS_WEB_DIGEST=$(sudo docker image inspect "$INJECT_SCW_REGISTRY_ENDPOINT/misfits-web:latest" --format '{{index .RepoDigests 0}}' 2>/dev/null | sed 's|.*@||' || true)
+            SMTP_SERVER_DIGEST=$(sudo docker image inspect "$INJECT_SCW_REGISTRY_ENDPOINT/smtp-server:latest" --format '{{index .RepoDigests 0}}' 2>/dev/null | sed 's|.*@||' || true)
+
+            if [ -z "$MISFITS_WEB_DIGEST" ]; then MISFITS_WEB_DIGEST="unknown"; fi
+            if [ -z "$SMTP_SERVER_DIGEST" ]; then SMTP_SERVER_DIGEST="unknown"; fi
+
+            upsert_env_file NEXT_PUBLIC_MISFITS_WEB_BUILD_VERSION "misfits-web@${MISFITS_WEB_DIGEST}"
+            upsert_env_file NEXT_PUBLIC_REIMAGINED_GUIDE_BUILD_VERSION "reimagined-guide@${SMTP_SERVER_DIGEST}"
+            echo "Footer versions set in .env.deploy"
 
             # Source .env.deploy so docker compose can resolve ${VAR} in the YAML
             # (avoids misleading "variable is not set" warnings)
