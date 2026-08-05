@@ -36,7 +36,7 @@ The API server will attempt to send the email using the SMTP client and return t
 */
 
 use actix_cors::Cors;
-use actix_web::{web, App, HttpResponse, HttpServer, Responder};
+use actix_web::{web, App, HttpRequest, HttpResponse, HttpServer, Responder};
 use base64::{engine::general_purpose, Engine as _};
 use bcrypt;
 use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
@@ -57,6 +57,7 @@ use std::fs::{create_dir_all, File};
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::sync::Arc;
+use uuid::Uuid;
 use tokio::sync::broadcast;
 use uuid::Uuid;
 
@@ -2202,6 +2203,127 @@ async fn api_templates() -> impl Responder {
     HttpResponse::Ok().json(serde_json::json!({"templates": []}))
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HermesChatProxyRequest {
+    messages: Vec<serde_json::Value>,
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    thread_id: Option<String>,
+    #[serde(default)]
+    user_id: Option<String>,
+    #[serde(default)]
+    session_id: Option<String>,
+    #[serde(default)]
+    session_key: Option<String>,
+    #[serde(default)]
+    temperature: Option<f32>,
+    #[serde(default)]
+    max_tokens: Option<u32>,
+}
+
+async fn api_hermes_chat(
+    req: HttpRequest,
+    body: web::Json<HermesChatProxyRequest>,
+) -> impl Responder {
+    if body.messages.is_empty() {
+        return HttpResponse::BadRequest().json(serde_json::json!({
+            "error": "messages is required"
+        }));
+    }
+
+    let base =
+        env::var("HERMES_BASE_URL").unwrap_or_else(|_| "http://172.16.12.2:8642".to_string());
+    let api_key = match env::var("HERMES_API_KEY") {
+        Ok(v) if !v.trim().is_empty() => v,
+        _ => {
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": "HERMES_API_KEY is not configured"
+            }))
+        }
+    };
+
+    let url = format!("{}/v1/chat/completions", base.trim_end_matches('/'));
+    let model = body
+        .model
+        .clone()
+        .unwrap_or_else(|| env::var("HERMES_MODEL").unwrap_or_else(|_| "hermes-agent".to_string()));
+
+    let thread_id = body
+        .thread_id
+        .clone()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
+
+    let fallback_user_id = resolve_user_id(&req);
+    let user_id = body
+        .user_id
+        .clone()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or(fallback_user_id);
+
+    let session_id = body
+        .session_id
+        .clone()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| format!("mail-thread-{}", thread_id));
+
+    let session_key = body
+        .session_key
+        .clone()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| format!("user-{}", user_id));
+
+    let mut payload = serde_json::json!({
+        "model": model,
+        "messages": body.messages,
+    });
+
+    if let Some(temp) = body.temperature {
+        payload["temperature"] = serde_json::json!(temp);
+    }
+    if let Some(max_tokens) = body.max_tokens {
+        payload["max_tokens"] = serde_json::json!(max_tokens);
+    }
+
+    let client = reqwest::Client::new();
+    let response = match client
+        .post(url)
+        .bearer_auth(api_key)
+        .header("X-Hermes-Session-Id", session_id)
+        .header("X-Hermes-Session-Key", session_key)
+        .json(&payload)
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Hermes upstream request error: {}", e);
+            return HttpResponse::BadGateway().json(serde_json::json!({
+                "error": "Hermes upstream unavailable"
+            }));
+        }
+    };
+
+    let status = response.status();
+    let body_json = match response.json::<serde_json::Value>().await {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("Hermes upstream JSON parse error: {}", e);
+            return HttpResponse::BadGateway().json(serde_json::json!({
+                "error": "Invalid Hermes upstream response"
+            }));
+        }
+    };
+
+    HttpResponse::build(
+        actix_web::http::StatusCode::from_u16(status.as_u16())
+            .unwrap_or(actix_web::http::StatusCode::BAD_GATEWAY),
+    )
+    .json(body_json)
+}
+
 // --- Calendar types ---
 
 #[derive(Deserialize)]
@@ -2578,6 +2700,7 @@ async fn main() -> std::io::Result<()> {
                 .route("/api/templates", web::get().to(api_templates))
                 .route("/api/settings/ai", web::get().to(api_get_ai_settings))
                 .route("/api/settings/ai", web::put().to(api_put_ai_settings))
+                .route("/api/hermes/chat", web::post().to(api_hermes_chat))
                 .route("/api/send/undo", web::post().to(api_send))
                 .route("/api/send/schedule", web::post().to(api_send))
                 .route(
@@ -2716,6 +2839,41 @@ mod tests {
         let resp = test::call_service(&app, req).await;
         println!("Response status: {:?}", resp.status());
         assert!(resp.status().is_success());
+    }
+
+    #[actix_web::test]
+    async fn test_api_hermes_chat_requires_messages() {
+        let app = test::init_service(
+            App::new().route("/api/hermes/chat", web::post().to(api_hermes_chat)),
+        )
+        .await;
+
+        let req = test::TestRequest::post()
+            .uri("/api/hermes/chat")
+            .set_json(serde_json::json!({ "messages": [] }))
+            .to_request();
+
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), actix_web::http::StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn test_hermes_chat_request_accepts_explicit_session_overrides() {
+        let parsed: HermesChatProxyRequest = serde_json::from_value(serde_json::json!({
+            "messages": [{"role":"user","content":"hello"}],
+            "threadId": "thread-123",
+            "userId": "admin",
+            "sessionId": "mail-thread-explicit",
+            "sessionKey": "user-explicit",
+            "maxTokens": 1200
+        }))
+        .expect("HermesChatProxyRequest should deserialize");
+
+        assert_eq!(parsed.thread_id.as_deref(), Some("thread-123"));
+        assert_eq!(parsed.user_id.as_deref(), Some("admin"));
+        assert_eq!(parsed.session_id.as_deref(), Some("mail-thread-explicit"));
+        assert_eq!(parsed.session_key.as_deref(), Some("user-explicit"));
+        assert_eq!(parsed.max_tokens, Some(1200));
     }
 }
 

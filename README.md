@@ -84,6 +84,14 @@ Exécuter **une seule fois** sur la nouvelle VM :
 # Copier le script sur la VM
 scp infra/init-vm.sh debian@<VM_PUBLIC_IP>:~
 
+# Hermes gateway (server-to-server)
+# Keep HERMES_BASE_URL on private VPC address only (no public 8642)
+HERMES_BASE_URL=http://172.16.12.2:8642
+HERMES_API_KEY=your_hermes_api_key
+HERMES_MODEL=hermes-agent
+
+# Logging
+RUST_LOG=debug
 # Exécuter (remplacer les valeurs)
 ssh debian@<VM_PUBLIC_IP> "bash ~/init-vm.sh '<MONGODB_PASSWORD>' '<MONGODB_USERNAME>'"
 ```
