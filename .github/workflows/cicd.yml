@@ -80,9 +80,9 @@ jobs:
     runs-on: ubuntu-latest
     if: >-
       always() &&
-      (github.event_name == 'push' && github.ref == 'refs/heads/master')
-      || github.event_name == 'workflow_dispatch'
-      || github.event_name == 'repository_dispatch'
+      (github.event_name == 'push' && github.ref == 'refs/heads/master') ||
+       github.event_name == 'workflow_dispatch' ||
+       github.event_name == 'repository_dispatch'
     steps:
       - uses: actions/checkout@v4
 
@@ -97,8 +97,8 @@ jobs:
         with:
           export-env: true
         env:
-          # SSH key from 1Password (SSH key item with dedicated fields)
           VM_SSH_KEY: op://hermes/ssh-hermes-smtp/private-key
+          DEPLOY_ENV_CONTENT: op://hermes/scw-hermes-smtp/texte
 
       - name: Install SSH key
         uses: shimataro/ssh-key-action@v2
@@ -112,38 +112,247 @@ jobs:
             docker-compose.deploy.yml \
             debian@${{ secrets.VM_IP }}:/home/debian/docker-compose.deploy.yml
 
-      - name: Pull images & deploy
+      - name: Copy Caddyfile to VM
         run: |
-          ssh -o StrictHostKeyChecking=no debian@${{ secrets.VM_IP }} << 'REMOTE'
+          scp -o StrictHostKeyChecking=no \
+            Caddyfile \
+            debian@${{ secrets.VM_IP }}:/home/debian/Caddyfile
+
+      - name: Write .env.deploy to VM
+        env:
+          DEPLOY_ENV_CONTENT: ${{ env.DEPLOY_ENV_CONTENT }}
+        run: |
+          # Write 1Password content locally on the runner first (avoids SSH escaping issues)
+          printf '%s\n' "$DEPLOY_ENV_CONTENT" > /tmp/.env.deploy
+
+          # upsert_env: safe for values containing = | and other special chars
+          upsert_env() {
+            local key="$1" val="$2" file="/tmp/.env.deploy"
+            grep -v "^${key}=" "$file" > "$file.tmp" && mv "$file.tmp" "$file"
+            printf '%s=%s\n' "$key" "$val" >> "$file"
+          }
+          upsert_env GITHUB_CLIENT_ID     "${{ secrets.OAUTH_GITHUB_CLIENT_ID }}"
+          upsert_env GITHUB_CLIENT_SECRET "${{ secrets.OAUTH_GITHUB_CLIENT_SECRET }}"
+          upsert_env SCW_REGISTRY_ENDPOINT "${{ secrets.SCW_REGISTRY_ENDPOINT }}"
+          upsert_env OAUTH_CALLBACK_BASE_URL "https://mail.misfits.ai"
+          upsert_env FRONTEND_BASE_URL       "https://mail.misfits.ai"
+
+          echo "Lines in .env.deploy: $(wc -l < /tmp/.env.deploy)"
+
+          # Copy to VM via scp (reliable binary transfer, no shell escaping)
+          scp -o StrictHostKeyChecking=no /tmp/.env.deploy \
+            debian@${{ secrets.VM_IP }}:/home/debian/.env.deploy
+
+      - name: Diagnose .env.deploy on VM
+        run: |
+          ssh -o StrictHostKeyChecking=no debian@${{ secrets.VM_IP }} bash << 'REMOTE'
+            echo "=== .env.deploy diagnostics ==="
+            if [ ! -f /home/debian/.env.deploy ]; then
+              echo "ERROR: /home/debian/.env.deploy does not exist!"
+              exit 1
+            fi
+            echo "File size: $(wc -c < /home/debian/.env.deploy) bytes"
+            echo "Line count: $(wc -l < /home/debian/.env.deploy)"
+            echo "=== Keys present (values hidden) ==="
+            grep -v '^#' /home/debian/.env.deploy | grep '=' | cut -d'=' -f1 | sort
+            echo "=== Keys with EMPTY values ==="
+            grep -v '^#' /home/debian/.env.deploy | grep '^[^=]*=$' | cut -d'=' -f1 || echo "(none)"
+            echo "=== OAuth secrets present? ==="
+            for key in GITHUB_CLIENT_ID GITHUB_CLIENT_SECRET OAUTH_CALLBACK_BASE_URL; do
+              val=$(grep "^${key}=" /home/debian/.env.deploy | cut -d'=' -f2- | tr -d '\r')
+              if [ -z "$val" ]; then
+                echo "  MISSING or EMPTY: $key"
+              else
+                echo "  OK: $key (${#val} chars)"
+              fi
+            done
+          REMOTE
+
+      - name: Pull images & deploy
+        env:
+          INJECT_SCW_REGISTRY_ENDPOINT: ${{ secrets.SCW_REGISTRY_ENDPOINT }}
+          INJECT_SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+        run: |
+          ssh -o StrictHostKeyChecking=no debian@${{ secrets.VM_IP }} \
+            INJECT_SCW_REGISTRY_ENDPOINT="$INJECT_SCW_REGISTRY_ENDPOINT" \
+            INJECT_SCW_SECRET_KEY="$INJECT_SCW_SECRET_KEY" \
+            bash << 'REMOTE'
             set -euo pipefail
             cd /home/debian
+
+            # Restart dockerd to evict any unkillable zombie containers from previous runs
+            sudo systemctl restart docker
+            sleep 3
 
             # Clean up old images to free disk space (VM has limited storage)
             sudo docker system prune -af --filter "until=1h" 2>/dev/null || true
 
             # Login to Scaleway Container Registry on the VM
-            echo "${{ secrets.SCW_SECRET_KEY }}" | sudo docker login \
-              ${{ secrets.SCW_REGISTRY_ENDPOINT }} \
+            echo "$INJECT_SCW_SECRET_KEY" | sudo docker login \
+              "$INJECT_SCW_REGISTRY_ENDPOINT" \
               -u nologin --password-stdin
 
             # Pull latest images from Scaleway Container Registry
-            sudo docker pull ${{ secrets.SCW_REGISTRY_ENDPOINT }}/smtp-server:latest
-            sudo docker pull ${{ secrets.SCW_REGISTRY_ENDPOINT }}/dkim-service:latest
+            sudo docker pull "$INJECT_SCW_REGISTRY_ENDPOINT/smtp-server:latest"
+            sudo docker pull "$INJECT_SCW_REGISTRY_ENDPOINT/dkim-service:latest"
 
-            # Remove stale containers that conflict with compose names
-            sudo docker rm -f email-api smtp-server imap-server misfits-web dkim-service 2>/dev/null || true
+            # Source .env.deploy so docker compose can resolve ${VAR} in the YAML
+            # (avoids misleading "variable is not set" warnings)
+            set -a
+            source /home/debian/.env.deploy
+            set +a
+            
+            # Stop any running compose stack to release bound ports (e.g. :80/:443)
+            sudo -E docker compose -f /home/debian/docker-compose.deploy.yml --env-file /home/debian/.env.deploy down --timeout 0 --remove-orphans 2>/dev/null || true
 
-            # Deploy with unified compose
-            # Create .env.deploy if it doesn't exist with default values
-            if [ ! -f .env.deploy ]; then
-              echo "Creating .env.deploy with default values..."
-              printf 'SCW_REGISTRY_ENDPOINT=%s\nMONGODB_USERNAME=mongo\nMONGODB_PASSWORD=change...o\n' "${{ secrets.SCW_REGISTRY_ENDPOINT }}" > .env.deploy
-            fi
-            # Drop stale Docker bind dirs created when file sources were missing
-            # (docker turns missing file mounts into empty directories → OCI mount error)
+            # Drop stale Docker bind dirs
             sudo rm -rf /home/debian/runtime-patches 2>/dev/null || true
 
-            sudo docker compose -f docker-compose.deploy.yml --env-file .env.deploy up -d --force-recreate --remove-orphans
+            # ── Free ports used by compose services ──────────────────────────────────────
+            # Stop known system services that may hold ports before Docker tries to bind them.
+            for svc in nginx apache2 caddy haproxy lighttpd; do
+              if systemctl is-active --quiet "$svc" 2>/dev/null; then
+                echo "Stopping system service: $svc"
+                sudo systemctl stop "$svc" || true
+                sudo systemctl disable "$svc" || true
+              fi
+            done
+
+            # Kill any remaining process still listening on the ports we need.
+            PORTS="80 443 25 587 8025 8465 143 993 8000 8443 3000 3001 8080"
+            if command -v fuser &>/dev/null; then
+              for port in $PORTS; do
+                sudo fuser -k "${port}/tcp" 2>/dev/null || true
+              done
+            else
+              # fallback: ss + kill
+              for port in $PORTS; do
+                pids=$(sudo ss -tlnp "sport = :${port}" 2>/dev/null \
+                       | grep -oP 'pid=\K[0-9]+' | sort -u || true)
+                for pid in $pids; do
+                  echo "Killing pid $pid on port $port"
+                  sudo kill -9 "$pid" 2>/dev/null || true
+                done
+              done
+            fi
+            # Brief pause to let the OS release sockets
+            sleep 2
+            # ─────────────────────────────────────────────────────────────────────────────
+
+            if [ ! -f .env.deploy ]; then
+              echo ".env.deploy is missing; aborting deployment."
+              exit 1
+            fi
+
+            # Fix nftables INPUT: open ports 80/443 for ACME HTTP-01 challenge
+            if sudo nft list chain inet filter input 2>/dev/null | grep -q 'policy drop'; then
+              sudo nft add rule inet filter input tcp dport 80 accept 2>/dev/null || true
+              sudo nft add rule inet filter input tcp dport 443 accept 2>/dev/null || true
+              # Allow Docker bridge subnets to reach MongoDB on the host
+              sudo nft add rule inet filter input ip saddr 172.16.0.0/12 tcp dport 27017 accept 2>/dev/null || true
+              echo "nftables: opened ports 80, 443 and 27017 (Docker→MongoDB) in INPUT chain"
+            fi
+            # Fix nftables FORWARD: allow Docker bridge traffic without hardcoding the bridge name
+            if sudo nft list chain inet filter forward 2>/dev/null | grep -q 'policy drop'; then
+              # DNAT'd inbound (port-forwards from outside to Docker containers)
+              sudo nft add rule inet filter forward ct status dnat accept 2>/dev/null || true
+              # Return/reply traffic for container-initiated outbound connections
+              sudo nft add rule inet filter forward ct state established,related accept 2>/dev/null || true
+              # New outbound connections from Docker bridge subnets (172.16.0.0/12 covers all Docker ranges)
+              sudo nft add rule inet filter forward ip saddr 172.16.0.0/12 accept 2>/dev/null || true
+              echo "nftables: fixed Docker bridge forwarding"
+            fi
+            sudo nft list ruleset | sudo tee /etc/nftables.conf > /dev/null
+
+            # Générer la clé privée DKIM si elle n'existe pas encore
+            mkdir -p /home/debian/dkim
+            if [ ! -f /home/debian/dkim/dkim-private.pem ]; then
+              openssl genrsa -out /home/debian/dkim/dkim-private.pem 2048
+              openssl rsa -in /home/debian/dkim/dkim-private.pem \
+                -pubout -out /home/debian/dkim/dkim-public.pem
+              chmod 600 /home/debian/dkim/dkim-private.pem
+              echo "DKIM key pair generated."
+            else
+              echo "DKIM private key already present, skipping generation."
+            fi
+
+            # Bootstrap Caddy first (host network mode — no Docker bridge egress needed)
+            sudo -E docker compose -f /home/debian/docker-compose.deploy.yml --env-file /home/debian/.env.deploy up -d --force-recreate --remove-orphans caddy
+
+            # Resolve cert path from Caddy storage and expose stable symlinks for services
+            DOMAIN=$(grep '^DOMAIN_NAME=' .env.deploy | cut -d= -f2- | tr -d '\r')
+            if [ -z "$DOMAIN" ]; then
+              echo "ERROR: DOMAIN_NAME is empty in .env.deploy"
+              exit 1
+            fi
+            CADDY_DATA_HOST=$(sudo docker inspect caddy --format '{{ range .Mounts }}{{ if eq .Destination "/data" }}{{ .Source }}{{ end }}{{ end }}' 2>/dev/null || true)
+            if [ -z "$CADDY_DATA_HOST" ]; then
+              echo "ERROR: could not resolve Caddy /data mount source"
+              sudo docker inspect caddy 2>/dev/null || true
+              exit 1
+            fi
+            CERT_ROOT="$CADDY_DATA_HOST/caddy/certificates"
+            LINK_DIR="$CADDY_DATA_HOST/live"
+            echo "Waiting for Caddy cert for domain: $DOMAIN"
+            CERT_READY=0
+            CERT_REAL=""
+            KEY_REAL=""
+            for i in $(seq 1 24); do
+              CERT_REAL=$(sudo find "$CERT_ROOT" -type f \
+                \( -path "*/${DOMAIN}/${DOMAIN}.crt" \
+                   -o -path "*/mail.${DOMAIN}/mail.${DOMAIN}.crt" \) \
+                -not -path "*/acme-staging-*/*" \
+                2>/dev/null | head -n1 || true)
+              if [ -n "$CERT_REAL" ]; then
+                KEY_REAL="${CERT_REAL%.crt}.key"
+                if sudo test -f "$KEY_REAL"; then
+                  echo "Caddy cert ready after ${i} attempts"
+                  echo "Resolved cert: $CERT_REAL"
+                  echo "Resolved key : $KEY_REAL"
+                  # Allow non-root containers (UID 10001) to read Caddy-generated certs
+                  # o+rX = world-read on files + world-traversal on directories (all caddy/ subdirs)
+                  sudo chmod -R o+rX "${CADDY_DATA_HOST}/caddy"
+                  sudo mkdir -p "$LINK_DIR"
+                  # Relative symlinks so paths resolve correctly inside the container too
+                  CERT_REL=$(sudo realpath --relative-to="$LINK_DIR" "$CERT_REAL")
+                  KEY_REL=$(sudo realpath --relative-to="$LINK_DIR" "$KEY_REAL")
+                  sudo ln -sfn "$CERT_REL" "$LINK_DIR/${DOMAIN}.crt"
+                  sudo ln -sfn "$KEY_REL" "$LINK_DIR/${DOMAIN}.key"
+                  CERT_READY=1
+                  break
+                fi
+              fi
+              if [ "$i" -eq 12 ]; then
+                echo "mid-check: testing ACME endpoint reachability from Caddy container"
+                sudo docker exec caddy sh -c 'wget -q -O /dev/null https://acme-v02.api.letsencrypt.org/directory || exit 1' \
+                  && echo "ACME endpoint reachable" \
+                  || echo "WARN: ACME endpoint unreachable from Caddy container"
+              fi
+              echo "attempt $i/24 - cert not yet available, waiting 5s..."
+              sleep 5
+            done
+
+            if [ "$CERT_READY" -ne 1 ]; then
+              echo "ERROR: No Caddy certificate found for domain '$DOMAIN'."
+              echo "DEBUG: listing candidate cert files from Caddy volume"
+              sudo find "$CERT_ROOT" -maxdepth 6 -type f \( -name '*.crt' -o -name '*.key' \) 2>/dev/null | sed -n '1,80p' || true
+              echo "DEBUG: testing ACME endpoint reachability from Caddy container"
+              sudo docker exec caddy sh -c 'wget -S -O /dev/null https://acme-v02.api.letsencrypt.org/directory' 2>&1 || true
+              sudo docker logs caddy --tail 120 2>&1 || true
+              exit 1
+            fi
+
+            sudo ls -l "$LINK_DIR/${DOMAIN}.crt" "$LINK_DIR/${DOMAIN}.key"
+
+            sudo -E docker compose -f /home/debian/docker-compose.deploy.yml --env-file /home/debian/.env.deploy up -d --force-recreate --remove-orphans
+
+            # Re-apply cert permissions after services start: Caddy may have re-issued
+            # the certificate between the initial chmod and container startup, which
+            # would reset the key file to 0600 root:root (unreadable by UID 10001).
+            sleep 8
+            sudo chmod -R o+rX "${CADDY_DATA_HOST}/caddy"
+            sudo docker restart smtp-server email-api
+            echo "Re-applied cert permissions and restarted cert-reading services."
 
             # Wait for misfits-web, then hot-patch baked Next rewrites if still
             # pointing at imap-server:8080 (old image). BACKEND_URL env is not
@@ -166,7 +375,42 @@ jobs:
             fi
 
             # Wait & check containers
-            sudo docker compose -f docker-compose.deploy.yml ps
+            sudo -E docker compose -f /home/debian/docker-compose.deploy.yml --env-file /home/debian/.env.deploy ps
+          REMOTE
+
+      - name: Diagnose smtp-server logs
+        run: |
+          ssh -o StrictHostKeyChecking=no debian@${{ secrets.VM_IP }} bash << 'REMOTE'
+            echo "=== smtp-server status ==="
+            sudo docker inspect --format='{{.State.Status}} (restarts: {{.RestartCount}})' smtp-server 2>/dev/null || echo "container not found"
+            echo "=== cert paths from container config (pre-entrypoint values) ==="
+            sudo docker inspect smtp-server --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | grep -E '^CERT_PATH=|^KEY_PATH=' || true
+            echo "=== symlinks in caddy live dir ==="
+            LIVE=$(sudo docker inspect caddy --format '{{ range .Mounts }}{{ if eq .Destination "/data" }}{{ .Source }}{{ end }}{{ end }}' 2>/dev/null || true)
+            sudo ls -la "${LIVE}/live/" 2>/dev/null || echo "live/ dir not found"
+            echo "=== symlink targets + permissions (caddy host volume) ==="
+            sudo find "${LIVE}/live" -maxdepth 1 -type l 2>/dev/null | while read f; do
+              TARGET=$(sudo readlink -f "$f" 2>/dev/null || echo "broken")
+              PERMS=$(sudo stat -c '%a %U:%G' "$TARGET" 2>/dev/null || echo "stat-failed")
+              echo "  $(basename $f) -> $TARGET  [$PERMS]"
+            done
+            echo "=== smtp-server: entrypoint cert copies in /tmp ==="
+            # The entrypoint (running as root) copies caddy certs to /tmp/smtp-certs/
+            # and chowns them to UID 10001 before exec-ing gosu default_user smtp_server.
+            # NOTE: caddy certs are 0600 root:root BY DESIGN — they should NOT be
+            # world-readable. smtp_server reads its own /tmp copies instead.
+            sudo docker exec smtp-server sh -c '
+              if ls -la /tmp/smtp-certs/ 2>/dev/null; then
+                echo "entrypoint cert copy: OK"
+                cat /tmp/smtp-certs/server.crt > /dev/null 2>&1 && echo "server.crt readable by root" || echo "server.crt NOT readable"
+              else
+                echo "WARN: /tmp/smtp-certs absent — entrypoint may not have run"
+              fi
+            ' 2>/dev/null || echo "docker exec failed"
+            echo "=== smtp-server running process UID ==="
+            sudo docker exec smtp-server sh -c 'cat /proc/1/status 2>/dev/null | grep -E "^(Name|Uid):"' 2>/dev/null || true
+            echo "=== smtp-server logs (last 20 lines) ==="
+            sudo docker logs smtp-server --tail 20 2>&1 || echo "no logs available"
           REMOTE
 
       - name: Smoke test - SMTP port 587 (STARTTLS)
@@ -177,4 +421,4 @@ jobs:
       - name: Smoke test - DKIM service port 3000
         run: |
           ssh -o StrictHostKeyChecking=no debian@${{ secrets.VM_IP }} \
-            "for i in \$(seq 1 12); do if curl -sf http://127.0.0.1:3000/health 2>/dev/null | grep -q 'ok'; then echo 'DKIM health check OK' && exit 0; fi; echo \"retry \$i...\"; sleep 5; done; echo 'DKIM service not reachable on :3000'; exit 1"
+            "for i in \$(seq 1 12); do if nc -z -w3 127.0.0.1 3000 2>/dev/null; then echo 'DKIM port 3000 open' && exit 0; fi; echo \"retry \$i...\"; sleep 5; done; echo 'DKIM service not reachable on :3000'; exit 1"

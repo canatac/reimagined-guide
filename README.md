@@ -1,128 +1,88 @@
-# Rust SMTP/IMAP Server Documentation
+# Stack Mail Rust — Déploiement sur Scaleway
 
-## 1. Introduction
-
-### 1.1 Purpose of the Project
-This project implements **robust, secure, and efficient SMTP and IMAP servers** in Rust. It supports:
-- **Plain text and TLS-encrypted connections** (with `stunnel` recommended for production).
-- **MongoDB and local file storage** for emails (configurable via `USE_MONGODB`).
-- **Async I/O** (Tokio-based) for high concurrency.
-- **SMTP/IMAP authentication** (AUTH LOGIN and AUTH PLAIN).
-- **DKIM signature handling** (optional).
-
-### 1.2 Key Features
-- **Async SMTP/IMAP servers** (Tokio runtime) for high performance.
-- **MongoDB integration** (Atlas or local Docker Compose).
-- **TLS support** (Rustls) with configurable certificates.
-- **Authentication** (AUTH LOGIN/PLAIN) with environment variables.
-- **Email storage** (MongoDB or local filesystem).
-- **DKIM signature handling** (optional).
-- **Environment variable configuration** (`.env.example` provided).
-- **Hermes chat gateway** (`POST /api/hermes/chat`) for secure server-to-server AI calls, including optional explicit `sessionId`/`sessionKey` overrides for cross-service thread continuity.
-
-### 1.3 Technology Stack
-- **Rust** (2021 edition)
-- **Tokio** (async runtime)
-- **Rustls** (TLS)
-- **MongoDB** (database)
-- **Serde** (serialization)
-- **Mailparse** (email parsing)
-- **Dotenv** (environment variables)
+Serveur SMTP/IMAP en Rust avec TLS automatique (Caddy + Let's Encrypt), MongoDB natif et frontend Next.js, déployé sur une VM Scaleway via GitHub Actions.
 
 ---
 
-## 2. Recent Updates (2026-07-23)
-- **MongoDB integration**: Added support for MongoDB (Atlas or local Docker Compose). Toggle via `USE_MONGODB=true/false`.
-- **Async SMTP/IMAP servers**: Refactored to use Tokio for async I/O (improves concurrency).
-- **Dependency updates**: Addressed GitHub vulnerabilities (updated `mongodb`, `rustls`, `reqwest`, `warp`).
-- **DKIM support**: Added optional DKIM signature handling.
-- **Docker Compose**: Added `mongodb` service and health checks.
-- **Environment variables**: Updated `.env.example` with MongoDB and DKIM settings.
+## Architecture
+
+```
+Internet
+   │
+   ├─ :25 / :587 → smtp-server (Rust)   ← emails entrants/sortants
+   ├─ :143 / :993 → imap-server (Rust)  ← accès boîtes mail
+   ├─ :80 / :443  → Caddy (host mode)   ← TLS Let's Encrypt + reverse proxy
+   │                   ├─ /api/*  → email-api:8000 (Rust)
+   │                   └─ /*      → misfits-web:3001 (Next.js)
+   └─ :27017 (réseau privé seulement) → MongoDB 7 (natif sur VM)
+```
+
+### Composants
+
+| Composant | Runtime | Description |
+|-----------|---------|-------------|
+| `smtp-server` | Container Docker | Serveur SMTP Rust (ports 25, 587) |
+| `email-api` | Container Docker | API REST (port 8000, Caddy reverse proxy) |
+| `imap-server` | Container Docker | Serveur IMAP Rust (ports 143, 993) |
+| `dkim-service` | Container Docker | Signature DKIM (port 3000) |
+| `misfits-web` | Container Docker | Frontend Next.js (port 3001) |
+| `caddy` | Container Docker (host mode) | TLS + reverse proxy (ports 80, 443) |
+| `mongod` | Natif sur VM | Base de données (port 27017, réseau privé) |
+
+### Fichiers Docker Compose
+
+| Fichier | Usage |
+|---------|-------|
+| `docker-compose.yml` | Développement local (MongoDB en container, build local) |
+| `docker-compose.deploy.yml` | Production sur VM (images SCW Registry, MongoDB natif) |
 
 ---
 
-## 3. System Architecture
+## Prérequis
 
-### 3.1 High-Level Overview
-The project consists of **two async servers** (Tokio-based):
-- **SMTP Server**: Listens on ports `8025` (plain) and `8465` (TLS).
-- **IMAP Server**: Listens on port `143` (plain) and `993` (TLS).
+- Compte [Scaleway](https://console.scaleway.com) avec clés API
+- Domaine DNS pointant vers l'IP publique de la VM (`mail.misfits.ai → <VM_IP>`)
+- [1Password](https://1password.com) avec vault `hermes` pour les secrets
+- GitHub Actions avec accès au vault 1Password
+- Terraform ≥ 1.0 (`brew install terraform` ou `prepare-deploy-machine.sh`)
+- Scaleway CLI (`scw`) et GitHub CLI (`gh`)
 
-### 3.2 Component Diagram
-![SMTP/IMAP Server Component Diagram](./img/2024-09-09-084653.svg)
-
-**Components:**
-1. **TLS Listener**: Handles incoming TLS connections (SMTP: `8465`, IMAP: `993`).
-2. **Plain Text Listener**: Handles plain text connections (SMTP: `8025`, IMAP: `143`).
-3. **Connection Handler**: Manages incoming connections (async).
-4. **Auth Handler**: Implements AUTH LOGIN and AUTH PLAIN.
-5. **Email Processor**: Parses and processes emails (with DKIM support).
-6. **Storage Manager**: Stores emails in **MongoDB** or **local filesystem**.
-7. **Logging System**: Uses `log` and `tracing` for diagnostics.
-
-### 3.3 Data Flow
-1. Client connects (plain text or TLS).
-2. Server authenticates (if required).
-3. Client sends/retrieves email data.
-4. Server processes and stores/retrieves the email (MongoDB or local).
-5. Server sends confirmation to the client.
-
-### 3.4 Security Considerations
-- **TLS encryption** (Rustls) for secure connections.
-- **Authentication** (AUTH LOGIN/PLAIN) to prevent unauthorized access.
-- **MongoDB storage** (optional) for scalability.
-- **Environment variables** for sensitive data (credentials, paths).
+Pour installer les outils sur votre machine de développement :
+```bash
+sudo bash prepare-deploy-machine.sh
+```
 
 ---
 
-## 4. Project Structure
+## 1. Provisionner l'infrastructure Scaleway (Terraform)
 
-### `src/`
-- **`bin/`**: Binary entry points.
-  - `smtp_server.rs`: **Async SMTP server** (Tokio, Rustls).
-  - `email_api.rs`: Email API server (Warp).
-  - `imap_server.rs`: **Async IMAP server** (Tokio, MongoDB).
-  - `client.rs`: SMTP client CLI.
-- **`logic/`**: Core business logic (MongoDB, email processing).
-- **`smtp_client/`**: SMTP client library (async, Rustls).
-- **`imap_server/`**: IMAP server implementation (async, Tokio).
+```bash
+cd infra/
+terraform init
+terraform plan
+terraform apply
+```
 
-### Other Files
-- **`docker-compose.yml`**: Docker Compose for MongoDB, SMTP, and IMAP servers.
-- **`docker-compose.override.yml`**: Development overrides.
-- **`env.example`**: Environment variable template.
-- **`scripts/init-mongo.js`**: MongoDB initialization script.
-- **`Cargo.toml`**: Dependencies and metadata.
-- **`README.md`**: Project documentation.
+Cela crée :
+- VM DEV1-S (Debian 11 Bullseye)
+- IP publique flexible
+- Groupe de sécurité (ports 22, 80, 443, 25, 587, 143, 993)
+- Container Registry Scaleway (pour les images Docker)
+
+Récupérer l'IP publique :
+```bash
+terraform output vm_public_ip
+```
 
 ---
 
-## 5. Configuration
+## 2. Provisionnement initial de la VM
 
-### 5.1 Environment Variables (`.env.example`)
-```ini
-# SMTP Server
-SMTP_TLS_ADDR=0.0.0.0:8465
-SMTP_PLAIN_ADDR=0.0.0.0:8025
-CERT_PATH=localhost.crt
-KEY_PATH=localhost.key
-SMTP_USERNAME=admin
-SMTP_PASSWORD=password123
+Exécuter **une seule fois** sur la nouvelle VM :
 
-# IMAP Server
-IMAP_SERVER=0.0.0.0:143
-IMAP_TLS_ADDR=0.0.0.0:993
-
-# MongoDB (local or Atlas)
-MONGODB_USERNAME=admin
-MONGODB_PASSWORD=password123
-MONGODB_CLUSTER_URL=mongodb  # Use "your_cluster.mongodb.net" for Atlas
-MONGODB_APP_NAME=mailserver
-MONGODB_DATABASE=mailserver
-USE_MONGODB=true  # Set to "false" for local file storage
-
-# DKIM (optional)
-DKIM_SERVICE_URL=http://your-dkim-service:3000/sign
+```bash
+# Copier le script sur la VM
+scp infra/init-vm.sh debian@<VM_PUBLIC_IP>:~
 
 # Hermes gateway (server-to-server)
 # Keep HERMES_BASE_URL on private VPC address only (no public 8642)
@@ -132,100 +92,218 @@ HERMES_MODEL=hermes-agent
 
 # Logging
 RUST_LOG=debug
+# Exécuter (remplacer les valeurs)
+ssh debian@<VM_PUBLIC_IP> "bash ~/init-vm.sh '<MONGODB_PASSWORD>' '<MONGODB_USERNAME>'"
 ```
 
-### 5.2 TLS Configuration
-- **Recommended**: Use `stunnel` for TLS termination in production.
-- **Embedded TLS**: Configure `CERT_PATH` and `KEY_PATH` in `.env`.
+Le script installe et configure :
+1. **Docker Engine** (CE) + plugin compose
+2. **MongoDB 7** (natif) avec authentification activée sur l'IP privée
+3. **nftables** (pare-feu : INPUT drop sauf SSH/mail/HTTP, FORWARD pour Docker)
+4. Sudoers pour que le CI/CD puisse lancer Docker sans mot de passe
 
-### 5.3 MongoDB Setup
-- **Local**: Use `docker-compose up -d mongodb`.
-- **Atlas**: Set `MONGODB_CLUSTER_URL` to your Atlas URI.
+À la fin du script, noter l'IP privée affichée (`172.16.x.x`).
+
+### Initialiser les collections MongoDB
+
+```bash
+ssh debian@<VM_PUBLIC_IP> "mongosh mongodb://<MONGODB_USERNAME>:<MONGODB_PASSWORD>@127.0.0.1:27017/mailserver?authSource=admin < scripts/init-mongo.js"
+```
 
 ---
 
-## 6. Deployment
+## 3. Configurer les secrets
 
-### 6.1 System Requirements
-- **Rust 1.70+** (2021 edition).
-- **Docker** (for MongoDB).
-- **Network access** for SMTP (`8025`, `8465`) and IMAP (`143`, `993`).
+### 3.1 Vault 1Password (vault: `hermes`, item: `scw-hermes-smtp`)
 
-### 6.2 Installation
+Créer ou mettre à jour ces champs dans 1Password :
+
+| Champ 1Password | Valeur |
+|-----------------|--------|
+| `SMTP_USERNAME` | Nom d'utilisateur SMTP |
+| `SMTP_PASSWORD` | Mot de passe SMTP |
+| `MONGODB_USERNAME` | Utilisateur MongoDB (ex: `adoremio`) |
+| `MONGODB_PASSWORD` | Mot de passe MongoDB |
+| `MONGODB_URL` | `mongodb://user:pass@172.16.x.x:27017/mailserver?authSource=admin` |
+| `DOMAIN_NAME` | `misfits.ai` |
+| `GITHUB_CLIENT_ID` | OAuth GitHub |
+| `GITHUB_CLIENT_SECRET` | OAuth GitHub |
+| `OPENROUTER_API_KEY` | Clé OpenRouter (frontend AI) |
+
+### 3.2 Secrets GitHub Actions
+
+Ces secrets sont définis dans `Settings → Secrets → Actions` du dépôt :
+
+| Secret GitHub | Description |
+|---------------|-------------|
+| `SCW_REGISTRY_ENDPOINT` | `rg.fr-par.scw.cloud/<votre-registry>` |
+| `SCW_SECRET_KEY` | Clé API Scaleway |
+| `SCW_DEFAULT_PROJECT_ID` | ID projet Scaleway |
+| `VM_IP` | IP publique de la VM |
+| `VM_SSH_KEY` | Clé SSH privée (pour se connecter à la VM) |
+| `VM_KNOWN_HOSTS` | Résultat de `ssh-keyscan <VM_IP>` |
+| `OP_SERVICE_ACCOUNT_TOKEN` | Token 1Password service account |
+
+Script helper pour configurer les secrets GitHub (première fois) :
 ```bash
-# Clone the repository
-git clone https://github.com/canatac/reimagined-guide.git
-cd reimagined-guide
+bash setup-secrets.sh
+```
 
-# Copy environment template
+---
+
+## 4. Premier déploiement (CI/CD)
+
+Pousser sur `main` déclenche le pipeline GitHub Actions (`.github/workflows/cicd.yml`) :
+
+```
+1. Build Rust (cargo build --release)
+2. Build images Docker + push → Scaleway Registry
+3. SSH sur la VM :
+   a. Redémarrage Docker
+   b. Pull des nouvelles images
+   c. Démarrage Caddy seul (obtention cert Let's Encrypt)
+   d. Démarrage du stack complet (docker-compose.deploy.yml)
+   e. Smoke tests (SMTP :587, DKIM health)
+```
+
+Pour suivre un déploiement :
+```bash
+# Logs en temps réel sur la VM
+ssh debian@<VM_IP> "sudo docker compose -f docker-compose.deploy.yml logs -f"
+
+# Vérifier les certificats Caddy
+ssh debian@<VM_IP> "sudo find /var/lib/docker/volumes/*/caddy/certificates -name '*.crt' 2>/dev/null"
+```
+
+---
+
+## 5. Déployer une nouvelle VM (remplacement complet)
+
+Procédure complète pour repartir de zéro :
+
+```bash
+# 1. Détruire l'ancienne infrastructure (ATTENTION : perte des données)
+cd infra/ && terraform destroy
+
+# 2. Recréer (prend ~2 minutes)
+terraform apply
+
+# 3. Récupérer la nouvelle IP
+NEW_IP=$(terraform output -raw vm_public_ip)
+echo "Nouvelle VM : $NEW_IP"
+
+# 4. Provisionner la VM
+scp infra/init-vm.sh debian@$NEW_IP:~
+ssh debian@$NEW_IP "bash ~/init-vm.sh '<MONGODB_PASSWORD>' '<MONGODB_USERNAME>'"
+
+# 5. Mettre à jour le secret GitHub VM_IP
+gh secret set VM_IP --body "$NEW_IP"
+gh secret set VM_KNOWN_HOSTS --body "$(ssh-keyscan $NEW_IP 2>/dev/null)"
+
+# 6. Mettre à jour MONGODB_URL dans 1Password avec la nouvelle IP privée
+#    (affichée à la fin de init-vm.sh)
+
+# 7. Déclencher le CI/CD
+git commit --allow-empty -m "ci: redeploy on new VM" && git push origin main
+```
+
+---
+
+## 6. Opérations courantes
+
+### Logs
+
+```bash
+ssh debian@<VM_IP> "sudo docker compose -f docker-compose.deploy.yml logs smtp-server -f"
+ssh debian@<VM_IP> "sudo docker compose -f docker-compose.deploy.yml logs caddy -f"
+```
+
+### Redémarrer un service
+
+```bash
+ssh debian@<VM_IP> "sudo docker compose -f docker-compose.deploy.yml restart smtp-server"
+```
+
+### MongoDB
+
+```bash
+# Connexion en ligne de commande
+ssh debian@<VM_IP> "mongosh 'mongodb://<user>:<pass>@127.0.0.1:27017/mailserver?authSource=admin'"
+
+# Vérifier les utilisateurs
+ssh debian@<VM_IP> "mongosh --eval 'db.getSiblingDB(\"admin\").getUsers()'"
+```
+
+### Renouvellement des certificats
+
+Caddy renouvelle automatiquement les certificats Let's Encrypt tous les ~60 jours.
+Le CI/CD re-applique les permissions (`chmod o+rX`) à chaque déploiement.
+
+Pour forcer un renouvellement manuellement :
+```bash
+ssh debian@<VM_IP> "sudo docker exec caddy caddy reload --config /etc/caddy/Caddyfile"
+```
+
+### Pare-feu nftables
+
+```bash
+# Voir les règles actives
+ssh debian@<VM_IP> "sudo nft list ruleset"
+
+# Recharger depuis la config persistée
+ssh debian@<VM_IP> "sudo nft -f /etc/nftables.conf"
+```
+
+---
+
+## 7. Développement local
+
+```bash
+# Copier et éditer les variables
 cp env.example .env
-# Edit .env with your settings
+# Éditer .env : MONGODB_CLUSTER_URL=mongodb, CERT_PATH=localhost.crt, etc.
 
-# Build and run
-cargo build --release
-cargo run --bin smtp_server &  # Async SMTP Server
-cargo run --bin imap_server &  # Async IMAP Server
-```
+# Générer des certificats auto-signés pour le dev
+mkdir -p certs
+openssl req -x509 -newkey rsa:4096 -keyout certs/localhost.key \
+  -out certs/localhost.crt -days 365 -nodes -subj '/CN=localhost'
 
-### 6.3 Docker Compose
-```bash
-# Start MongoDB, SMTP, and IMAP servers
+# Démarrer le stack de développement
 docker compose up -d
+
+# Logs
+docker compose logs smtp-server -f
+```
+
+Le stack local inclut un container MongoDB (port 27017). Aucun Caddy en dev ; les services SMTP/IMAP exposent directement leurs ports TLS.
+
+---
+
+## 8. Structure du projet
+
+```
+.
+├── src/                        # Code Rust (smtp_server, imap_server, email_api...)
+├── Cargo.toml                  # Dépendances Rust
+├── Dockerfile                  # Build multi-stage Rust → Debian slim (UID 10001)
+├── Caddyfile                   # Config Caddy (reverse proxy + TLS auto)
+├── docker-compose.yml          # Dev local (MongoDB container + build local)
+├── docker-compose.deploy.yml   # Production VM (SCW Registry + MongoDB natif)
+├── env.example                 # Template variables d'environnement
+├── infra/
+│   ├── main.tf                 # Infrastructure Scaleway (Terraform)
+│   └── init-vm.sh              # Provisionnement VM (Docker, MongoDB, nftables)
+├── scripts/
+│   └── init-mongo.js           # Création collections/indexes MongoDB
+├── prepare-deploy-machine.sh   # Setup machine de dev (Terraform, gh, scw CLI)
+└── setup-secrets.sh            # Helper config secrets GitHub (première fois)
 ```
 
 ---
 
-## 7. Testing
+## Variables d'environnement
 
-### 7.1 Send a Test Email
-```bash
-swaks --to recipient@example.com --from test@example.com --server localhost:8025 -d test_email.eml
-```
+Voir [`env.example`](./env.example) pour la liste complète avec commentaires.
 
-### 7.2 Verify MongoDB Storage
-```bash
-docker compose exec mongodb mongosh --eval "use mailserver; db.emails.find().pretty()"
-```
-
-### 7.3 Test IMAP Server
-```bash
-telnet localhost 143
-# or
-openssl s_client -connect localhost:993 -crlf
-```
-
----
-
-## 8. Security Best Practices
-- **Use `stunnel` for TLS** in production (simpler and more secure).
-- **Rotate credentials** regularly (MongoDB, SMTP/IMAP auth).
-- **Enable DKIM** for email signing (optional).
-- **Monitor logs** for suspicious activity.
-
----
-
-## 9. Troubleshooting
-| Issue | Solution |
-|-------|----------|
-| **MongoDB connection failed** | Check `MONGODB_CLUSTER_URL` and credentials. |
-| **TLS handshake failed** | Verify `CERT_PATH` and `KEY_PATH` in `.env`. |
-| **Authentication failed** | Check `SMTP_USERNAME`/`IMAP_USERNAME` and passwords. |
-| **Port already in use** | Change `SMTP_TLS_ADDR`, `SMTP_PLAIN_ADDR`, or `IMAP_SERVER`. |
-| **IMAP Server not responding** | Check `IMAP_SERVER` in `.env` and MongoDB connection. |
-
----
-
-## 10. Future Enhancements
-- **IMAP server improvements** (full RFC compliance).
-- **Spam filtering** (Rspamd integration).
-- **Web UI** for email management.
-
----
-
-## 11. References
-- [Rust Documentation](https://doc.rust-lang.org/book/)
-- [Tokio Documentation](https://tokio.rs/docs/overview/)
-- [SMTP RFC](https://tools.ietf.org/html/rfc5321)
-- [IMAP RFC](https://tools.ietf.org/html/rfc3501)
-- [MongoDB Rust Driver](https://docs.rs/mongodb/latest/mongodb/)
-- [Rustls Documentation](https://docs.rs/rustls/)
+En production, toutes les variables sensibles sont lues depuis le vault 1Password `hermes`
+(item `scw-hermes-smtp`) via `load-secrets-action` dans le CI/CD.

@@ -241,6 +241,7 @@ mod tests {
             username: "testuser".to_string(),
             password: "password".to_string(),
             mailbox: "testmailbox".to_string(),
+            condition_accepted: true,
         };
 
         // Créer un filtre pour le handler create_user

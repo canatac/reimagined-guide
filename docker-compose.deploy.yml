@@ -12,6 +12,7 @@ services:
     image: ${SCW_REGISTRY_ENDPOINT}/smtp-server:latest
     container_name: smtp-server
     restart: always
+    user: "0"
     ports:
       - "25:8025"
       - "587:8465"
@@ -19,24 +20,32 @@ services:
       - "8465:8465"
     volumes:
       - ./emails:/app/emails
-      - ./certs:/app/certs
       - ./dkim:/app/dkim
+      - caddy_data:/caddy-certs:ro
     environment:
       - SMTP_TLS_ADDR=${SMTP_TLS_ADDR}
       - SMTP_PLAIN_ADDR=${SMTP_PLAIN_ADDR}
-      - CERT_PATH=/app/certs/${CERT_PATH}
-      - KEY_PATH=/app/certs/${KEY_PATH}
+      - CERT_PATH=/caddy-certs/live/${DOMAIN_NAME}.crt
+      - KEY_PATH=/caddy-certs/live/${DOMAIN_NAME}.key
       - SMTP_USERNAME=${SMTP_USERNAME}
       - SMTP_PASSWORD=${SMTP_PASSWORD}
       - MONGODB_USERNAME=${MONGODB_USERNAME}
       - MONGODB_PASSWORD=${MONGODB_PASSWORD}
-      - MONGODB_CLUSTER_URL=172.16.12.2:27017
+      - MONGODB_CLUSTER_URL=${MONGODB_URL}
       - MONGODB_APP_NAME=${MONGODB_APP_NAME:-mailserver}
       - MONGODB_DATABASE=${MONGODB_DATABASE:-mailserver}
       - MONGODB_COLLECTION=${MONGODB_COLLECTION:-emails}
       - USE_MONGODB=${USE_MONGODB:-true}
       - RUST_LOG=${RUST_LOG:-info}
     command: ["smtp_server"]
+    # Override the image's HTTP-based healthcheck (which sends HTTP traffic to the SMTP port).
+    # Use a TCP connect so the probe is protocol-agnostic.
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 8025 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
     networks:
       - mailnet
 
@@ -44,26 +53,30 @@ services:
     image: ${SCW_REGISTRY_ENDPOINT}/smtp-server:latest
     container_name: email-api
     restart: always
+    user: "0"
     ports:
-      - "8000:8000"
-      - "8443:8443"
+      - "127.0.0.1:8000:8000"
     volumes:
-      - ./certs:/app/certs
+      - caddy_data:/caddy-certs:ro
     environment:
       - API_SERVER_ADDR=${API_SERVER_ADDR}
-      - FULLCHAIN_PATH=/app/certs/${FULLCHAIN_PATH}
-      - PRIVKEY_PATH=/app/certs/${PRIVKEY_PATH}
+      - FULLCHAIN_PATH=/caddy-certs/live/${DOMAIN_NAME}.crt
+      - PRIVKEY_PATH=/caddy-certs/live/${DOMAIN_NAME}.key
       - SMTP_USERNAME=${SMTP_USERNAME}
       - SMTP_PASSWORD=${SMTP_PASSWORD}
       - MONGODB_USERNAME=${MONGODB_USERNAME}
       - MONGODB_PASSWORD=${MONGODB_PASSWORD}
-      - MONGODB_CLUSTER_URL=172.16.12.2:27017
+      - MONGODB_CLUSTER_URL=${MONGODB_URL}
       - MONGODB_APP_NAME=${MONGODB_APP_NAME:-mailserver}
       - MONGODB_DATABASE=${MONGODB_DATABASE:-mailserver}
       - MONGODB_COLLECTION=${MONGODB_COLLECTION:-emails}
       - USE_MONGODB=${USE_MONGODB:-true}
       - DKIM_SERVICE_URL=http://dkim-service:3000/generate-dkim
       - RUST_LOG=${RUST_LOG:-info}
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
+      - OAUTH_CALLBACK_BASE_URL=${OAUTH_CALLBACK_BASE_URL:-https://mail.misfits.ai}
+      - FRONTEND_BASE_URL=${FRONTEND_BASE_URL:-https://mail.misfits.ai}
     command: ["email_api"]
     # Image HEALTHCHECK probes :8025 (SMTP). Override for API binary.
     # wget --spider treats some 2xx oddly; use full GET + HTTP code check.
@@ -93,7 +106,7 @@ services:
       - IMAP_SERVER_API_PORT=${IMAP_SERVER_API_PORT}
       - MONGODB_USERNAME=${MONGODB_USERNAME}
       - MONGODB_PASSWORD=${MONGODB_PASSWORD}
-      - MONGODB_CLUSTER_URL=172.16.12.2:27017
+      - MONGODB_CLUSTER_URL=${MONGODB_URL}
       - MONGODB_APP_NAME=${MONGODB_APP_NAME:-mailserver}
       - MONGODB_DATABASE=${MONGODB_DATABASE:-mailserver}
       - MONGODB_COLLECTION=${MONGODB_COLLECTION:-emails}
@@ -115,7 +128,8 @@ services:
     container_name: dkim-service
     restart: always
     ports:
-      - "3000:3000"
+      # Accessible uniquement en local — email-api passe par le réseau Docker interne
+      - "127.0.0.1:3000:3000"
     volumes:
       - ./dkim:/app/dkim
     environment:
@@ -128,6 +142,13 @@ services:
       - DOMAIN_NAME=${DOMAIN_NAME}
       - KEY_SELECTOR=${KEY_SELECTOR:-default}
       - PRIVATE_KEY_PATH=dkim/dkim-private.pem
+    healthcheck:
+      # node est garanti dans l'image — CMD-SHELL assure que PATH est résolu
+      test: ["CMD-SHELL", "node -e \"const s=require('net').connect(3000,'127.0.0.1',()=>process.exit(0));s.on('error',()=>process.exit(1));\""]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
     depends_on:
       - smtp-server
     networks:
@@ -159,6 +180,23 @@ services:
     networks:
       - mailnet
 
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy
+    restart: always
+    network_mode: "host"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - email-api
+      - misfits-web
+
 networks:
   mailnet:
     driver: bridge
+
+volumes:
+  caddy_data:
+  caddy_config:
