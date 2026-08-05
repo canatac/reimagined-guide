@@ -221,6 +221,8 @@ jobs:
             if [ -z "$MISFITS_WEB_DIGEST" ]; then MISFITS_WEB_DIGEST="unknown"; fi
             if [ -z "$SMTP_SERVER_DIGEST" ]; then SMTP_SERVER_DIGEST="unknown"; fi
 
+            upsert_env_file MISFITS_WEB_BUILD_VERSION "misfits-web@${MISFITS_WEB_DIGEST}"
+            upsert_env_file REIMAGINED_GUIDE_BUILD_VERSION "reimagined-guide@${SMTP_SERVER_DIGEST}"
             upsert_env_file NEXT_PUBLIC_MISFITS_WEB_BUILD_VERSION "misfits-web@${MISFITS_WEB_DIGEST}"
             upsert_env_file NEXT_PUBLIC_REIMAGINED_GUIDE_BUILD_VERSION "reimagined-guide@${SMTP_SERVER_DIGEST}"
             echo "Footer versions set in .env.deploy"
