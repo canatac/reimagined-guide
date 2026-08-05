@@ -12,6 +12,7 @@ services:
     image: ${SCW_REGISTRY_ENDPOINT}/smtp-server:latest
     container_name: smtp-server
     restart: always
+    user: "0"
     ports:
       - "25:8025"
       - "587:8465"
@@ -52,6 +53,7 @@ services:
     image: ${SCW_REGISTRY_ENDPOINT}/smtp-server:latest
     container_name: email-api
     restart: always
+    user: "0"
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
