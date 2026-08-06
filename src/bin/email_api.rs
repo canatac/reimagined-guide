@@ -1615,6 +1615,14 @@ fn folder_to_mailboxes(folder: &str) -> Vec<String> {
     }
 }
 
+fn canonical_folder(folder: &str) -> Option<String> {
+    let f = folder.trim().to_ascii_lowercase();
+    match f.as_str() {
+        "inbox" | "sent" | "drafts" | "archive" | "trash" | "spam" => Some(f),
+        _ => None,
+    }
+}
+
 /// Resolve mailbox local-part. Convention: user_id = `admin` (not admin@misfits.ai).
 fn resolve_user_id(req: &actix_web::HttpRequest) -> String {
     if let Some(id) = req
@@ -2354,6 +2362,73 @@ async fn api_email_by_id(
             eprintln!("fetch_email error: {}", e);
             HttpResponse::InternalServerError().json(serde_json::json!({
                 "message": "Failed to fetch email",
+            }))
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EmailActionRequest {
+    action: String,
+    #[serde(default)]
+    target_folder: Option<String>,
+}
+
+async fn api_email_action(
+    path: web::Path<String>,
+    body: web::Json<EmailActionRequest>,
+    req: actix_web::HttpRequest,
+    logic: web::Data<Arc<Logic>>,
+) -> impl Responder {
+    let user_id = resolve_user_id(&req);
+    let email_id = path.into_inner();
+    let action = body.action.trim().to_ascii_lowercase();
+
+    let result = match action.as_str() {
+        "archive" => logic.move_email_to_mailbox(&user_id, &email_id, "archive").await,
+        "trash" | "delete" => logic.move_email_to_mailbox(&user_id, &email_id, "trash").await,
+        "restore" => logic.move_email_to_mailbox(&user_id, &email_id, "inbox").await,
+        "move" => {
+            let Some(target) = body
+                .target_folder
+                .as_ref()
+                .and_then(|f| canonical_folder(f))
+            else {
+                return HttpResponse::BadRequest().json(serde_json::json!({
+                    "ok": false,
+                    "message": "targetFolder must be one of inbox|sent|drafts|archive|trash|spam",
+                }));
+            };
+            logic.move_email_to_mailbox(&user_id, &email_id, &target).await
+        }
+        "markread" => logic.set_email_read(&user_id, &email_id, true).await,
+        "markunread" => logic.set_email_read(&user_id, &email_id, false).await,
+        "star" => logic.set_email_starred(&user_id, &email_id, true).await,
+        "unstar" => logic.set_email_starred(&user_id, &email_id, false).await,
+        _ => {
+            return HttpResponse::BadRequest().json(serde_json::json!({
+                "ok": false,
+                "message": "Unsupported action. Use move|archive|trash|delete|restore|markRead|markUnread|star|unstar",
+            }))
+        }
+    };
+
+    match result {
+        Ok(true) => HttpResponse::Ok().json(serde_json::json!({
+            "ok": true,
+            "id": email_id,
+            "action": body.action,
+        })),
+        Ok(false) => HttpResponse::NotFound().json(serde_json::json!({
+            "ok": false,
+            "message": "Email not found",
+        })),
+        Err(e) => {
+            eprintln!("api_email_action error: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({
+                "ok": false,
+                "message": "Failed to apply email action",
             }))
         }
     }
@@ -3236,6 +3311,7 @@ async fn main() -> std::io::Result<()> {
                 )
                 .route("/api/emails", web::get().to(api_emails))
                 .route("/api/emails/{id}", web::get().to(api_email_by_id))
+                .route("/api/emails/{id}/action", web::post().to(api_email_action))
                 .route("/api/tags", web::get().to(api_tags))
                 .route("/api/send", web::post().to(api_send))
                 .route("/api/send/{id}/status", web::get().to(api_send_status))
