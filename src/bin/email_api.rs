@@ -1996,7 +1996,7 @@ async fn api_send(
     // both sign and deliver via Nodemailer — when no dkimSignature is
     // returned we treat success as "already delivered by dkim-service".
     let dkim_service: Box<dyn DkimService> = Box::new(RealDkimService);
-    let (dkim_sig, message_id_hdr, already_delivered) =
+    let (dkim_sig, message_id_hdr, already_delivered, dkim_remote_accepted, dkim_remote_rejected, dkim_response) =
         match dkim_service.sign_email(&email_req).await {
             Ok(dkim_result) => {
                 let status = dkim_result["status"].as_str().unwrap_or("");
@@ -2010,6 +2010,7 @@ async fn api_send(
                         "message": format!("Failed to sign email: {}", msg),
                     }));
                 }
+
                 let sig = dkim_result["dkimSignature"]
                     .as_str()
                     .or_else(|| dkim_result["dkim_signature"].as_str())
@@ -2020,8 +2021,29 @@ async fn api_send(
                     .or_else(|| dkim_result["message_id"].as_str())
                     .unwrap_or("")
                     .to_string();
+
+                let accepted_by_remote_mx = dkim_result["acceptedByRemoteMx"].as_bool().unwrap_or(false)
+                    || dkim_result["accepted"]
+                        .as_array()
+                        .map(|a| !a.is_empty())
+                        .unwrap_or(false);
+                let rejected_by_remote_mx = dkim_result["rejected"]
+                    .as_array()
+                    .map(|a| !a.is_empty())
+                    .unwrap_or(false);
+                let upstream_response = dkim_result["response"].as_str().map(|s| s.to_string());
+
+                // No DKIM signature means the Node service likely already performed
+                // SMTP handoff/delivery itself.
                 let delivered = sig.is_empty();
-                (sig, mid, delivered)
+                (
+                    sig,
+                    mid,
+                    delivered,
+                    accepted_by_remote_mx,
+                    rejected_by_remote_mx,
+                    upstream_response,
+                )
             }
             Err(e) => {
                 eprintln!("DKIM service error on /api/send: {}", e);
@@ -2091,22 +2113,41 @@ async fn api_send(
     match send_result {
         Ok(_) => {
             if already_delivered && monitoring::monitoring_enabled() {
-                // When DKIM service returns success without dkimSignature, the
-                // handoff/delivery happened outside our direct SMTP client path.
-                // Emit a monitoring event so the message is traceable by
-                // message_id even without local SMTP relay telemetry.
+                // DKIM service did the SMTP handoff/delivery itself. Persist an
+                // explicit monitoring event so trace API/status API can surface
+                // whether upstream accepted recipient(s).
                 let mut ev = monitoring::SmtpEvent::new(
                     &normalize_message_id(&message_id),
-                    monitoring::SmtpEventType::Queued,
+                    if dkim_remote_accepted {
+                        monitoring::SmtpEventType::Delivered
+                    } else {
+                        monitoring::SmtpEventType::Queued
+                    },
                     &from,
                     &to,
                 );
-                ev.status = monitoring::SmtpStatus::Pending;
+
+                ev.status = if dkim_remote_accepted {
+                    monitoring::SmtpStatus::Delivered
+                } else if dkim_remote_rejected {
+                    monitoring::SmtpStatus::Bounced
+                } else {
+                    monitoring::SmtpStatus::Pending
+                };
+
                 ev.company = Some("dkim-service".to_string());
-                ev.smtp_reply = Some(
-                    "Handoff accepted by DKIM service (remote mailbox receipt not independently verified)"
+                ev.smtp_reply = dkim_response.or_else(|| {
+                    Some(
+                        if dkim_remote_accepted {
+                            "Upstream SMTP accepted by DKIM service"
+                        } else if dkim_remote_rejected {
+                            "Upstream SMTP rejected recipient in DKIM service"
+                        } else {
+                            "Handoff accepted by DKIM service (remote mailbox receipt not independently verified)"
+                        }
                         .to_string(),
-                );
+                    )
+                });
                 monitoring::emit(ev);
             }
 
@@ -3470,6 +3511,7 @@ impl DkimService for RealDkimService {
                 "from": email.from,
                 "to": email.to,
                 "subject": email.subject,
+                "text": email.body,
                 "html": email.body
             }))
             .send()
