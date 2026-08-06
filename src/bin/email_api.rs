@@ -2072,7 +2072,14 @@ async fn api_send(
         },
     };
 
-    let send_result = send_outgoing_email(&email).await;
+    // If the DKIM service already delivered the message (success response
+    // without a dkim signature), skip direct SMTP relay. This prevents false
+    // negatives when relay ports are closed but delivery already happened.
+    let send_result = if already_delivered {
+        Ok(())
+    } else {
+        send_outgoing_email(&email).await
+    };
 
     match send_result {
         Ok(_) => {
