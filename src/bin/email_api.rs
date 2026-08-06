@@ -1950,6 +1950,13 @@ fn from_address_for_user(user_id: &str) -> String {
     }
 }
 
+fn normalize_message_id(raw: &str) -> String {
+    raw.trim()
+        .trim_start_matches('<')
+        .trim_end_matches('>')
+        .to_string()
+}
+
 async fn api_send(
     body: web::Json<ComposeSendRequest>,
     req: actix_web::HttpRequest,
@@ -2083,6 +2090,26 @@ async fn api_send(
 
     match send_result {
         Ok(_) => {
+            if already_delivered && monitoring::monitoring_enabled() {
+                // When DKIM service returns success without dkimSignature, the
+                // handoff/delivery happened outside our direct SMTP client path.
+                // Emit a monitoring event so the message is traceable by
+                // message_id even without local SMTP relay telemetry.
+                let mut ev = monitoring::SmtpEvent::new(
+                    &normalize_message_id(&message_id),
+                    monitoring::SmtpEventType::Queued,
+                    &from,
+                    &to,
+                );
+                ev.status = monitoring::SmtpStatus::Pending;
+                ev.company = Some("dkim-service".to_string());
+                ev.smtp_reply = Some(
+                    "Handoff accepted by DKIM service (remote mailbox receipt not independently verified)"
+                        .to_string(),
+                );
+                monitoring::emit(ev);
+            }
+
             // Store Sent copy for the sender. Local-domain inbox copies come
             // exclusively from SMTP inbound (Nodemailer/dkim or MX self-delivery)
             // to avoid duplicate messages.
@@ -2118,6 +2145,115 @@ async fn api_send(
             }))
         }
     }
+}
+
+async fn api_send_status(
+    path: web::Path<String>,
+    req: actix_web::HttpRequest,
+    logic: web::Data<Arc<Logic>>,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    let user_id = resolve_user_id(&req);
+    let email_id = path.into_inner();
+
+    let email = match logic.fetch_email(&user_id, &email_id).await {
+        Ok(Some(email)) => email,
+        Ok(None) => {
+            return HttpResponse::NotFound().json(serde_json::json!({
+                "message": "Email not found"
+            }))
+        }
+        Err(e) => {
+            eprintln!("api_send_status fetch_email error: {}", e);
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "message": "Failed to fetch email"
+            }));
+        }
+    };
+
+    let message_id_header = email
+        .headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("message-id"))
+        .map(|(_, v)| v.clone())
+        .unwrap_or_default();
+
+    let message_id = normalize_message_id(&message_id_header);
+    if message_id.is_empty() {
+        return HttpResponse::Ok().json(serde_json::json!({
+            "id": email.id,
+            "message": "No Message-ID found",
+            "monitoring": {
+                "traceable": false
+            }
+        }));
+    }
+
+    let db = env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
+    let coll = mongo
+        .database(&db)
+        .collection::<bson::Document>("smtp_events");
+
+    let events = match coll
+        .find(doc! { "message_id": &message_id })
+        .sort(doc! { "ts": -1 })
+        .limit(200)
+        .await
+    {
+        Ok(cursor) => cursor
+            .try_collect::<Vec<_>>()
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|d| bson::from_document::<monitoring::SmtpEvent>(d).ok())
+            .collect::<Vec<_>>(),
+        Err(e) => {
+            eprintln!("api_send_status query smtp_events error: {}", e);
+            vec![]
+        }
+    };
+
+    let accepted_by_remote_mx = events.iter().any(|e| {
+        matches!(e.event_type, monitoring::SmtpEventType::Delivered)
+            && matches!(e.status, monitoring::SmtpStatus::Delivered)
+    });
+    let bounced_or_failed = events.iter().any(|e| {
+        matches!(e.status, monitoring::SmtpStatus::Bounced | monitoring::SmtpStatus::Failed)
+    });
+    let handoff_only = !accepted_by_remote_mx
+        && !bounced_or_failed
+        && events.iter().any(|e| e.company.as_deref() == Some("dkim-service"));
+
+    let latest = events.first();
+
+    HttpResponse::Ok().json(serde_json::json!({
+        "id": email.id,
+        "messageId": message_id,
+        "from": email.from,
+        "to": email.to,
+        "subject": email.subject,
+        "monitoring": {
+            "traceable": true,
+            "events": events.len(),
+            "acceptedByRemoteMx": accepted_by_remote_mx,
+            "bouncedOrFailed": bounced_or_failed,
+            "handoffOnly": handoff_only,
+            "latestEventType": latest.map(|e| format!("{:?}", e.event_type)),
+            "latestStatus": latest.map(|e| format!("{:?}", e.status)),
+            "latestSmtpCode": latest.and_then(|e| e.smtp_code),
+            "latestSmtpReply": latest.and_then(|e| e.smtp_reply.clone()),
+            "traceEndpoint": format!("/api/monitoring/messages/{}/trace", message_id),
+            "note": if accepted_by_remote_mx {
+                "Remote MX accepted the message (strong delivery signal)."
+            } else if handoff_only {
+                "Message handed off to DKIM service; remote mailbox receipt is not independently verified yet."
+            } else if bounced_or_failed {
+                "SMTP monitoring reports bounce/failure events."
+            } else {
+                "No conclusive delivery signal yet."
+            }
+        }
+    }))
 }
 
 async fn api_email_by_id(
@@ -3040,6 +3176,7 @@ async fn main() -> std::io::Result<()> {
                 .route("/api/emails/{id}", web::get().to(api_email_by_id))
                 .route("/api/tags", web::get().to(api_tags))
                 .route("/api/send", web::post().to(api_send))
+                .route("/api/send/{id}/status", web::get().to(api_send_status))
                 .route("/api/drafts", web::get().to(api_drafts))
                 .route("/api/drafts", web::post().to(api_drafts))
                 .route("/api/templates", web::get().to(api_templates))
