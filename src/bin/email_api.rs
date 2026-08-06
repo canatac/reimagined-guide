@@ -55,6 +55,7 @@ use std::collections::HashMap;
 use std::env;
 use std::fs::{create_dir_all, File};
 use std::io::{BufRead, BufReader, Write};
+use std::net::IpAddr;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -1965,6 +1966,38 @@ fn normalize_message_id(raw: &str) -> String {
         .to_string()
 }
 
+fn is_private_or_local_ip(ip: &str) -> bool {
+    match ip.parse::<IpAddr>() {
+        Ok(IpAddr::V4(v4)) => {
+            v4.is_private() || v4.is_loopback() || v4.is_link_local() || v4.is_multicast()
+        }
+        Ok(IpAddr::V6(v6)) => v6.is_loopback() || v6.is_unspecified(),
+        Err(_) => false,
+    }
+}
+
+fn is_internal_delivery_hop(
+    mx_host: Option<&str>,
+    remote_ip: Option<&str>,
+    remote_port: Option<u16>,
+    company: Option<&str>,
+) -> bool {
+    let host_internal = mx_host
+        .map(|h| {
+            let h = h.to_ascii_lowercase();
+            h == "smtp-server" || h.ends_with(".local") || h.ends_with(".internal")
+        })
+        .unwrap_or(false);
+
+    let ip_internal = remote_ip.map(is_private_or_local_ip).unwrap_or(false);
+    let relay_port = matches!(remote_port, Some(8025 | 8465));
+    let company_internal = company
+        .map(|c| c.eq_ignore_ascii_case("dkim-service"))
+        .unwrap_or(false);
+
+    host_internal || ip_internal || (company_internal && relay_port)
+}
+
 async fn api_send(
     body: web::Json<ComposeSendRequest>,
     req: actix_web::HttpRequest,
@@ -2056,14 +2089,24 @@ async fn api_send(
                     .as_u64()
                     .and_then(|p| u16::try_from(p).ok());
 
+                // Distinguish true remote-MX acceptance from internal relay handoff.
+                let internal_hop = is_internal_delivery_hop(
+                    upstream_mx_host.as_deref(),
+                    upstream_remote_ip.as_deref(),
+                    upstream_remote_port,
+                    Some("dkim-service"),
+                );
+                let effective_remote_accept = accepted_by_remote_mx && !internal_hop;
+
                 // No DKIM signature means the Node service likely already performed
-                // SMTP handoff/delivery itself.
-                let delivered = sig.is_empty();
+                // SMTP handoff/delivery itself. Only skip direct SMTP relay when
+                // acceptance is on a non-internal remote MX hop.
+                let delivered = sig.is_empty() && effective_remote_accept;
                 (
                     sig,
                     mid,
                     delivered,
-                    accepted_by_remote_mx,
+                    effective_remote_accept,
                     rejected_by_remote_mx,
                     upstream_response,
                     upstream_mx_host,
@@ -2298,13 +2341,25 @@ async fn api_send_status(
     let accepted_by_remote_mx = events.iter().any(|e| {
         matches!(e.event_type, monitoring::SmtpEventType::Delivered)
             && matches!(e.status, monitoring::SmtpStatus::Delivered)
+            && !is_internal_delivery_hop(
+                e.mx_host.as_deref(),
+                e.remote_ip.as_deref(),
+                e.remote_port,
+                e.company.as_deref(),
+            )
     });
     let bounced_or_failed = events.iter().any(|e| {
         matches!(e.status, monitoring::SmtpStatus::Bounced | monitoring::SmtpStatus::Failed)
     });
-    let handoff_only = !accepted_by_remote_mx
-        && !bounced_or_failed
-        && events.iter().any(|e| e.company.as_deref() == Some("dkim-service"));
+    let saw_internal_handoff = events.iter().any(|e| {
+        is_internal_delivery_hop(
+            e.mx_host.as_deref(),
+            e.remote_ip.as_deref(),
+            e.remote_port,
+            e.company.as_deref(),
+        )
+    });
+    let handoff_only = !accepted_by_remote_mx && !bounced_or_failed && saw_internal_handoff;
 
     let latest = events.first();
     let delivery_state = if accepted_by_remote_mx {
