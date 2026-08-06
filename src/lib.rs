@@ -1,6 +1,7 @@
 pub mod logic;
 pub use logic::LogicTrait;
 pub mod entities;
+pub mod external_imap;
 pub mod imap_server;
 pub mod monitoring;
 pub mod security;

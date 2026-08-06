@@ -1,0 +1,534 @@
+openapi: 3.0.3
+info:
+  title: Misfits Mail External IMAP Aggregation API
+  version: 1.0.0
+servers:
+  - url: https://mail.misfits.ai
+  - url: http://127.0.0.1:8000
+paths:
+  /api/openapi/external-imap.yaml:
+    get:
+      summary: Get this OpenAPI specification
+      responses:
+        '200':
+          description: OpenAPI YAML
+          content:
+            application/yaml:
+              schema:
+                type: string
+  /api/external-accounts:
+    get:
+      summary: List external IMAP accounts
+      responses:
+        '200':
+          description: External accounts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accounts:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ExternalImapAccount'
+    post:
+      summary: Create external IMAP account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateExternalAccountInput'
+      responses:
+        '200':
+          description: External account created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalImapAccount'
+  /api/external-accounts/{id}:
+    get:
+      summary: Get external account
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: External account
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalImapAccount'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      summary: Update external account
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateExternalAccountInput'
+      responses:
+        '200':
+          description: External account updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalImapAccount'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      summary: Delete external account
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted:
+                    type: boolean
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/external-accounts/{id}/test:
+    post:
+      summary: Test IMAP auth/capabilities
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: IMAP test result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImapTestResult'
+        '422':
+          description: IMAP auth failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/external-accounts/{id}/folders:
+    get:
+      summary: List external folders
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Folders
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  folders:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ExternalImapFolder'
+  /api/external-accounts/{id}/folders/discover:
+    post:
+      summary: Discover folders from remote IMAP
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Discovery result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImapDiscoverResult'
+  /api/external-accounts/{id}/folders/{folder_id}/mapping:
+    put:
+      summary: Set local role mapping for a folder
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: folder_id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExternalFolderMappingInput'
+      responses:
+        '200':
+          description: Mapping updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalImapFolder'
+  /api/external-accounts/{id}/sync:
+    post:
+      summary: Trigger sync now
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartSyncInput'
+      responses:
+        '200':
+          description: Sync completed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  runId: { type: string }
+                  status: { type: string }
+                  run:
+                    $ref: '#/components/schemas/ExternalSyncRun'
+  /api/external-accounts/{id}/sync/status:
+    get:
+      summary: Latest sync status for account
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Latest sync run
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ExternalSyncRun'
+                  - type: object
+                    properties:
+                      status:
+                        type: string
+                        example: idle
+  /api/external-accounts/{id}/sync/pause:
+    post:
+      summary: Pause account sync
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Account paused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalImapAccount'
+  /api/external-accounts/{id}/sync/resume:
+    post:
+      summary: Resume account sync
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Account resumed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalImapAccount'
+  /api/external-sync-runs/{run_id}:
+    get:
+      summary: Get sync run by id
+      parameters:
+        - in: path
+          name: run_id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Sync run
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalSyncRun'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/external-messages:
+    get:
+      summary: List external messages
+      parameters:
+        - in: query
+          name: accountId
+          required: true
+          schema: { type: string }
+        - in: query
+          name: folder
+          required: false
+          schema: { type: string }
+        - in: query
+          name: page
+          required: false
+          schema: { type: integer, minimum: 1, default: 1 }
+        - in: query
+          name: pageSize
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        '200':
+          description: Message page
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  messages:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ExternalImapMessage'
+                  page:
+                    type: integer
+                  pageSize:
+                    type: integer
+  /api/external-messages/{id}/action:
+    post:
+      summary: Apply external message action
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExternalMessageActionInput'
+      responses:
+        '200':
+          description: Updated message
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalImapMessage'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+  responses:
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+  schemas:
+    ErrorEnvelope:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string }
+            message: { type: string }
+
+    CreateExternalAccountInput:
+      type: object
+      required: [provider, email, authType, imap]
+      properties:
+        provider: { type: string }
+        email: { type: string, format: email }
+        authType: { type: string, enum: [oauth2, app_password, password] }
+        imap:
+          $ref: '#/components/schemas/ExternalImapServerConfig'
+        smtp:
+          $ref: '#/components/schemas/ExternalSmtpServerConfig'
+        credentials:
+          $ref: '#/components/schemas/ExternalAccountCredentials'
+
+    UpdateExternalAccountInput:
+      type: object
+      properties:
+        provider: { type: string }
+        email: { type: string, format: email }
+        authType: { type: string }
+        status: { type: string, enum: [active, paused, error] }
+        imap:
+          $ref: '#/components/schemas/ExternalImapServerConfig'
+        smtp:
+          $ref: '#/components/schemas/ExternalSmtpServerConfig'
+        credentials:
+          $ref: '#/components/schemas/ExternalAccountCredentials'
+        lastError: { type: string }
+
+    ExternalImapServerConfig:
+      type: object
+      required: [host, port, tls]
+      properties:
+        host: { type: string }
+        port: { type: integer }
+        tls: { type: boolean }
+
+    ExternalSmtpServerConfig:
+      type: object
+      properties:
+        host: { type: string }
+        port: { type: integer }
+        tls: { type: boolean }
+
+    ExternalAccountCredentials:
+      type: object
+      properties:
+        secretValue: { type: string, description: "MVP storage, redacted in read APIs" }
+        secretRef: { type: string }
+
+    ExternalImapAccount:
+      type: object
+      properties:
+        id: { type: string }
+        ownerUserId: { type: string }
+        provider: { type: string }
+        email: { type: string, format: email }
+        authType: { type: string }
+        secretRef: { type: string, nullable: true }
+        secretValue: { type: string, nullable: true }
+        imapHost: { type: string }
+        imapPort: { type: integer }
+        imapTls: { type: boolean }
+        smtpHost: { type: string, nullable: true }
+        smtpPort: { type: integer, nullable: true }
+        smtpTls: { type: boolean, nullable: true }
+        status: { type: string }
+        lastSyncAt: { type: string, format: date-time, nullable: true }
+        lastError: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    ExternalImapFolder:
+      type: object
+      properties:
+        id: { type: string }
+        accountId: { type: string }
+        ownerUserId: { type: string }
+        remoteName: { type: string }
+        localRole: { type: string }
+        uidValidity: { type: integer, nullable: true }
+        highestUid: { type: integer, nullable: true }
+        highestModseq: { type: integer, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    ExternalImapMessage:
+      type: object
+      properties:
+        id: { type: string }
+        accountId: { type: string }
+        folderId: { type: string, nullable: true }
+        ownerUserId: { type: string }
+        remoteUid: { type: integer, nullable: true }
+        messageIdHeader: { type: string, nullable: true }
+        threadKey: { type: string, nullable: true }
+        from: { type: string, nullable: true }
+        to: { type: string, nullable: true }
+        subject: { type: string, nullable: true }
+        sentAt: { type: string, format: date-time, nullable: true }
+        flags:
+          type: array
+          items: { type: string }
+        internalDate: { type: string, format: date-time, nullable: true }
+        bodyPreview: { type: string, nullable: true }
+        rawRef: { type: string, nullable: true }
+        dedupHash: { type: string, nullable: true }
+        deleted: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    ExternalSyncRun:
+      type: object
+      properties:
+        id: { type: string }
+        accountId: { type: string }
+        ownerUserId: { type: string }
+        mode: { type: string, enum: [full, incremental] }
+        folders:
+          type: array
+          items: { type: string }
+        since: { type: string, format: date-time, nullable: true }
+        status: { type: string, enum: [running, success, failed, partial] }
+        statsFetched: { type: integer }
+        statsUpdated: { type: integer }
+        statsDeleted: { type: integer }
+        startedAt: { type: string, format: date-time }
+        endedAt: { type: string, format: date-time, nullable: true }
+        error: { type: string, nullable: true }
+
+    ImapTestResult:
+      type: object
+      properties:
+        ok: { type: boolean }
+        capabilities:
+          type: array
+          items: { type: string }
+        greeting: { type: string }
+        message: { type: string }
+
+    ImapDiscoverResult:
+      type: object
+      properties:
+        folders:
+          type: array
+          items: { type: string }
+        capabilities:
+          type: array
+          items: { type: string }
+
+    ExternalFolderMappingInput:
+      type: object
+      required: [localRole]
+      properties:
+        localRole: { type: string }
+
+    StartSyncInput:
+      type: object
+      required: [mode]
+      properties:
+        mode: { type: string, enum: [full, incremental] }
+        folders:
+          type: array
+          items: { type: string }
+        since: { type: string, format: date-time }
+
+    ExternalMessageActionInput:
+      type: object
+      required: [action]
+      properties:
+        action:
+          type: string
+          enum: [mark_read, mark_unread, star, unstar, move, delete, archive]
+        targetFolder:
+          type: string

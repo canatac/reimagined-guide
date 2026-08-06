@@ -2,6 +2,89 @@ use mongodb::bson;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalImapAccount {
+    pub id: String,
+    pub owner_user_id: String,
+    pub provider: String,
+    pub email: String,
+    pub auth_type: String,
+    pub secret_ref: Option<String>,
+    #[serde(default)]
+    pub secret_value: Option<String>,
+    pub imap_host: String,
+    pub imap_port: u16,
+    pub imap_tls: bool,
+    pub smtp_host: Option<String>,
+    pub smtp_port: Option<u16>,
+    pub smtp_tls: Option<bool>,
+    pub status: String,
+    pub last_sync_at: Option<bson::DateTime>,
+    pub last_error: Option<String>,
+    pub created_at: bson::DateTime,
+    pub updated_at: bson::DateTime,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalImapFolder {
+    pub id: String,
+    pub account_id: String,
+    pub owner_user_id: String,
+    pub remote_name: String,
+    pub local_role: String,
+    pub uid_validity: Option<u64>,
+    pub highest_uid: Option<u64>,
+    pub highest_modseq: Option<u64>,
+    pub created_at: bson::DateTime,
+    pub updated_at: bson::DateTime,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalImapMessage {
+    pub id: String,
+    pub account_id: String,
+    pub folder_id: Option<String>,
+    pub owner_user_id: String,
+    pub remote_uid: Option<u64>,
+    pub message_id_header: Option<String>,
+    pub thread_key: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub subject: Option<String>,
+    pub sent_at: Option<bson::DateTime>,
+    #[serde(default)]
+    pub flags: Vec<String>,
+    pub internal_date: Option<bson::DateTime>,
+    pub body_preview: Option<String>,
+    pub raw_ref: Option<String>,
+    pub dedup_hash: Option<String>,
+    pub deleted: bool,
+    pub created_at: bson::DateTime,
+    pub updated_at: bson::DateTime,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalSyncRun {
+    pub id: String,
+    pub account_id: String,
+    pub owner_user_id: String,
+    pub mode: String,
+    #[serde(default)]
+    pub folders: Vec<String>,
+    pub since: Option<bson::DateTime>,
+    pub status: String,
+    pub stats_fetched: u64,
+    pub stats_updated: u64,
+    pub stats_deleted: u64,
+    pub started_at: bson::DateTime,
+    pub ended_at: Option<bson::DateTime>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct CalendarEvent {
     pub id: String,
     pub user_id: String,
