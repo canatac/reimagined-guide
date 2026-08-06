@@ -2201,16 +2201,28 @@ async fn api_send(
                 },
             )
             .await;
+            let delivery_state = if dkim_remote_rejected {
+                "failed"
+            } else if dkim_remote_accepted {
+                "sent"
+            } else if already_delivered {
+                "queued"
+            } else {
+                "sending"
+            };
+
             HttpResponse::Ok().json(serde_json::json!({
                 "sent": true,
                 "id": id,
                 "messageId": message_id,
+                "deliveryState": delivery_state,
             }))
         }
         Err(e) => {
             eprintln!("send_outgoing_email failed: {}", e);
             HttpResponse::InternalServerError().json(serde_json::json!({
                 "sent": false,
+                "deliveryState": "failed",
                 "message": format!("Failed to send email: {}", e),
             }))
         }
@@ -2295,10 +2307,20 @@ async fn api_send_status(
         && events.iter().any(|e| e.company.as_deref() == Some("dkim-service"));
 
     let latest = events.first();
+    let delivery_state = if accepted_by_remote_mx {
+        "sent"
+    } else if bounced_or_failed {
+        "failed"
+    } else if handoff_only {
+        "queued"
+    } else {
+        "sending"
+    };
 
     HttpResponse::Ok().json(serde_json::json!({
         "id": email.id,
         "messageId": message_id,
+        "deliveryState": delivery_state,
         "from": email.from,
         "to": email.to,
         "subject": email.subject,
