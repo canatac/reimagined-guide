@@ -1996,7 +1996,17 @@ async fn api_send(
     // both sign and deliver via Nodemailer — when no dkimSignature is
     // returned we treat success as "already delivered by dkim-service".
     let dkim_service: Box<dyn DkimService> = Box::new(RealDkimService);
-    let (dkim_sig, message_id_hdr, already_delivered, dkim_remote_accepted, dkim_remote_rejected, dkim_response) =
+    let (
+        dkim_sig,
+        message_id_hdr,
+        already_delivered,
+        dkim_remote_accepted,
+        dkim_remote_rejected,
+        dkim_response,
+        dkim_mx_host,
+        dkim_remote_ip,
+        dkim_remote_port,
+    ) =
         match dkim_service.sign_email(&email_req).await {
             Ok(dkim_result) => {
                 let status = dkim_result["status"].as_str().unwrap_or("");
@@ -2032,6 +2042,11 @@ async fn api_send(
                     .map(|a| !a.is_empty())
                     .unwrap_or(false);
                 let upstream_response = dkim_result["response"].as_str().map(|s| s.to_string());
+                let upstream_mx_host = dkim_result["smtpHost"].as_str().map(|s| s.to_string());
+                let upstream_remote_ip = dkim_result["remoteIp"].as_str().map(|s| s.to_string());
+                let upstream_remote_port = dkim_result["smtpPort"]
+                    .as_u64()
+                    .and_then(|p| u16::try_from(p).ok());
 
                 // No DKIM signature means the Node service likely already performed
                 // SMTP handoff/delivery itself.
@@ -2043,6 +2058,9 @@ async fn api_send(
                     accepted_by_remote_mx,
                     rejected_by_remote_mx,
                     upstream_response,
+                    upstream_mx_host,
+                    upstream_remote_ip,
+                    upstream_remote_port,
                 )
             }
             Err(e) => {
@@ -2136,6 +2154,9 @@ async fn api_send(
                 };
 
                 ev.company = Some("dkim-service".to_string());
+                ev.mx_host = dkim_mx_host;
+                ev.remote_ip = dkim_remote_ip;
+                ev.remote_port = dkim_remote_port;
                 ev.smtp_reply = dkim_response.or_else(|| {
                     Some(
                         if dkim_remote_accepted {
