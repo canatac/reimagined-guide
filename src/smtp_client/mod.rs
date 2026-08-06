@@ -77,16 +77,49 @@ async fn expect_code<T: AsyncReadExt + Unpin>(
     expected: &str,
 ) -> std::io::Result<()> {
     let mut response = [0; 1024];
-    let n = stream.read(&mut response).await?;
-    let response_str = String::from_utf8_lossy(&response[..n]);
-    println!("Received response: {}", response_str);
-    if !response_str.starts_with(expected) {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            format!("Unexpected response: {}", response_str),
-        ));
+    let mut acc = String::new();
+
+    for _ in 0..16 {
+        let n = stream.read(&mut response).await?;
+        if n == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                format!("Connection closed while waiting for SMTP {}", expected),
+            ));
+        }
+
+        let chunk = String::from_utf8_lossy(&response[..n]);
+        acc.push_str(&chunk);
+        println!("Received response: {}", chunk);
+
+        for line in acc.split("\r\n").filter(|l| !l.is_empty()) {
+            if line.len() < 4 {
+                continue;
+            }
+            let prefix = &line[..3];
+            let sep = line.as_bytes()[3] as char;
+            let is_code = prefix.chars().all(|c| c.is_ascii_digit());
+            if !is_code {
+                continue;
+            }
+
+            if prefix == expected && sep == ' ' {
+                return Ok(());
+            }
+
+            if sep == ' ' && prefix != expected {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("Unexpected response: {}", acc),
+                ));
+            }
+        }
     }
-    Ok(())
+
+    Err(std::io::Error::new(
+        std::io::ErrorKind::TimedOut,
+        format!("Timed out waiting for SMTP {} response: {}", expected, acc),
+    ))
 }
 pub async fn send_outgoing_email(email: &Email) -> std::io::Result<()> {
     if let Ok(relay_host) = env::var("SMTP_RELAY_HOST") {
