@@ -2528,6 +2528,8 @@ async fn api_drafts_upsert(
         }
     };
     draft_doc.insert("user_id", user_id.clone());
+    // Avoid Mongo update conflict between $set and $setOnInsert on createdAt.
+    draft_doc.remove("createdAt");
 
     let coll = mongo
         .database(&mongo_db_name())
