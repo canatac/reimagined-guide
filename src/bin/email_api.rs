@@ -49,6 +49,10 @@ use mongodb::bson;
 use mongodb::bson::doc;
 use reqwest;
 use simple_smtp_server::entities::{CalendarEvent, Email};
+use simple_smtp_server::external_imap::{
+    CreateExternalAccountInput, ExternalImapService, ExternalMessageActionInput,
+    ExternalFolderMappingInput, StartSyncInput, UpdateExternalAccountInput,
+};
 use simple_smtp_server::logic::Logic;
 use simple_smtp_server::smtp_client::send_outgoing_email;
 use std::collections::HashMap;
@@ -3153,6 +3157,328 @@ async fn api_hermes_run_events(path: web::Path<HermesRunPath>, req: HttpRequest)
 // --- Calendar types ---
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExternalMessagesQuery {
+    account_id: String,
+    folder: Option<String>,
+    page: Option<u64>,
+    page_size: Option<u64>,
+}
+
+async fn api_external_openapi() -> impl Responder {
+    static OPENAPI_YAML: &str = include_str!("../../ops/openapi/external-imap-v1.yaml");
+    HttpResponse::Ok()
+        .content_type("application/yaml; charset=utf-8")
+        .body(OPENAPI_YAML)
+}
+
+async fn api_external_accounts_list(
+    req: HttpRequest,
+    svc: web::Data<Arc<ExternalImapService>>,
+) -> impl Responder {
+    let user_id = resolve_user_id(&req);
+    match svc.list_accounts(&user_id).await {
+        Ok(accounts) => HttpResponse::Ok().json(serde_json::json!({ "accounts": accounts })),
+        Err(e) => HttpResponse::InternalServerError()
+            .json(serde_json::json!({"error": {"code": "EXTERNAL_ACCOUNTS_LIST_FAILED", "message": e.to_string()}})),
+    }
+}
+
+async fn api_external_accounts_create(
+    req: HttpRequest,
+    payload: web::Json<CreateExternalAccountInput>,
+    svc: web::Data<Arc<ExternalImapService>>,
+) -> impl Responder {
+    let user_id = resolve_user_id(&req);
+    match svc.create_account(&user_id, payload.into_inner()).await {
+        Ok(account) => HttpResponse::Ok().json(account),
+        Err(e) => HttpResponse::InternalServerError()
+            .json(serde_json::json!({"error": {"code": "EXTERNAL_ACCOUNT_CREATE_FAILED", "message": e.to_string()}})),
+    }
+}
+
+async fn api_external_account_get(
+    req: HttpRequest,
+    path: web::Path<String>,
+    svc: web::Data<Arc<ExternalImapService>>,
+) -> impl Responder {
+    let user_id = resolve_user_id(&req);
+    let account_id = path.into_inner();
+    match svc.get_account(&user_id, &account_id).await {
+        Ok(Some(account)) => HttpResponse::Ok().json(account),
+        Ok(None) => HttpResponse::NotFound().json(serde_json::json!({"error": {"code": "EXTERNAL_ACCOUNT_NOT_FOUND", "message": "External account not found"}})),
+        Err(e) => HttpResponse::InternalServerError()
+            .json(serde_json::json!({"error": {"code": "EXTERNAL_ACCOUNT_FETCH_FAILED", "message": e.to_string()}})),
+    }
+}
+
+async fn api_external_account_patch(
+    req: HttpRequest,
+    path: web::Path<String>,
+    payload: web::Json<UpdateExternalAccountInput>,
+    svc: web::Data<Arc<ExternalImapService>>,
+) -> impl Responder {
+    let user_id = resolve_user_id(&req);
+    let account_id = path.into_inner();
+    match svc
+        .update_account(&user_id, &account_id, payload.into_inner())
+        .await
+    {
+        Ok(Some(account)) => HttpResponse::Ok().json(account),
+        Ok(None) => HttpResponse::NotFound().json(serde_json::json!({"error": {"code": "EXTERNAL_ACCOUNT_NOT_FOUND", "message": "External account not found"}})),
+        Err(e) => HttpResponse::InternalServerError()
+            .json(serde_json::json!({"error": {"code": "EXTERNAL_ACCOUNT_UPDATE_FAILED", "message": e.to_string()}})),
+    }
+}
+
+async fn api_external_account_delete(
+    req: HttpRequest,
+    path: web::Path<String>,
+    svc: web::Data<Arc<ExternalImapService>>,
+) -> impl Responder {
+    let user_id = resolve_user_id(&req);
+    let account_id = path.into_inner();
+    match svc.delete_account(&user_id, &account_id).await {
+        Ok(true) => HttpResponse::Ok().json(serde_json::json!({ "deleted": true })),
+        Ok(false) => HttpResponse::NotFound().json(serde_json::json!({"error": {"code": "EXTERNAL_ACCOUNT_NOT_FOUND", "message": "External account not found"}})),
+        Err(e) => HttpResponse::InternalServerError()
+            .json(serde_json::json!({"error": {"code": "EXTERNAL_ACCOUNT_DELETE_FAILED", "message": e.to_string()}})),
+    }
+}
+
+async fn api_external_account_test(
+    req: HttpRequest,
+    path: web::Path<String>,
+    svc: web::Data<Arc<ExternalImapService>>,
+) -> impl Responder {
+    let user_id = resolve_user_id(&req);
+    let account_id = path.into_inner();
+    let account = match svc.get_account_raw(&user_id, &account_id).await {
+        Ok(Some(a)) => a,
+        Ok(None) => return HttpResponse::NotFound().json(serde_json::json!({"error": {"code": "EXTERNAL_ACCOUNT_NOT_FOUND", "message": "External account not found"}})),
+        Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({"error": {"code": "EXTERNAL_ACCOUNT_FETCH_FAILED", "message": e.to_string()}})),
+    };
+
+    match svc.imap_test(&account).await {
+        Ok(result) => {
+            if result.ok {
+                HttpResponse::Ok().json(result)
+            } else {
+                HttpResponse::UnprocessableEntity().json(serde_json::json!({
+                    "ok": false,
+                    "error": {"code": "IMAP_AUTH_FAILED", "message": result.message},
+                    "capabilities": result.capabilities,
+                    "greeting": result.greeting,
+                }))
+            }
+        }
+        Err(e) => HttpResponse::InternalServerError()
+            .json(serde_json::json!({"error": {"code": "IMAP_TEST_FAILED", "message": e.to_string()}})),
+    }
+}
+
+async fn api_external_folders_list(
+    req: HttpRequest,
+    path: web::Path<String>,
+    svc: web::Data<Arc<ExternalImapService>>,
+) -> impl Responder {
+    let user_id = resolve_user_id(&req);
+    let account_id = path.into_inner();
+    match svc.list_folders(&user_id, &account_id).await {
+        Ok(folders) => HttpResponse::Ok().json(serde_json::json!({ "folders": folders })),
+        Err(e) => HttpResponse::InternalServerError()
+            .json(serde_json::json!({"error": {"code": "EXTERNAL_FOLDERS_LIST_FAILED", "message": e.to_string()}})),
+    }
+}
+
+async fn api_external_folders_discover(
+    req: HttpRequest,
+    path: web::Path<String>,
+    svc: web::Data<Arc<ExternalImapService>>,
+) -> impl Responder {
+    let user_id = resolve_user_id(&req);
+    let account_id = path.into_inner();
+    let account = match svc.get_account_raw(&user_id, &account_id).await {
+        Ok(Some(a)) => a,
+        Ok(None) => return HttpResponse::NotFound().json(serde_json::json!({"error": {"code": "EXTERNAL_ACCOUNT_NOT_FOUND", "message": "External account not found"}})),
+        Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({"error": {"code": "EXTERNAL_ACCOUNT_FETCH_FAILED", "message": e.to_string()}})),
+    };
+
+    match svc.discover_folders(&user_id, &account).await {
+        Ok(result) => HttpResponse::Ok().json(result),
+        Err(e) => HttpResponse::InternalServerError()
+            .json(serde_json::json!({"error": {"code": "EXTERNAL_FOLDERS_DISCOVER_FAILED", "message": e.to_string()}})),
+    }
+}
+
+async fn api_external_folder_mapping_put(
+    req: HttpRequest,
+    path: web::Path<(String, String)>,
+    payload: web::Json<ExternalFolderMappingInput>,
+    svc: web::Data<Arc<ExternalImapService>>,
+) -> impl Responder {
+    let user_id = resolve_user_id(&req);
+    let (account_id, folder_id) = path.into_inner();
+    match svc
+        .upsert_folder_mapping(&user_id, &account_id, &folder_id, &payload.local_role)
+        .await
+    {
+        Ok(Some(folder)) => HttpResponse::Ok().json(folder),
+        Ok(None) => HttpResponse::NotFound().json(serde_json::json!({"error": {"code": "EXTERNAL_FOLDER_NOT_FOUND", "message": "Folder not found"}})),
+        Err(e) => HttpResponse::InternalServerError()
+            .json(serde_json::json!({"error": {"code": "EXTERNAL_FOLDER_MAPPING_FAILED", "message": e.to_string()}})),
+    }
+}
+
+async fn api_external_sync_start(
+    req: HttpRequest,
+    path: web::Path<String>,
+    payload: web::Json<StartSyncInput>,
+    svc: web::Data<Arc<ExternalImapService>>,
+) -> impl Responder {
+    let user_id = resolve_user_id(&req);
+    let account_id = path.into_inner();
+
+    let account = match svc.get_account_raw(&user_id, &account_id).await {
+        Ok(Some(a)) => a,
+        Ok(None) => return HttpResponse::NotFound().json(serde_json::json!({"error": {"code": "EXTERNAL_ACCOUNT_NOT_FOUND", "message": "External account not found"}})),
+        Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({"error": {"code": "EXTERNAL_ACCOUNT_FETCH_FAILED", "message": e.to_string()}})),
+    };
+
+    let run = match svc.start_sync_run(&user_id, &account_id, &payload).await {
+        Ok(run) => run,
+        Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({"error": {"code": "EXTERNAL_SYNC_START_FAILED", "message": e.to_string()}})),
+    };
+
+    match svc.run_sync_now(&user_id, &account, &run).await {
+        Ok(stats) => {
+            let updated = svc
+                .complete_sync_run(&user_id, &run.id, "success", stats, None)
+                .await
+                .ok()
+                .flatten();
+            HttpResponse::Ok().json(serde_json::json!({ "runId": run.id, "status": "success", "run": updated }))
+        }
+        Err(e) => {
+            let _ = svc
+                .complete_sync_run(
+                    &user_id,
+                    &run.id,
+                    "failed",
+                    simple_smtp_server::external_imap::SyncExecutionResult {
+                        fetched: 0,
+                        updated: 0,
+                        deleted: 0,
+                        discovered_folders: 0,
+                    },
+                    Some(e.to_string()),
+                )
+                .await;
+            HttpResponse::InternalServerError().json(serde_json::json!({"error": {"code": "EXTERNAL_SYNC_EXECUTION_FAILED", "message": e.to_string()}, "runId": run.id}))
+        }
+    }
+}
+
+async fn api_external_sync_run_get(
+    req: HttpRequest,
+    path: web::Path<String>,
+    svc: web::Data<Arc<ExternalImapService>>,
+) -> impl Responder {
+    let user_id = resolve_user_id(&req);
+    let run_id = path.into_inner();
+    match svc.get_sync_run(&user_id, &run_id).await {
+        Ok(Some(run)) => HttpResponse::Ok().json(run),
+        Ok(None) => HttpResponse::NotFound().json(serde_json::json!({"error": {"code": "EXTERNAL_SYNC_RUN_NOT_FOUND", "message": "Sync run not found"}})),
+        Err(e) => HttpResponse::InternalServerError()
+            .json(serde_json::json!({"error": {"code": "EXTERNAL_SYNC_RUN_FETCH_FAILED", "message": e.to_string()}})),
+    }
+}
+
+async fn api_external_sync_status(
+    req: HttpRequest,
+    path: web::Path<String>,
+    svc: web::Data<Arc<ExternalImapService>>,
+) -> impl Responder {
+    let user_id = resolve_user_id(&req);
+    let account_id = path.into_inner();
+    match svc.get_sync_status(&user_id, &account_id).await {
+        Ok(Some(run)) => HttpResponse::Ok().json(run),
+        Ok(None) => HttpResponse::Ok().json(serde_json::json!({"status": "idle"})),
+        Err(e) => HttpResponse::InternalServerError()
+            .json(serde_json::json!({"error": {"code": "EXTERNAL_SYNC_STATUS_FAILED", "message": e.to_string()}})),
+    }
+}
+
+async fn api_external_sync_pause(
+    req: HttpRequest,
+    path: web::Path<String>,
+    svc: web::Data<Arc<ExternalImapService>>,
+) -> impl Responder {
+    let user_id = resolve_user_id(&req);
+    let account_id = path.into_inner();
+    match svc.set_account_status(&user_id, &account_id, "paused").await {
+        Ok(Some(account)) => HttpResponse::Ok().json(account),
+        Ok(None) => HttpResponse::NotFound().json(serde_json::json!({"error": {"code": "EXTERNAL_ACCOUNT_NOT_FOUND", "message": "External account not found"}})),
+        Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({"error": {"code": "EXTERNAL_SYNC_PAUSE_FAILED", "message": e.to_string()}})),
+    }
+}
+
+async fn api_external_sync_resume(
+    req: HttpRequest,
+    path: web::Path<String>,
+    svc: web::Data<Arc<ExternalImapService>>,
+) -> impl Responder {
+    let user_id = resolve_user_id(&req);
+    let account_id = path.into_inner();
+    match svc.set_account_status(&user_id, &account_id, "active").await {
+        Ok(Some(account)) => HttpResponse::Ok().json(account),
+        Ok(None) => HttpResponse::NotFound().json(serde_json::json!({"error": {"code": "EXTERNAL_ACCOUNT_NOT_FOUND", "message": "External account not found"}})),
+        Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({"error": {"code": "EXTERNAL_SYNC_RESUME_FAILED", "message": e.to_string()}})),
+    }
+}
+
+async fn api_external_messages_list(
+    req: HttpRequest,
+    query: web::Query<ExternalMessagesQuery>,
+    svc: web::Data<Arc<ExternalImapService>>,
+) -> impl Responder {
+    let user_id = resolve_user_id(&req);
+    let page = query.page.unwrap_or(1);
+    let page_size = query.page_size.unwrap_or(50).min(200);
+    match svc
+        .list_messages(
+            &user_id,
+            &query.account_id,
+            query.folder.as_deref(),
+            page,
+            page_size,
+        )
+        .await
+    {
+        Ok(messages) => HttpResponse::Ok().json(serde_json::json!({ "messages": messages, "page": page, "pageSize": page_size })),
+        Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({"error": {"code": "EXTERNAL_MESSAGES_LIST_FAILED", "message": e.to_string()}})),
+    }
+}
+
+async fn api_external_message_action(
+    req: HttpRequest,
+    path: web::Path<String>,
+    payload: web::Json<ExternalMessageActionInput>,
+    svc: web::Data<Arc<ExternalImapService>>,
+) -> impl Responder {
+    let user_id = resolve_user_id(&req);
+    let message_id = path.into_inner();
+    match svc
+        .apply_message_action(&user_id, &message_id, &payload)
+        .await
+    {
+        Ok(Some(message)) => HttpResponse::Ok().json(message),
+        Ok(None) => HttpResponse::NotFound().json(serde_json::json!({"error": {"code": "EXTERNAL_MESSAGE_NOT_FOUND", "message": "Message not found"}})),
+        Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({"error": {"code": "EXTERNAL_MESSAGE_ACTION_FAILED", "message": e.to_string()}})),
+    }
+}
+
+#[derive(Deserialize)]
 struct CreateCalendarEventRequest {
     title: String,
     #[serde(default)]
@@ -3461,6 +3787,9 @@ async fn main() -> std::io::Result<()> {
         mongo_client.unwrap_or(fallback_client),
     )));
     let mongo_data = web::Data::new(shared_mongo.clone());
+    let external_imap_service = web::Data::new(Arc::new(ExternalImapService::new(
+        shared_mongo.clone(),
+    )));
 
     let (event_tx, _) = broadcast::channel::<MailEvent>(256);
     let event_bus = web::Data::new(event_tx);
@@ -3496,6 +3825,7 @@ async fn main() -> std::io::Result<()> {
     let http_logic = logic.clone();
     let http_mongo = mongo_data.clone();
     let http_event_bus = event_bus.clone();
+    let http_external_imap = external_imap_service.clone();
     let http_addr = env::var("API_SERVER_ADDR").unwrap_or_else(|_| "0.0.0.0:8000".to_string());
     let http_server = actix_web::rt::spawn(async move {
         HttpServer::new(move || {
@@ -3511,6 +3841,24 @@ async fn main() -> std::io::Result<()> {
                 .app_data(http_logic.clone())
                 .app_data(http_mongo.clone())
                 .app_data(http_event_bus.clone())
+                .app_data(http_external_imap.clone())
+                .route("/api/openapi/external-imap.yaml", web::get().to(api_external_openapi))
+                .route("/api/external-accounts", web::get().to(api_external_accounts_list))
+                .route("/api/external-accounts", web::post().to(api_external_accounts_create))
+                .route("/api/external-accounts/{id}", web::get().to(api_external_account_get))
+                .route("/api/external-accounts/{id}", web::patch().to(api_external_account_patch))
+                .route("/api/external-accounts/{id}", web::delete().to(api_external_account_delete))
+                .route("/api/external-accounts/{id}/test", web::post().to(api_external_account_test))
+                .route("/api/external-accounts/{id}/folders", web::get().to(api_external_folders_list))
+                .route("/api/external-accounts/{id}/folders/discover", web::post().to(api_external_folders_discover))
+                .route("/api/external-accounts/{id}/folders/{folder_id}/mapping", web::put().to(api_external_folder_mapping_put))
+                .route("/api/external-accounts/{id}/sync", web::post().to(api_external_sync_start))
+                .route("/api/external-accounts/{id}/sync/status", web::get().to(api_external_sync_status))
+                .route("/api/external-accounts/{id}/sync/pause", web::post().to(api_external_sync_pause))
+                .route("/api/external-accounts/{id}/sync/resume", web::post().to(api_external_sync_resume))
+                .route("/api/external-sync-runs/{run_id}", web::get().to(api_external_sync_run_get))
+                .route("/api/external-messages", web::get().to(api_external_messages_list))
+                .route("/api/external-messages/{id}/action", web::post().to(api_external_message_action))
                 .route("/api/auth/login", web::post().to(auth_login))
                 .route("/api/auth/register", web::post().to(auth_register))
                 .route("/api/auth/logout", web::post().to(auth_logout))
