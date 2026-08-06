@@ -449,6 +449,89 @@ impl Logic {
         }
     }
 
+    pub async fn move_email_to_mailbox(
+        &self,
+        username: &str,
+        email_id: &str,
+        mailbox: &str,
+    ) -> Result<bool> {
+        #[cfg(not(test))]
+        {
+            let database_name =
+                std::env::var("MONGODB_DATABASE").expect("MONGODB_DATABASE must be set");
+            let collection = self
+                .client
+                .database(&database_name)
+                .collection::<Email>("emails");
+            let filter = doc! { "user_id": username, "id": email_id };
+            let update = doc! { "$set": { "mailbox": mailbox.to_ascii_lowercase() } };
+            let res = collection.update_one(filter, update).await?;
+            Ok(res.matched_count > 0)
+        }
+        #[cfg(test)]
+        {
+            Ok(true)
+        }
+    }
+
+    pub async fn set_email_read(
+        &self,
+        username: &str,
+        email_id: &str,
+        is_read: bool,
+    ) -> Result<bool> {
+        #[cfg(not(test))]
+        {
+            let database_name =
+                std::env::var("MONGODB_DATABASE").expect("MONGODB_DATABASE must be set");
+            let collection = self
+                .client
+                .database(&database_name)
+                .collection::<Email>("emails");
+            let filter = doc! { "user_id": username, "id": email_id };
+            let update = if is_read {
+                doc! { "$addToSet": { "flags": "\\Seen" } }
+            } else {
+                doc! { "$pull": { "flags": { "$in": ["\\Seen", "Seen", "seen"] } } }
+            };
+            let res = collection.update_one(filter, update).await?;
+            Ok(res.matched_count > 0)
+        }
+        #[cfg(test)]
+        {
+            Ok(true)
+        }
+    }
+
+    pub async fn set_email_starred(
+        &self,
+        username: &str,
+        email_id: &str,
+        is_starred: bool,
+    ) -> Result<bool> {
+        #[cfg(not(test))]
+        {
+            let database_name =
+                std::env::var("MONGODB_DATABASE").expect("MONGODB_DATABASE must be set");
+            let collection = self
+                .client
+                .database(&database_name)
+                .collection::<Email>("emails");
+            let filter = doc! { "user_id": username, "id": email_id };
+            let update = if is_starred {
+                doc! { "$addToSet": { "flags": "\\Flagged" } }
+            } else {
+                doc! { "$pull": { "flags": { "$in": ["\\Flagged", "Flagged", "flagged", "starred"] } } }
+            };
+            let res = collection.update_one(filter, update).await?;
+            Ok(res.matched_count > 0)
+        }
+        #[cfg(test)]
+        {
+            Ok(true)
+        }
+    }
+
     pub async fn delete_email(&self, username: &str, email_id: &str) -> Result<()> {
         #[cfg(not(test))]
         {
