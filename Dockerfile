@@ -39,6 +39,7 @@ RUN rm -rf src
 # Copy real source code and ops (required for include_str! macros referencing ops/openapi/)
 COPY --chown=default_user:default_user src/ ./src/
 COPY --chown=default_user:default_user ops/ ./ops/
+COPY --chown=default_user:default_user i18n/ ./i18n/
 
 # Touch source files to force rebuild of app crates (not deps)
 RUN find src/ -name "*.rs" -exec touch {} \; 2>/dev/null; true
