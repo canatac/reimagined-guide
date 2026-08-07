@@ -36,8 +36,9 @@ RUN cargo build --release --bins 2>/dev/null || true
 # Remove dummy files
 RUN rm -rf src
 
-# Copy real source code
+# Copy real source code and ops (required for include_str! macros referencing ops/openapi/)
 COPY --chown=default_user:default_user src/ ./src/
+COPY --chown=default_user:default_user ops/ ./ops/
 
 # Touch source files to force rebuild of app crates (not deps)
 RUN find src/ -name "*.rs" -exec touch {} \; 2>/dev/null; true
