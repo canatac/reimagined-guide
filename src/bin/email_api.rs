@@ -3247,7 +3247,7 @@ struct ExternalMessagesQuery {
 }
 
 async fn api_openapi_json() -> impl Responder {
-    let spec = serde_json::json!({
+    static SPEC_JSON: &str = r#"{
         "openapi": "3.0.3",
         "info": {
             "title": "Email API",
@@ -3330,12 +3330,13 @@ async fn api_openapi_json() -> impl Responder {
             "/api/external-messages": { "get": { "tags": ["External IMAP"], "summary": "List external messages", "parameters": [{ "name": "account_id", "in": "query", "required": true, "schema": { "type": "string" } }, { "name": "folder", "in": "query", "schema": { "type": "string" } }, { "name": "page", "in": "query", "schema": { "type": "integer" } }, { "name": "page_size", "in": "query", "schema": { "type": "integer" } }], "responses": { "200": { "description": "OK" } } } },
             "/api/external-messages/{id}/action": { "post": { "tags": ["External IMAP"], "summary": "Apply action on external message", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" } } } }
         }
-    });
+    }"#;
+    let spec: serde_json::Value = serde_json::from_str(SPEC_JSON).unwrap_or_default();
     HttpResponse::Ok().json(spec)
 }
 
 async fn api_swagger_ui() -> impl Responder {
-    let html = r#"<!DOCTYPE html>
+    let html = r##"<!DOCTYPE html>
 <html>
 <head>
   <title>Email API — Swagger UI</title>
@@ -3349,7 +3350,7 @@ async fn api_swagger_ui() -> impl Responder {
   SwaggerUIBundle({ url: "/api/openapi.json", dom_id: "#swagger-ui", presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset] });
 </script>
 </body>
-</html>"#;
+</html>"##;
     HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html)
 }
 
