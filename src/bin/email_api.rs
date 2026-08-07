@@ -39,8 +39,11 @@ use actix_cors::Cors;
 use actix_web::{web, App, HttpRequest, HttpResponse, HttpServer, Responder};
 use base64::{engine::general_purpose, Engine as _};
 use bcrypt;
+use data_encoding::BASE32;
+use hmac::{Hmac, Mac};
 use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 use serde::{Deserialize, Serialize};
+use sha1::Sha1;
 
 use chrono::Utc;
 use dotenv::dotenv;
@@ -117,6 +120,59 @@ struct RegisterRequest {
 struct OAuthCallbackQuery {
     code: Option<String>,
     state: Option<String>,
+}
+
+// --- 2FA types ---
+
+fn default_2fa_method() -> String {
+    "email".to_string()
+}
+
+#[derive(Deserialize)]
+struct TwoFactorVerifyRequest {
+    email: String,
+    code: String,
+    #[serde(default = "default_2fa_method")]
+    method: String,
+}
+
+// --- Password reset types ---
+
+#[derive(Deserialize)]
+struct PasswordResetRequestBody {
+    email: String,
+}
+
+#[derive(Deserialize)]
+struct PasswordResetConfirmBody {
+    token: String,
+    new_password: String,
+}
+
+// --- Send queue types ---
+
+const SEND_QUEUE_COLL: &str = "send_queue";
+
+#[derive(Deserialize)]
+struct UndoSendRequest {
+    id: String,
+}
+
+#[derive(Deserialize)]
+struct ScheduleSendBody {
+    #[serde(default)]
+    to: Vec<ComposerRecipient>,
+    #[serde(default)]
+    cc: Vec<ComposerRecipient>,
+    #[serde(default)]
+    bcc: Vec<ComposerRecipient>,
+    #[serde(default)]
+    subject: String,
+    #[serde(default)]
+    body: String,
+    #[serde(default)]
+    from: Option<String>,
+    send_at: String,
 }
 
 // --- OAuth provider response types ---
@@ -1732,6 +1788,313 @@ fn resolve_user_id(req: &actix_web::HttpRequest) -> String {
     env::var("SMTP_USERNAME").unwrap_or_else(|_| "admin".to_string())
 }
 
+// --- TOTP helpers (RFC 6238) ---
+
+fn compute_hotp(key: &[u8], counter: u64) -> u32 {
+    type HmacSha1 = Hmac<Sha1>;
+    let mut mac = HmacSha1::new_from_slice(key).expect("HMAC accepts any key size");
+    mac.update(&counter.to_be_bytes());
+    let result = mac.finalize().into_bytes();
+    let offset = (result[19] & 0x0f) as usize;
+    let code = ((result[offset] as u32 & 0x7f) << 24)
+        | ((result[offset + 1] as u32) << 16)
+        | ((result[offset + 2] as u32) << 8)
+        | (result[offset + 3] as u32);
+    code % 1_000_000
+}
+
+fn verify_totp(secret_b32: &str, code: &str) -> bool {
+    use constant_time_eq::constant_time_eq;
+    let s = secret_b32.to_uppercase();
+    let pad = s.len() % 8;
+    let padded = if pad == 0 {
+        s
+    } else {
+        format!("{}{}", s, "=".repeat(8 - pad))
+    };
+    let key = match BASE32.decode(padded.as_bytes()) {
+        Ok(k) => k,
+        Err(_) => return false,
+    };
+    let t = Utc::now().timestamp() / 30;
+    for delta in [-1i64, 0, 1] {
+        let counter = (t + delta).max(0) as u64;
+        let candidate = format!("{:06}", compute_hotp(&key, counter));
+        if constant_time_eq(candidate.as_bytes(), code.as_bytes()) {
+            return true;
+        }
+    }
+    false
+}
+
+fn generate_totp_secret() -> String {
+    BASE32.encode(Uuid::new_v4().as_bytes())
+}
+
+fn generate_otp_code() -> String {
+    let b = Uuid::new_v4();
+    let n = u32::from_be_bytes([
+        b.as_bytes()[0],
+        b.as_bytes()[1],
+        b.as_bytes()[2],
+        b.as_bytes()[3],
+    ]);
+    format!("{:06}", n % 1_000_000)
+}
+
+// --- 2FA verify (POST /api/auth/2fa/verify) ---
+
+async fn api_2fa_verify(
+    body: web::Json<TwoFactorVerifyRequest>,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    let db = mongo_db_name();
+
+    if body.method == "totp" {
+        let coll = mongo
+            .database(&db)
+            .collection::<bson::Document>("users");
+        let local = body.email.split('@').next().unwrap_or(&body.email);
+        let user_doc = match coll
+            .find_one(doc! { "$or": [{ "username": local }, { "username": &body.email }] })
+            .await
+        {
+            Ok(Some(d)) => d,
+            Ok(None) => {
+                return HttpResponse::Unauthorized().json(serde_json::json!({
+                    "verified": false, "error": "User not found"
+                }))
+            }
+            Err(e) => {
+                return HttpResponse::InternalServerError()
+                    .json(serde_json::json!({ "error": e.to_string() }))
+            }
+        };
+
+        let totp_secret = match user_doc.get_str("totp_secret").ok().filter(|s| !s.is_empty()) {
+            Some(s) => s.to_string(),
+            None => {
+                return HttpResponse::BadRequest().json(serde_json::json!({
+                    "verified": false, "error": "TOTP not configured for this user"
+                }))
+            }
+        };
+
+        if !verify_totp(&totp_secret, &body.code) {
+            return HttpResponse::Unauthorized().json(serde_json::json!({
+                "verified": false, "error": "Invalid TOTP code"
+            }));
+        }
+    } else {
+        // Email OTP: verify code stored in two_factor_codes collection
+        let coll = mongo
+            .database(&db)
+            .collection::<bson::Document>("two_factor_codes");
+        let now_ms = Utc::now().timestamp_millis();
+
+        match coll
+            .find_one(doc! {
+                "email": &body.email,
+                "code": &body.code,
+                "used": false,
+                "expires_at": { "$gt": bson::DateTime::from_millis(now_ms) },
+            })
+            .await
+        {
+            Ok(Some(d)) => {
+                if let Ok(oid) = d.get_object_id("_id") {
+                    let _ = coll
+                        .update_one(doc! { "_id": oid }, doc! { "$set": { "used": true } })
+                        .await;
+                }
+            }
+            Ok(None) => {
+                return HttpResponse::Unauthorized().json(serde_json::json!({
+                    "verified": false, "error": "Invalid or expired code"
+                }))
+            }
+            Err(e) => {
+                return HttpResponse::InternalServerError()
+                    .json(serde_json::json!({ "error": e.to_string() }))
+            }
+        }
+    }
+
+    let display = body.email.split('@').next().unwrap_or(&body.email).to_string();
+    let session = make_session(&body.email, &display);
+    HttpResponse::Ok().json(serde_json::json!({ "verified": true, "session": session.session }))
+}
+
+// --- Password reset (POST /api/auth/password-reset/request + /confirm) ---
+
+async fn api_password_reset_request(
+    body: web::Json<PasswordResetRequestBody>,
+    mongo: web::Data<Arc<mongodb::Client>>,
+    logic: web::Data<Arc<Logic>>,
+) -> impl Responder {
+    let db = mongo_db_name();
+    let email = body.email.trim().to_lowercase();
+    let local = email.split('@').next().unwrap_or(&email).to_string();
+
+    let users_coll = mongo
+        .database(&db)
+        .collection::<bson::Document>("users");
+    let user_exists = matches!(
+        users_coll
+            .find_one(doc! { "$or": [{ "username": &local }, { "username": &email }] })
+            .await,
+        Ok(Some(_))
+    );
+
+    // Always return 200 to avoid user enumeration
+    if !user_exists {
+        return HttpResponse::Ok().json(serde_json::json!({
+            "message": "If the address is registered, a reset link has been sent."
+        }));
+    }
+
+    let token = Uuid::new_v4().to_string();
+    let expires_at =
+        bson::DateTime::from_millis(Utc::now().timestamp_millis() + 3_600_000); // 1 hour
+
+    let tokens_coll = mongo
+        .database(&db)
+        .collection::<bson::Document>("password_reset_tokens");
+    // Invalidate any previous pending tokens for this email
+    let _ = tokens_coll
+        .update_many(
+            doc! { "email": &email, "used": false },
+            doc! { "$set": { "used": true } },
+        )
+        .await;
+
+    if let Err(e) = tokens_coll
+        .insert_one(doc! {
+            "token": &token,
+            "email": &email,
+            "expires_at": expires_at,
+            "used": false,
+        })
+        .await
+    {
+        eprintln!("password_reset_request insert error: {}", e);
+        return HttpResponse::InternalServerError()
+            .json(serde_json::json!({ "error": "Failed to create reset token" }));
+    }
+
+    let frontend_url = env::var("FRONTEND_URL")
+        .unwrap_or_else(|_| "https://app.misfits.ai".to_string());
+    let reset_url = format!("{}/auth/reset-password?token={}", frontend_url, token);
+    let body_html = format!(
+        "<p>Click <a href=\"{url}\">here</a> to reset your password. This link expires in 1 hour.</p>\
+         <p>Or copy this link: {url}</p>",
+        url = reset_url
+    );
+    let reset_email = Email {
+        id: Uuid::new_v4().to_string(),
+        from: "noreply@misfits.ai".to_string(),
+        to: email.clone(),
+        subject: "Password Reset Request".to_string(),
+        body: body_html,
+        headers: vec![("Content-Type".to_string(), "text/html; charset=utf-8".to_string())],
+        flags: vec![],
+        sequence_number: 0,
+        uid: 0,
+        internal_date: bson::DateTime::from_millis(Utc::now().timestamp_millis()),
+        dkim_signature: None,
+    };
+    if let Err(e) = logic.deliver_to_inbox(&local, &reset_email).await {
+        eprintln!("password reset email delivery error: {}", e);
+    }
+
+    HttpResponse::Ok().json(serde_json::json!({
+        "message": "If the address is registered, a reset link has been sent."
+    }))
+}
+
+async fn api_password_reset_confirm(
+    body: web::Json<PasswordResetConfirmBody>,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    if body.new_password.len() < 8 {
+        return HttpResponse::BadRequest()
+            .json(serde_json::json!({ "error": "Password must be at least 8 characters" }));
+    }
+
+    let db = mongo_db_name();
+    let tokens_coll = mongo
+        .database(&db)
+        .collection::<bson::Document>("password_reset_tokens");
+    let now_ms = Utc::now().timestamp_millis();
+
+    let token_doc = match tokens_coll
+        .find_one(doc! {
+            "token": &body.token,
+            "used": false,
+            "expires_at": { "$gt": bson::DateTime::from_millis(now_ms) },
+        })
+        .await
+    {
+        Ok(Some(d)) => d,
+        Ok(None) => {
+            return HttpResponse::BadRequest()
+                .json(serde_json::json!({ "error": "Invalid or expired token" }))
+        }
+        Err(e) => {
+            return HttpResponse::InternalServerError()
+                .json(serde_json::json!({ "error": e.to_string() }))
+        }
+    };
+
+    let email = match token_doc.get_str("email") {
+        Ok(e) => e.to_string(),
+        Err(_) => {
+            return HttpResponse::InternalServerError()
+                .json(serde_json::json!({ "error": "Token data corrupted" }))
+        }
+    };
+    let local = email.split('@').next().unwrap_or(&email).to_string();
+
+    let new_password = body.new_password.clone();
+    let password_hash = match web::block(move || bcrypt::hash(&new_password, 12)).await {
+        Ok(Ok(h)) => h,
+        _ => {
+            return HttpResponse::InternalServerError()
+                .json(serde_json::json!({ "error": "Password hashing failed" }))
+        }
+    };
+
+    let users_coll = mongo
+        .database(&db)
+        .collection::<bson::Document>("users");
+    match users_coll
+        .update_one(
+            doc! { "$or": [{ "username": &local }, { "username": &email }] },
+            doc! { "$set": { "password": &password_hash } },
+        )
+        .await
+    {
+        Ok(r) if r.matched_count == 0 => {
+            return HttpResponse::NotFound()
+                .json(serde_json::json!({ "error": "User not found" }))
+        }
+        Err(e) => {
+            return HttpResponse::InternalServerError()
+                .json(serde_json::json!({ "error": e.to_string() }))
+        }
+        _ => {}
+    }
+
+    // Invalidate the token
+    if let Ok(oid) = token_doc.get_object_id("_id") {
+        let _ = tokens_coll
+            .update_one(doc! { "_id": oid }, doc! { "$set": { "used": true } })
+            .await;
+    }
+
+    HttpResponse::Ok().json(serde_json::json!({ "message": "Password updated successfully" }))
+}
+
 #[derive(Serialize)]
 struct EmailAddressDto {
     name: String,
@@ -2258,6 +2621,51 @@ async fn api_send(
     // If the DKIM service already delivered the message (success response
     // without a dkim signature), skip direct SMTP relay. This prevents false
     // negatives when relay ports are closed but delivery already happened.
+
+    // Undo window: queue the email instead of sending immediately.
+    let undo_window_secs = env::var("SEND_UNDO_WINDOW_SECS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0);
+
+    if undo_window_secs > 0 && !already_delivered {
+        let send_after = bson::DateTime::from_millis(
+            Utc::now().timestamp_millis() + (undo_window_secs as i64 * 1000),
+        );
+        let queue_doc = doc! {
+            "id": &id,
+            "user_id": &user_id,
+            "from": &from,
+            "to": &to,
+            "cc": &cc,
+            "bcc": &bcc,
+            "subject": &subject,
+            "body": &mail_body,
+            "dkim_signature": email.dkim_signature.as_deref().unwrap_or(""),
+            "message_id": &message_id,
+            "status": "pending",
+            "send_after": send_after,
+            "created_at": bson::DateTime::from_millis(Utc::now().timestamp_millis()),
+        };
+        let db = mongo_db_name();
+        let sq_coll = mongo
+            .database(&db)
+            .collection::<bson::Document>(SEND_QUEUE_COLL);
+        return match sq_coll.insert_one(queue_doc).await {
+            Ok(_) => HttpResponse::Ok().json(serde_json::json!({
+                "sent": false,
+                "queued": true,
+                "id": id,
+                "messageId": message_id,
+                "deliveryState": "pending",
+                "undoWindowSecs": undo_window_secs,
+            })),
+            Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({
+                "sent": false, "error": e.to_string()
+            })),
+        };
+    }
+
     let send_result = if already_delivered {
         Ok(())
     } else {
@@ -2353,6 +2761,237 @@ async fn api_send(
                 "deliveryState": "failed",
                 "message": format!("Failed to send email: {}", e),
             }))
+        }
+    }
+}
+
+// --- Send undo (POST /api/send/undo) ---
+
+async fn api_send_undo(
+    body: web::Json<UndoSendRequest>,
+    req: actix_web::HttpRequest,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    let user_id = resolve_user_id(&req);
+    let db = mongo_db_name();
+    let coll = mongo
+        .database(&db)
+        .collection::<bson::Document>(SEND_QUEUE_COLL);
+
+    let now = bson::DateTime::from_millis(Utc::now().timestamp_millis());
+    match coll
+        .update_one(
+            doc! {
+                "id": &body.id,
+                "user_id": &user_id,
+                "status": "pending",
+                "send_after": { "$gt": now },
+            },
+            doc! { "$set": { "status": "cancelled" } },
+        )
+        .await
+    {
+        Ok(r) if r.matched_count > 0 => {
+            HttpResponse::Ok().json(serde_json::json!({ "cancelled": true, "id": &body.id }))
+        }
+        Ok(_) => HttpResponse::NotFound().json(serde_json::json!({
+            "cancelled": false,
+            "reason": "Email not found, already sent, or undo window has passed"
+        })),
+        Err(e) => HttpResponse::InternalServerError()
+            .json(serde_json::json!({ "error": e.to_string() })),
+    }
+}
+
+// --- Send schedule (POST /api/send/schedule) ---
+
+async fn api_send_schedule(
+    body: web::Json<ScheduleSendBody>,
+    req: actix_web::HttpRequest,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    let user_id = resolve_user_id(&req);
+
+    let to = join_recipients(&body.to);
+    if to.is_empty() {
+        return HttpResponse::BadRequest().json(serde_json::json!({
+            "error": "At least one recipient (to) is required"
+        }));
+    }
+
+    let send_at = match chrono::DateTime::parse_from_rfc3339(&body.send_at) {
+        Ok(dt) => dt,
+        Err(_) => {
+            return HttpResponse::BadRequest()
+                .json(serde_json::json!({ "error": "Invalid send_at: use ISO 8601 format" }))
+        }
+    };
+    if send_at.timestamp() <= Utc::now().timestamp() {
+        return HttpResponse::BadRequest()
+            .json(serde_json::json!({ "error": "send_at must be in the future" }));
+    }
+
+    let from = body
+        .from
+        .as_ref()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| from_address_for_user(&user_id));
+    let cc = join_recipients(&body.cc);
+    let bcc = join_recipients(&body.bcc);
+
+    let id = Uuid::new_v4().to_string();
+    let db = mongo_db_name();
+    let coll = mongo
+        .database(&db)
+        .collection::<bson::Document>(SEND_QUEUE_COLL);
+
+    match coll
+        .insert_one(doc! {
+            "id": &id,
+            "user_id": &user_id,
+            "from": &from,
+            "to": &to,
+            "cc": &cc,
+            "bcc": &bcc,
+            "subject": &body.subject,
+            "body": &body.body,
+            "dkim_signature": "",
+            "message_id": format!("<{}@{}>", &id, domain_from_env()),
+            "status": "scheduled",
+            "send_after": bson::DateTime::from_millis(send_at.timestamp_millis()),
+            "created_at": bson::DateTime::from_millis(Utc::now().timestamp_millis()),
+        })
+        .await
+    {
+        Ok(_) => HttpResponse::Ok().json(serde_json::json!({
+            "queued": true, "id": id, "sendAt": body.send_at
+        })),
+        Err(e) => HttpResponse::InternalServerError()
+            .json(serde_json::json!({ "error": e.to_string() })),
+    }
+}
+
+// --- Send queue background worker ---
+
+async fn send_queue_worker(mongo: Arc<mongodb::Client>) {
+    let db_name =
+        std::env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+        let coll = mongo
+            .database(&db_name)
+            .collection::<bson::Document>(SEND_QUEUE_COLL);
+        let now = bson::DateTime::from_millis(Utc::now().timestamp_millis());
+
+        let cursor = match coll
+            .find(doc! {
+                "status": { "$in": ["pending", "scheduled"] },
+                "send_after": { "$lte": now },
+            })
+            .await
+        {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("send_queue_worker find error: {}", e);
+                continue;
+            }
+        };
+
+        let entries = match cursor.try_collect::<Vec<bson::Document>>().await {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("send_queue_worker collect error: {}", e);
+                continue;
+            }
+        };
+
+        for entry in entries {
+            let id = entry.get_str("id").unwrap_or("").to_string();
+            let from = entry.get_str("from").unwrap_or("").to_string();
+            let to = entry.get_str("to").unwrap_or("").to_string();
+            let subject = entry.get_str("subject").unwrap_or("").to_string();
+            let body_text = entry.get_str("body").unwrap_or("").to_string();
+            let cc = entry.get_str("cc").unwrap_or("").to_string();
+            let bcc = entry.get_str("bcc").unwrap_or("").to_string();
+            let dkim_sig = entry
+                .get_str("dkim_signature")
+                .unwrap_or("")
+                .to_string();
+            let message_id = entry
+                .get_str("message_id")
+                .unwrap_or("")
+                .to_string();
+
+            // Optimistic lock: claim entry before sending
+            let claim = coll
+                .update_one(
+                    doc! { "id": &id, "status": { "$in": ["pending", "scheduled"] } },
+                    doc! { "$set": { "status": "sending" } },
+                )
+                .await;
+            match claim {
+                Ok(r) if r.matched_count == 0 => continue,
+                Err(e) => {
+                    eprintln!("send_queue claim error for {}: {}", id, e);
+                    continue;
+                }
+                _ => {}
+            }
+
+            let mut headers = vec![
+                (
+                    "Message-ID".to_string(),
+                    if message_id.is_empty() {
+                        format!("<{}@{}>", id, std::env::var("DOMAIN_NAME").unwrap_or_else(|_| "misfits.ai".to_string()))
+                    } else {
+                        message_id
+                    },
+                ),
+                ("Date".to_string(), Utc::now().to_rfc2822()),
+                ("MIME-Version".to_string(), "1.0".to_string()),
+                ("Content-Type".to_string(), "text/html; charset=utf-8".to_string()),
+            ];
+            if !cc.is_empty() {
+                headers.push(("Cc".to_string(), cc));
+            }
+            if !bcc.is_empty() {
+                headers.push(("Bcc".to_string(), bcc));
+            }
+            if !dkim_sig.is_empty() {
+                headers.push(("DKIM-Signature".to_string(), dkim_sig.clone()));
+            }
+
+            let email = Email {
+                id: id.clone(),
+                from,
+                to,
+                subject,
+                body: body_text,
+                headers,
+                flags: vec![],
+                sequence_number: 0,
+                uid: 0,
+                internal_date: bson::DateTime::from_millis(Utc::now().timestamp_millis()),
+                dkim_signature: if dkim_sig.is_empty() {
+                    None
+                } else {
+                    Some(dkim_sig)
+                },
+            };
+
+            let status = match send_outgoing_email(&email).await {
+                Ok(_) => "sent",
+                Err(e) => {
+                    eprintln!("send_queue_worker send error for {}: {}", id, e);
+                    "failed"
+                }
+            };
+
+            let _ = coll
+                .update_one(doc! { "id": &id }, doc! { "$set": { "status": status } })
+                .await;
         }
     }
 }
@@ -3999,6 +4638,10 @@ async fn main() -> std::io::Result<()> {
     });
     security::audit::start_engine(shared_mongo.clone());
 
+    // Start send queue background worker
+    let sq_mongo = shared_mongo.clone();
+    tokio::spawn(send_queue_worker(sq_mongo));
+
     let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
     builder
         .set_private_key_file(
@@ -4054,6 +4697,9 @@ async fn main() -> std::io::Result<()> {
                 .route("/api/auth/register", web::post().to(auth_register))
                 .route("/api/auth/logout", web::post().to(auth_logout))
                 .route("/api/auth/refresh", web::post().to(auth_refresh))
+                .route("/api/auth/2fa/verify", web::post().to(api_2fa_verify))
+                .route("/api/auth/password-reset/request", web::post().to(api_password_reset_request))
+                .route("/api/auth/password-reset/confirm", web::post().to(api_password_reset_confirm))
                 .route("/api/user/locale", web::patch().to(api_patch_user_locale))
                 .route(
                     "/api/auth/oauth/{provider}",
@@ -4089,8 +4735,8 @@ async fn main() -> std::io::Result<()> {
                     "/api/hermes/runs/{run_id}/events",
                     web::get().to(api_hermes_run_events),
                 )
-                .route("/api/send/undo", web::post().to(api_send))
-                .route("/api/send/schedule", web::post().to(api_send))
+                .route("/api/send/undo", web::post().to(api_send_undo))
+                .route("/api/send/schedule", web::post().to(api_send_schedule))
                 .route(
                     "/api/calendar/events",
                     web::post().to(calendar_create_event),
