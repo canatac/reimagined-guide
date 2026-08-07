@@ -1,0 +1,13 @@
+error-login-invalid = E-Mail-Adresse oder Passwort ist falsch.
+error-conditions-required = Sie müssen die Nutzungsbedingungen akzeptieren.
+error-password-too-short = Das Passwort muss mindestens 8 Zeichen haben.
+error-name-required = Vor- und Nachname sind erforderlich, um Ihre E-Mail-Adresse zu erstellen.
+error-account-creation-failed = Kontoerstellung fehlgeschlagen. Bitte versuchen Sie es erneut.
+error-email-taken = Die Adresse { $email } ist bereits vergeben. Wählen Sie einen anderen Alias.
+error-oauth-failed = OAuth-Authentifizierung fehlgeschlagen.
+error-oauth-not-configured = OAuth-Anbieter nicht konfiguriert.
+error-oauth-unsupported = OAuth-Anbieter nicht unterstützt.
+error-oauth-missing-code = OAuth-Autorisierungscode fehlt.
+error-recipient-required = Mindestens ein Empfänger (to) ist erforderlich.
+error-trace-not-found = Spur nicht gefunden.
+error-sign-failed = E-Mail-Signierung fehlgeschlagen: { $msg }

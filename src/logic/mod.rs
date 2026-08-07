@@ -17,6 +17,8 @@ pub struct User {
     pub mailbox: String,
     #[serde(default)]
     pub condition_accepted: bool,
+    #[serde(default)]
+    pub locale: Option<String>,
 }
 
 fn default_mailbox() -> String {
@@ -44,6 +46,7 @@ fn user_from_document(doc: &bson::Document, fallback_username: &str) -> User {
         password,
         mailbox,
         condition_accepted: false,
+        locale: doc.get_str("locale").ok().map(str::to_owned),
     }
 }
 
@@ -78,6 +81,32 @@ impl Logic {
         Logic { client }
     }
 
+    pub async fn update_user_locale(&self, username: &str, locale: &str) -> Result<()> {
+        #[cfg(not(test))]
+        {
+            let database_name =
+                std::env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
+            let collection_name =
+                std::env::var("MONGODB_USERS_COLLECTION").unwrap_or_else(|_| "users".to_string());
+            let collection = self
+                .client
+                .database(&database_name)
+                .collection::<bson::Document>(&collection_name);
+            collection
+                .update_one(
+                    doc! { "username": username },
+                    doc! { "$set": { "locale": locale } },
+                )
+                .await?;
+            Ok(())
+        }
+        #[cfg(test)]
+        {
+            let _ = (username, locale);
+            Ok(())
+        }
+    }
+
     pub async fn create_user(&self, username: &str, password: &str, mailbox: &str) -> Result<()> {
         let new_user = User {
             id: None,
@@ -85,6 +114,7 @@ impl Logic {
             password: password.to_string(),
             mailbox: mailbox.to_string(),
             condition_accepted: false,
+            locale: None,
         };
         #[cfg(not(test))]
         {
@@ -341,6 +371,7 @@ impl Logic {
                     password: String::new(),
                     mailbox: default_mailbox(),
                     condition_accepted: false,
+                    locale: None,
                 })
             }
         }
@@ -353,6 +384,7 @@ impl Logic {
                 password: String::new(),
                 mailbox: default_mailbox(),
                 condition_accepted: false,
+                locale: None,
             })
         }
     }

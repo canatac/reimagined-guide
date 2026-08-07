@@ -1,0 +1,13 @@
+error-login-invalid = כתובת דוא"ל או סיסמה שגויה.
+error-conditions-required = עליך לאשר את תנאי השירות.
+error-password-too-short = הסיסמה חייבת להכיל לפחות 8 תווים.
+error-name-required = נדרשים שם פרטי ושם משפחה ליצירת כתובת הדוא"ל.
+error-account-creation-failed = יצירת החשבון נכשלה. אנא נסה שוב.
+error-email-taken = הכתובת { $email } כבר בשימוש. בחר כינוי אחר.
+error-oauth-failed = אימות OAuth נכשל.
+error-oauth-not-configured = ספק OAuth אינו מוגדר.
+error-oauth-unsupported = ספק OAuth לא נתמך.
+error-oauth-missing-code = קוד ההרשאה של OAuth חסר.
+error-recipient-required = נדרש לפחות נמען אחד (to).
+error-trace-not-found = מעקב לא נמצא.
+error-sign-failed = חתימה על הדוא"ל נכשלה: { $msg }

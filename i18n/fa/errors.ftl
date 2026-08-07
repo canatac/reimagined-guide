@@ -1,0 +1,13 @@
+error-login-invalid = ایمیل یا رمز عبور اشتباه است.
+error-conditions-required = باید شرایط خدمات را بپذیرید.
+error-password-too-short = رمز عبور باید حداقل ۸ کاراکتر داشته باشد.
+error-name-required = نام و نام خانوادگی برای ایجاد آدرس ایمیل الزامی است.
+error-account-creation-failed = ایجاد حساب کاربری ناموفق بود. لطفاً دوباره امتحان کنید.
+error-email-taken = آدرس { $email } قبلاً استفاده شده است. نام مستعار دیگری انتخاب کنید.
+error-oauth-failed = احراز هویت OAuth ناموفق بود.
+error-oauth-not-configured = ارائه‌دهنده OAuth پیکربندی نشده است.
+error-oauth-unsupported = ارائه‌دهنده OAuth پشتیبانی نمی‌شود.
+error-oauth-missing-code = کد مجوز OAuth وجود ندارد.
+error-recipient-required = حداقل یک گیرنده (to) الزامی است.
+error-trace-not-found = ردیابی یافت نشد.
+error-sign-failed = امضای ایمیل ناموفق بود: { $msg }

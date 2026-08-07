@@ -1,0 +1,13 @@
+error-login-invalid = Incorrect email or password.
+error-conditions-required = You must accept the terms of service.
+error-password-too-short = Password must be at least 8 characters.
+error-name-required = First and last name are required to create your email address.
+error-account-creation-failed = Account creation failed. Please try again.
+error-email-taken = The address { $email } is already taken. Choose a different alias.
+error-oauth-failed = OAuth authentication failed.
+error-oauth-not-configured = OAuth provider not configured.
+error-oauth-unsupported = Unsupported OAuth provider.
+error-oauth-missing-code = Missing OAuth authorization code.
+error-recipient-required = At least one recipient (to) is required.
+error-trace-not-found = Trace not found.
+error-sign-failed = Failed to sign email: { $msg }

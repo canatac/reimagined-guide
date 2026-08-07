@@ -1,3 +1,4 @@
+pub mod i18n;
 pub mod logic;
 pub use logic::LogicTrait;
 pub mod entities;

@@ -55,6 +55,7 @@ use simple_smtp_server::external_imap::{
 };
 use simple_smtp_server::logic::Logic;
 use simple_smtp_server::smtp_client::send_outgoing_email;
+use simple_smtp_server::i18n;
 use std::collections::HashMap;
 use std::env;
 use std::fs::{create_dir_all, File};
@@ -1075,12 +1076,70 @@ fn req_ip_str(req: &actix_web::HttpRequest) -> String {
         .to_string()
 }
 
+fn get_accept_language(req: &actix_web::HttpRequest) -> String {
+    req.headers()
+        .get("accept-language")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string()
+}
+
+fn welcome_email_html(
+    locale: &str,
+    display_name: &str,
+    primary_email: &str,
+    alias_email: Option<&str>,
+) -> String {
+    let dir = if i18n::is_rtl(locale) { "rtl" } else { "ltr" };
+    let text_align = if i18n::is_rtl(locale) { "right" } else { "left" };
+    let greeting = i18n::t(locale, "email-welcome-greeting", &[("name", display_name)]);
+    let intro = i18n::t(locale, "email-welcome-intro", &[]);
+    let primary_label = i18n::t(locale, "email-welcome-primary-label", &[]);
+    let cta = i18n::t(locale, "email-welcome-cta", &[]);
+    let signature = i18n::t(locale, "email-welcome-signature", &[]);
+    let alias_row = alias_email
+        .map(|a| {
+            let lbl = i18n::t(locale, "email-welcome-alias-label", &[]);
+            let detail = i18n::t(locale, "email-welcome-alias-detail", &[]);
+            format!(
+                "<tr><td style=\"padding:4px 0\"><b>{lbl}</b> \
+                 <span class=\"addr\">{a}</span> {detail}</td></tr>"
+            )
+        })
+        .unwrap_or_default();
+    format!(
+        r#"<!DOCTYPE html>
+<html lang="{locale}" dir="{dir}">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <style>
+    body{{font-family:Tahoma,Arial,sans-serif;direction:{dir};text-align:{text_align};color:#222;background:#f5f5f5;margin:0;padding:0}}
+    .wrap{{max-width:600px;margin:40px auto;background:#fff;border-radius:8px;padding:40px}}
+    .addr{{font-family:monospace;background:#f0f0f0;padding:2px 6px;border-radius:3px}}
+  </style>
+</head>
+<body><div class="wrap">
+  <h2>{greeting}</h2>
+  <p>{intro}</p>
+  <table cellpadding="0" cellspacing="0">
+    <tr><td style="padding:4px 0"><b>{primary_label}</b> <span class="addr">{primary_email}</span></td></tr>
+    {alias_row}
+  </table>
+  <p>{cta}</p>
+  <p>{signature}</p>
+</div></body>
+</html>"#,
+    )
+}
+
 async fn auth_login(
     req: web::Json<LoginRequest>,
     req_http: actix_web::HttpRequest,
     logic: web::Data<Arc<Logic>>,
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
+    let locale = i18n::resolve_locale(&get_accept_language(&req_http), None);
     // Try to authenticate against MongoDB
     match logic.authenticate_user(&req.email, &req.password).await {
         Ok(Some(user)) => {
@@ -1111,7 +1170,7 @@ async fn auth_login(
                 simple_smtp_server::security::log_auth_event(&mc, ev).await;
             });
             HttpResponse::Unauthorized().json(serde_json::json!({
-                "message": "Incorrect email or password."
+                "message": i18n::t(&locale, "error-login-invalid", &[])
             }))
         }
         Err(e) => {
@@ -1124,7 +1183,7 @@ async fn auth_login(
                 }
             }
             HttpResponse::Unauthorized().json(serde_json::json!({
-                "message": "Incorrect email or password."
+                "message": i18n::t(&locale, "error-login-invalid", &[])
             }))
         }
     }
@@ -1132,20 +1191,22 @@ async fn auth_login(
 
 async fn auth_register(
     req: web::Json<RegisterRequest>,
+    req_http: actix_web::HttpRequest,
     logic: web::Data<Arc<Logic>>,
     bus: web::Data<EventBus>,
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
+    let locale = i18n::resolve_locale(&get_accept_language(&req_http), None);
     if !req.condition_accepted {
         return HttpResponse::BadRequest().json(serde_json::json!({
             "code": "CONDITIONS_NOT_ACCEPTED",
-            "message": "Vous devez accepter les conditions d'utilisation."
+            "message": i18n::t(&locale, "error-conditions-required", &[])
         }));
     }
     if req.password.len() < 8 {
         return HttpResponse::BadRequest().json(serde_json::json!({
             "code": "INVALID_PASSWORD",
-            "message": "Le mot de passe doit contenir au moins 8 caractères."
+            "message": i18n::t(&locale, "error-password-too-short", &[])
         }));
     }
 
@@ -1154,7 +1215,7 @@ async fn auth_register(
         None => {
             return HttpResponse::BadRequest().json(serde_json::json!({
                 "code": "MISSING_IDENTITY",
-                "message": "Prénom et nom sont requis pour créer votre adresse mail."
+                "message": i18n::t(&locale, "error-name-required", &[])
             }));
         }
     };
@@ -1188,14 +1249,14 @@ async fn auth_register(
             eprintln!("bcrypt error: {}", e);
             return HttpResponse::InternalServerError().json(serde_json::json!({
                 "code": "INTERNAL_ERROR",
-                "message": "La création du compte a échoué. Veuillez réessayer."
+                "message": i18n::t(&locale, "error-account-creation-failed", &[])
             }));
         }
         Err(e) => {
             eprintln!("bcrypt task error: {}", e);
             return HttpResponse::InternalServerError().json(serde_json::json!({
                 "code": "INTERNAL_ERROR",
-                "message": "La création du compte a échoué. Veuillez réessayer."
+                "message": i18n::t(&locale, "error-account-creation-failed", &[])
             }));
         }
     };
@@ -1210,16 +1271,13 @@ async fn auth_register(
             if msg.contains("E11000") || msg.contains("duplicate key") {
                 return HttpResponse::Conflict().json(serde_json::json!({
                     "code": "EMAIL_TAKEN",
-                    "message": format!(
-                        "L'adresse {} est déjà utilisée. Choisissez un alias différent.",
-                        primary_email
-                    )
+                    "message": i18n::t(&locale, "error-email-taken", &[("email", &primary_email)])
                 }));
             }
             eprintln!("Register error ({}): {}", primary_email, e);
             return HttpResponse::InternalServerError().json(serde_json::json!({
                 "code": "INTERNAL_ERROR",
-                "message": "La création du compte a échoué. Veuillez réessayer."
+                "message": i18n::t(&locale, "error-account-creation-failed", &[])
             }));
         }
     }
@@ -1235,22 +1293,16 @@ async fn auth_register(
         }
     }
 
-    // Email de bienvenue déposé directement dans l'inbox
-    let alias_line = alias_email
-        .as_deref()
-        .map(|a| format!("\n• Alias : {} (redirige vers votre boîte principale)", a))
-        .unwrap_or_default();
-    let welcome_body = format!(
-        "Bonjour {} 👋\n\nBienvenue sur Misfits Mail !\n\nVotre adresse mail est prête :\n• Adresse principale : {}{}\n\nVous pouvez dès maintenant envoyer et recevoir des emails.\n\nL'équipe Misfits",
-        display_name, primary_email, alias_line
-    );
+    // Email de bienvenue HTML avec support RTL
+    let welcome_subject = i18n::t(&locale, "email-welcome-subject", &[]);
+    let welcome_body = welcome_email_html(&locale, &display_name, &primary_email, alias_email.as_deref());
     let welcome = Email {
         id: Uuid::new_v4().to_string(),
         from: "noreply@misfits.ai".to_string(),
         to: primary_email.clone(),
-        subject: "Bienvenue sur Misfits Mail 🎉".to_string(),
+        subject: welcome_subject,
         body: welcome_body,
-        headers: vec![],
+        headers: vec![("Content-Type".to_string(), "text/html; charset=utf-8".to_string())],
         flags: vec![],
         sequence_number: 1,
         uid: 1,
@@ -1278,11 +1330,40 @@ async fn auth_register(
     }
 
     let session = make_session(&primary_email, &display_name);
-    HttpResponse::Created().json(serde_json::json!({
-        "email": primary_email,
-        "alias": alias_email,
-        "session": session.session,
-    }))
+    HttpResponse::Created()
+        .insert_header(("Content-Language", locale.as_str()))
+        .json(serde_json::json!({
+            "email": primary_email,
+            "alias": alias_email,
+            "session": session.session,
+            "locale": locale,
+        }))
+}
+
+#[derive(Deserialize)]
+struct PatchLocaleRequest {
+    locale: String,
+}
+
+async fn api_patch_user_locale(
+    req: actix_web::HttpRequest,
+    body: web::Json<PatchLocaleRequest>,
+    logic: web::Data<Arc<Logic>>,
+) -> impl Responder {
+    if !i18n::SUPPORTED_LOCALES.contains(&body.locale.as_str()) {
+        return HttpResponse::BadRequest().json(serde_json::json!({
+            "error": "unsupported_locale",
+            "supported": i18n::SUPPORTED_LOCALES,
+        }));
+    }
+    let username = resolve_user_id(&req);
+    match logic.update_user_locale(&username, &body.locale).await {
+        Ok(()) => HttpResponse::Ok().json(serde_json::json!({ "locale": body.locale })),
+        Err(e) => {
+            eprintln!("update_user_locale error: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({ "error": "internal" }))
+        }
+    }
 }
 
 async fn auth_logout() -> impl Responder {
@@ -3863,6 +3944,7 @@ async fn main() -> std::io::Result<()> {
                 .route("/api/auth/register", web::post().to(auth_register))
                 .route("/api/auth/logout", web::post().to(auth_logout))
                 .route("/api/auth/refresh", web::post().to(auth_refresh))
+                .route("/api/user/locale", web::patch().to(api_patch_user_locale))
                 .route(
                     "/api/auth/oauth/{provider}",
                     web::get().to(auth_oauth_start),

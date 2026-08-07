@@ -1,0 +1,13 @@
+error-login-invalid = البريد الإلكتروني أو كلمة المرور غير صحيحة.
+error-conditions-required = يجب عليك قبول شروط الخدمة.
+error-password-too-short = يجب أن تحتوي كلمة المرور على 8 أحرف على الأقل.
+error-name-required = الاسم الأول والأخير مطلوبان لإنشاء عنوان بريدك الإلكتروني.
+error-account-creation-failed = فشل إنشاء الحساب. يرجى المحاولة مرة أخرى.
+error-email-taken = العنوان { $email } مستخدم بالفعل. اختر اسمًا مستعارًا مختلفًا.
+error-oauth-failed = فشل مصادقة OAuth.
+error-oauth-not-configured = مزود OAuth غير مهيأ.
+error-oauth-unsupported = مزود OAuth غير مدعوم.
+error-oauth-missing-code = رمز تفويض OAuth مفقود.
+error-recipient-required = مستلم واحد على الأقل (to) مطلوب.
+error-trace-not-found = لم يتم العثور على التتبع.
+error-sign-failed = فشل توقيع البريد الإلكتروني: { $msg }
