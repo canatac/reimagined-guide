@@ -354,6 +354,16 @@ fn since_str(window: &str) -> String {
     (Utc::now() - dur).to_rfc3339()
 }
 
+fn env_bool(name: &str, default: bool) -> bool {
+    match env::var(name) {
+        Ok(v) => matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        ),
+        Err(_) => default,
+    }
+}
+
 #[derive(Deserialize)]
 struct MonitoringWindowQuery {
     #[serde(default = "default_monitoring_window")]
@@ -392,6 +402,19 @@ fn default_mon_page_size() -> u32 {
 #[derive(Deserialize)]
 struct MonitoringLiveQuery {
     message_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct AdminWindowQuery {
+    #[serde(default = "default_window")]
+    window: String,
+}
+
+#[derive(Deserialize)]
+struct DeliverabilityDiagnosticsQuery {
+    #[serde(default = "default_window")]
+    window: String,
+    domain: Option<String>,
 }
 
 /// GET /api/monitoring/summary?window=15m
@@ -872,6 +895,249 @@ async fn api_security_live(mongo: web::Data<Arc<mongodb::Client>>) -> impl Respo
         .insert_header(("Cache-Control", "no-cache"))
         .insert_header(("X-Accel-Buffering", "no"))
         .streaming(stream)
+}
+
+async fn api_admin_security_posture(
+    query: web::Query<AdminWindowQuery>,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    use simple_smtp_server::security::audit;
+
+    let active_alerts = audit::query_active_alerts(&mongo, 300).await;
+
+    let brute_force_alerts = active_alerts
+        .iter()
+        .filter(|a| {
+            let n = a.rule_name.to_ascii_lowercase();
+            n.contains("bruteforce") || n.contains("brute") || n.contains("rate")
+        })
+        .count();
+
+    let auth_fail_alerts = active_alerts
+        .iter()
+        .filter(|a| {
+            let n = a.rule_name.to_ascii_lowercase();
+            n.contains("spf") || n.contains("dkim") || n.contains("dmarc")
+        })
+        .count();
+
+    let domain = env::var("DOMAIN_NAME")
+        .or_else(|_| env::var("MAIL_DOMAIN"))
+        .unwrap_or_else(|_| "misfits.ai".to_string());
+    let smtp_public_ip =
+        env::var("SMTP_PUBLIC_IP").unwrap_or_else(|_| "51.158.114.182".to_string());
+    let dkim_selector = env::var("KEY_SELECTOR").unwrap_or_else(|_| "default".to_string());
+
+    HttpResponse::Ok().json(serde_json::json!({
+        "window": query.window,
+        "security": {
+            "tls": {
+                "smtp_starttls_required": env_bool("SMTP_REQUIRE_STARTTLS", true),
+                "smtps_listener": env::var("SMTP_TLS_ADDR").unwrap_or_else(|_| "0.0.0.0:8465".to_string()),
+                "imaps_listener": env::var("IMAP_TLS_ADDR").unwrap_or_else(|_| "0.0.0.0:8993".to_string()),
+                "imap_starttls_required": env_bool("IMAP_REQUIRE_STARTTLS", true)
+            },
+            "authentication": {
+                "sasl_mechanisms": ["PLAIN", "LOGIN"],
+                "oauth2_enabled": env::var("GITHUB_CLIENT_ID").map(|v| !v.trim().is_empty()).unwrap_or(false),
+                "admin_mfa_required": env_bool("ADMIN_MFA_REQUIRED", true)
+            },
+            "anti_abuse": {
+                "rate_limit_enabled": env_bool("RATE_LIMIT_ENABLED", true),
+                "rate_limit_per_minute": env::var("RATE_LIMIT_PER_MINUTE").ok().and_then(|v| v.parse::<u32>().ok()).unwrap_or(120),
+                "fail2ban_enabled": env_bool("FAIL2BAN_ENABLED", true),
+                "bruteforce_signals_24h": brute_force_alerts,
+                "auth_policy_signals_24h": auth_fail_alerts
+            },
+            "mail_auth_dns": {
+                "domain": domain,
+                "spf_expected": format!("v=spf1 ip4:{} -all", smtp_public_ip),
+                "dkim_selector": dkim_selector,
+                "dmarc_expected": "v=DMARC1; p=quarantine; adkim=s; aspf=s; pct=100",
+                "ptr_rdns_note": "Configurer PTR/rDNS de l'IP publique vers un host mail stable (ex: mail.<domain>)"
+            }
+        }
+    }))
+}
+
+async fn api_admin_deliverability_diagnostics(
+    query: web::Query<DeliverabilityDiagnosticsQuery>,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    use simple_smtp_server::security::audit;
+
+    let since = since_str(&query.window);
+    let mut filter = doc! { "ts": { "$gte": &since } };
+
+    if let Some(domain) = query.domain.as_ref().map(|d| d.trim()).filter(|d| !d.is_empty()) {
+        let safe_domain = domain.replace('.', "\\.");
+        filter.insert("to", doc! { "$regex": format!("@{}$", safe_domain), "$options": "i" });
+    }
+
+    let total = storage::count_events(&mongo, filter.clone()).await;
+    let bounces = storage::query_events(
+        &mongo,
+        doc! { "ts": { "$gte": &since }, "status": "bounced" },
+        1,
+        200,
+    )
+    .await;
+
+    let mut bounce_reasons: HashMap<String, u32> = HashMap::new();
+    for evt in &bounces {
+        let key = evt
+            .bounce_reason
+            .clone()
+            .or_else(|| evt.smtp_reply.clone())
+            .unwrap_or_else(|| "unknown".to_string());
+        *bounce_reasons.entry(key).or_insert(0) += 1;
+    }
+
+    let mut top_reasons: Vec<(String, u32)> = bounce_reasons.into_iter().collect();
+    top_reasons.sort_by(|a, b| b.1.cmp(&a.1));
+
+    let auth_alerts = audit::query_active_alerts(&mongo, 300)
+        .await
+        .into_iter()
+        .filter(|a| {
+            let n = a.rule_name.to_ascii_lowercase();
+            n.contains("spf") || n.contains("dkim") || n.contains("dmarc")
+        })
+        .count();
+
+    let rbl_sources = env::var("RBL_CHECK_HOSTS")
+        .unwrap_or_else(|_| "zen.spamhaus.org,bl.spamcop.net".to_string())
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>();
+
+    HttpResponse::Ok().json(serde_json::json!({
+        "window": query.window,
+        "since": since,
+        "scope_domain": query.domain,
+        "total_events": total,
+        "bounces_total": bounces.len(),
+        "auth_policy_alerts": auth_alerts,
+        "top_bounce_reasons": top_reasons.into_iter().take(10).map(|(reason, count)| serde_json::json!({"reason": reason, "count": count})).collect::<Vec<_>>(),
+        "recent_delivery_failures": bounces.into_iter().take(15).map(|e| serde_json::json!({
+            "ts": e.ts,
+            "to": e.to,
+            "mx_host": e.mx_host,
+            "smtp_code": e.smtp_code,
+            "smtp_reply": e.smtp_reply,
+            "bounce_reason": e.bounce_reason,
+            "risk_score": e.risk_score
+        })).collect::<Vec<_>>(),
+        "rbl": {
+            "sources": rbl_sources,
+            "status": "pending_active_probe",
+            "note": "Connecter un probe DNS périodique pour marquer listed/clean par source RBL"
+        },
+        "diagnostics_hints": [
+            "Vérifier SPF/DKIM/DMARC alignés pour le domaine expéditeur",
+            "Comparer smtp_code/smtp_reply des bounces pour isoler policy vs reputation",
+            "Analyser la latence DNS/TLS avant DATA pour détecter throttling provider"
+        ]
+    }))
+}
+
+async fn api_admin_observability_overview(
+    query: web::Query<AdminWindowQuery>,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    use simple_smtp_server::security::audit;
+
+    let since = since_str(&query.window);
+    let base_filter = doc! { "ts": { "$gte": &since } };
+
+    let total = storage::count_events(&mongo, base_filter.clone()).await;
+    let by_status_docs = storage::aggregate(
+        &mongo,
+        vec![
+            doc! { "$match": base_filter.clone() },
+            doc! { "$group": { "_id": "$status", "count": { "$sum": 1 }, "avg_ms": { "$avg": "$total_ms" } } },
+        ],
+    )
+    .await;
+
+    let mut by_status = serde_json::Map::new();
+    let mut queued = 0u64;
+    let mut failed = 0u64;
+    for doc in &by_status_docs {
+        let status = doc.get_str("_id").unwrap_or("unknown").to_string();
+        let count = doc.get_i64("count").unwrap_or(0) as u64;
+        if status == "queued" || status == "pending" || status == "deferred" {
+            queued += count;
+        }
+        if status == "failed" || status == "bounced" {
+            failed += count;
+        }
+        by_status.insert(status, serde_json::json!(count));
+    }
+
+    let p95 = storage::p95_total_ms(&mongo, base_filter.clone(), 1000).await;
+    let monitoring_alerts =
+        monitoring::alerts::evaluate_alerts(&mongo, parse_window(&query.window).num_minutes(), &AlertConfig::default()).await;
+    let security_alerts = audit::query_active_alerts(&mongo, 300).await;
+
+    let by_domain_docs = storage::aggregate(
+        &mongo,
+        vec![
+            doc! { "$match": base_filter.clone() },
+            doc! { "$project": {
+                "recipient_domain": { "$arrayElemAt": [ { "$split": ["$to", "@"] }, 1 ] },
+                "status": "$status"
+            }},
+            doc! { "$group": {
+                "_id": "$recipient_domain",
+                "count": { "$sum": 1 },
+                "delivered": { "$sum": { "$cond": { "if": { "$eq": ["$status", "delivered"] }, "then": 1, "else": 0 } } },
+                "bounced": { "$sum": { "$cond": { "if": { "$eq": ["$status", "bounced"] }, "then": 1, "else": 0 } } }
+            }},
+            doc! { "$sort": { "count": -1 } },
+            doc! { "$limit": 20 }
+        ],
+    )
+    .await;
+
+    let per_domain = by_domain_docs
+        .into_iter()
+        .map(|d| {
+            serde_json::json!({
+                "domain": d.get_str("_id").unwrap_or("unknown"),
+                "count": d.get_i64("count").unwrap_or(0),
+                "delivered": d.get_i64("delivered").unwrap_or(0),
+                "bounced": d.get_i64("bounced").unwrap_or(0)
+            })
+        })
+        .collect::<Vec<_>>();
+
+    HttpResponse::Ok().json(serde_json::json!({
+        "window": query.window,
+        "since": since,
+        "smtp": {
+            "total_events": total,
+            "queue_depth_estimate": queued,
+            "failure_events": failed,
+            "p95_total_ms": p95,
+            "by_status": by_status
+        },
+        "imap": {
+            "active_connections": env::var("IMAP_ACTIVE_CONNECTIONS").ok().and_then(|v| v.parse::<u64>().ok()),
+            "note": "Connecter un compteur runtime IMAP pour une métrique live fiable"
+        },
+        "realtime_alerts": {
+            "monitoring_active": monitoring_alerts.len(),
+            "security_active": security_alerts.len()
+        },
+        "per_domain": per_domain,
+        "exports": {
+            "prometheus_enabled": env_bool("PROMETHEUS_EXPORT_ENABLED", true),
+            "prometheus_path": env::var("PROMETHEUS_EXPORT_PATH").unwrap_or_else(|_| "/metrics".to_string()),
+            "siem_webhook_configured": env::var("SIEM_WEBHOOK_URL").map(|v| !v.trim().is_empty()).unwrap_or(false)
+        }
+    }))
 }
 
 /// Accents → ASCII, non-alphanumériques supprimés, minuscules.
@@ -4805,6 +5071,18 @@ async fn main() -> std::io::Result<()> {
                 .route(
                     "/api/security/remediation/{alert_id}/rollback",
                     web::post().to(api_security_rollback),
+                )
+                .route(
+                    "/api/admin/security/posture",
+                    web::get().to(api_admin_security_posture),
+                )
+                .route(
+                    "/api/admin/deliverability/diagnostics",
+                    web::get().to(api_admin_deliverability_diagnostics),
+                )
+                .route(
+                    "/api/admin/observability/overview",
+                    web::get().to(api_admin_observability_overview),
                 )
         })
         .bind(http_addr)
