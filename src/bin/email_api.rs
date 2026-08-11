@@ -51,7 +51,9 @@ use futures_util::{stream, TryStreamExt};
 use mongodb::bson;
 use mongodb::bson::doc;
 use reqwest;
-use simple_smtp_server::entities::{CalendarEvent, Email};
+use simple_smtp_server::entities::{
+    AdminUserActivity, AdminUserRecord, CalendarEvent, ChangeRequestItem, Email, WorkflowStage,
+};
 use simple_smtp_server::external_imap::{
     CreateExternalAccountInput, ExternalImapService, ExternalMessageActionInput,
     ExternalFolderMappingInput, StartSyncInput, UpdateExternalAccountInput,
@@ -3865,6 +3867,610 @@ async fn api_drafts_delete(
     }
 }
 
+const ADMIN_USERS_COLL: &str = "admin_users";
+const ADMIN_CHANGE_REQUESTS_COLL: &str = "admin_change_requests";
+
+fn now_iso() -> String {
+    Utc::now().to_rfc3339()
+}
+
+fn admin_workflow_order() -> Vec<&'static str> {
+    vec!["submitted", "triaged", "planned", "in_progress", "qa", "released"]
+}
+
+fn compute_priority(urgency: &str, impact: &str) -> String {
+    if urgency == "high" && impact == "high" {
+        "P0".to_string()
+    } else if urgency == "high" || impact == "high" {
+        "P1".to_string()
+    } else {
+        "P2".to_string()
+    }
+}
+
+fn build_initial_stages() -> Vec<WorkflowStage> {
+    vec![
+        WorkflowStage {
+            key: "discovery".to_string(),
+            label: "Discovery produit".to_string(),
+            owner: "product".to_string(),
+            status: "active".to_string(),
+            checklist: vec![
+                "Clarifier le problème utilisateur".to_string(),
+                "Mesurer impact business/ops".to_string(),
+                "Valider la portée UX + Backend".to_string(),
+            ],
+            done_at: None,
+        },
+        WorkflowStage {
+            key: "spec".to_string(),
+            label: "Spécification".to_string(),
+            owner: "backend".to_string(),
+            status: "pending".to_string(),
+            checklist: vec![
+                "Définir contrat API + payload".to_string(),
+                "Définir telemetry & changelog".to_string(),
+            ],
+            done_at: None,
+        },
+        WorkflowStage {
+            key: "build".to_string(),
+            label: "Implémentation".to_string(),
+            owner: "frontend".to_string(),
+            status: "pending".to_string(),
+            checklist: vec![
+                "Implémenter UI/UX".to_string(),
+                "Implémenter endpoint backend".to_string(),
+                "Ajouter tests critiques".to_string(),
+            ],
+            done_at: None,
+        },
+        WorkflowStage {
+            key: "qa".to_string(),
+            label: "Validation".to_string(),
+            owner: "qa".to_string(),
+            status: "pending".to_string(),
+            checklist: vec![
+                "Typecheck + lint + tests".to_string(),
+                "Validation de non-régression admin".to_string(),
+            ],
+            done_at: None,
+        },
+        WorkflowStage {
+            key: "release".to_string(),
+            label: "Rollout".to_string(),
+            owner: "ops".to_string(),
+            status: "pending".to_string(),
+            checklist: vec![
+                "Publier changelog".to_string(),
+                "Surveiller métriques post-release".to_string(),
+                "Préparer rollback playbook".to_string(),
+            ],
+            done_at: None,
+        },
+    ]
+}
+
+fn build_acceptance_criteria(scope: &str) -> Vec<String> {
+    let mut base = vec![
+        "Le flux admin expose un état lisible de la demande".to_string(),
+        "Le backend retourne un état workflow déterministe".to_string(),
+        "Le changement apparaît dans le flux changelog une fois released".to_string(),
+    ];
+
+    if scope == "ux" || scope == "fullstack" {
+        base.push("Parcours UX sans ambiguïté: soumission -> triage -> release".to_string());
+    }
+    if scope == "backend" || scope == "fullstack" {
+        base.push("Contrat API versionné et validé sur payloads invalides".to_string());
+    }
+    if scope == "security" {
+        base.push("Audit trail incluant owner, horodatage et note de transition".to_string());
+    }
+
+    base
+}
+
+fn advance_workflow(stages: &[WorkflowStage]) -> Vec<WorkflowStage> {
+    let now = now_iso();
+    let current_idx = stages.iter().position(|s| s.status == "active");
+    if current_idx.is_none() {
+        return stages.to_vec();
+    }
+    let current_idx = current_idx.unwrap();
+    stages
+        .iter()
+        .enumerate()
+        .map(|(idx, stage)| {
+            if idx == current_idx {
+                let mut done = stage.clone();
+                done.status = "done".to_string();
+                done.done_at = Some(now.clone());
+                done
+            } else if idx == current_idx + 1 {
+                let mut active = stage.clone();
+                active.status = "active".to_string();
+                active
+            } else {
+                stage.clone()
+            }
+        })
+        .collect()
+}
+
+fn status_counts(items: &[ChangeRequestItem]) -> serde_json::Value {
+    let mut map = serde_json::Map::new();
+    for status in [
+        "submitted",
+        "triaged",
+        "planned",
+        "in_progress",
+        "qa",
+        "released",
+        "rejected",
+    ] {
+        map.insert(status.to_string(), serde_json::Value::from(0));
+    }
+    for item in items {
+        if let Some(v) = map.get_mut(&item.status) {
+            let next = v.as_i64().unwrap_or(0) + 1;
+            *v = serde_json::Value::from(next);
+        }
+    }
+    serde_json::Value::Object(map)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateAdminUserInput {
+    id: Option<String>,
+    email: String,
+    display_name: Option<String>,
+    role: String,
+    status: Option<String>,
+    two_factor_enabled: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateAdminUserInput {
+    role: Option<String>,
+    status: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateChangeRequestInputApi {
+    title: String,
+    problem: String,
+    desired_outcome: String,
+    scope: String,
+    urgency: String,
+    impact: String,
+    requested_by: String,
+    linked_repo: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PatchChangeRequestInputApi {
+    action: Option<String>,
+    note: Option<String>,
+    title: Option<String>,
+    problem: Option<String>,
+    desired_outcome: Option<String>,
+    status: Option<String>,
+}
+
+async fn api_admin_users_list(mongo: web::Data<Arc<mongodb::Client>>) -> impl Responder {
+    let coll = mongo
+        .database(&mongo_db_name())
+        .collection::<AdminUserRecord>(ADMIN_USERS_COLL);
+
+    match coll.find(doc! {}).sort(doc! { "lastActivityAt": -1 }).limit(500).await {
+        Ok(cursor) => {
+            let users = cursor.try_collect::<Vec<AdminUserRecord>>().await.unwrap_or_default();
+            HttpResponse::Ok().json(serde_json::json!({
+                "generatedAt": now_iso(),
+                "users": users,
+            }))
+        }
+        Err(e) => {
+            eprintln!("api_admin_users_list error: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({ "message": "Failed to load admin users" }))
+        }
+    }
+}
+
+async fn api_admin_user_get(
+    path: web::Path<String>,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    let id = path.into_inner();
+    let coll = mongo
+        .database(&mongo_db_name())
+        .collection::<AdminUserRecord>(ADMIN_USERS_COLL);
+
+    match coll.find_one(doc! { "id": &id }).await {
+        Ok(Some(user)) => HttpResponse::Ok().json(serde_json::json!({ "user": user })),
+        Ok(None) => HttpResponse::NotFound().json(serde_json::json!({ "message": "User not found" })),
+        Err(e) => {
+            eprintln!("api_admin_user_get error: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({ "message": "Failed to load user" }))
+        }
+    }
+}
+
+async fn api_admin_user_create(
+    body: web::Json<CreateAdminUserInput>,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    let role = body.role.trim().to_ascii_lowercase();
+    if !["user", "admin", "support"].contains(&role.as_str()) {
+        return HttpResponse::BadRequest().json(serde_json::json!({ "message": "role must be user|admin|support" }));
+    }
+
+    let status = body
+        .status
+        .as_deref()
+        .unwrap_or("active")
+        .trim()
+        .to_ascii_lowercase();
+    if !["active", "restricted"].contains(&status.as_str()) {
+        return HttpResponse::BadRequest().json(serde_json::json!({ "message": "status must be active|restricted" }));
+    }
+
+    let id = body
+        .id
+        .clone()
+        .unwrap_or_else(|| format!("u_{}", Uuid::new_v4().simple()));
+    let now = now_iso();
+
+    let user = AdminUserRecord {
+        id: id.clone(),
+        email: body.email.trim().to_string(),
+        display_name: body.display_name.clone(),
+        role,
+        status,
+        two_factor_enabled: body.two_factor_enabled.unwrap_or(false),
+        last_login_at: None,
+        last_activity_at: Some(now.clone()),
+        sessions24h: 0,
+        actions7d: 0,
+        change_requests30d: 0,
+        recent_activity: vec![AdminUserActivity {
+            at: now.clone(),
+            label: "User created".to_string(),
+            kind: "admin_action".to_string(),
+        }],
+        created_at: now.clone(),
+        updated_at: now,
+    };
+
+    let coll = mongo
+        .database(&mongo_db_name())
+        .collection::<AdminUserRecord>(ADMIN_USERS_COLL);
+
+    match coll.insert_one(&user).await {
+        Ok(_) => HttpResponse::Created().json(serde_json::json!({ "user": user })),
+        Err(e) => {
+            eprintln!("api_admin_user_create error: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({ "message": "Failed to create user" }))
+        }
+    }
+}
+
+async fn api_admin_user_patch(
+    path: web::Path<String>,
+    body: web::Json<UpdateAdminUserInput>,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    let id = path.into_inner();
+    let coll = mongo
+        .database(&mongo_db_name())
+        .collection::<AdminUserRecord>(ADMIN_USERS_COLL);
+
+    let current = match coll.find_one(doc! { "id": &id }).await {
+        Ok(Some(v)) => v,
+        Ok(None) => {
+            return HttpResponse::NotFound().json(serde_json::json!({ "message": "User not found" }))
+        }
+        Err(e) => {
+            eprintln!("api_admin_user_patch read error: {}", e);
+            return HttpResponse::InternalServerError().json(serde_json::json!({ "message": "Failed to load user" }));
+        }
+    };
+
+    let now = now_iso();
+    let mut updated = current.clone();
+
+    if let Some(role) = &body.role {
+        let role = role.trim().to_ascii_lowercase();
+        if !["user", "admin", "support"].contains(&role.as_str()) {
+            return HttpResponse::BadRequest().json(serde_json::json!({ "message": "role must be user|admin|support" }));
+        }
+        updated.role = role;
+    }
+
+    if let Some(status) = &body.status {
+        let status = status.trim().to_ascii_lowercase();
+        if !["active", "restricted"].contains(&status.as_str()) {
+            return HttpResponse::BadRequest().json(serde_json::json!({ "message": "status must be active|restricted" }));
+        }
+        updated.status = status;
+    }
+
+    updated.updated_at = now.clone();
+    updated.last_activity_at = Some(now.clone());
+    updated.actions7d += 1;
+    let note = body
+        .role
+        .as_ref()
+        .map(|r| format!("Role changed to {}", r))
+        .unwrap_or_else(|| "User updated".to_string());
+    let mut recent = updated.recent_activity;
+    recent.insert(
+        0,
+        AdminUserActivity {
+            at: now,
+            label: note,
+            kind: "role_change".to_string(),
+        },
+    );
+    recent.truncate(8);
+    updated.recent_activity = recent;
+
+    match coll
+        .replace_one(doc! { "id": &id }, &updated)
+        .upsert(false)
+        .await
+    {
+        Ok(_) => HttpResponse::Ok().json(serde_json::json!({ "user": updated })),
+        Err(e) => {
+            eprintln!("api_admin_user_patch write error: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({ "message": "Failed to update user" }))
+        }
+    }
+}
+
+async fn api_admin_user_delete(
+    path: web::Path<String>,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    let id = path.into_inner();
+    let coll = mongo
+        .database(&mongo_db_name())
+        .collection::<AdminUserRecord>(ADMIN_USERS_COLL);
+
+    match coll.delete_one(doc! { "id": &id }).await {
+        Ok(res) if res.deleted_count > 0 => HttpResponse::Ok().json(serde_json::json!({ "deleted": true, "id": id })),
+        Ok(_) => HttpResponse::NotFound().json(serde_json::json!({ "deleted": false, "message": "User not found" })),
+        Err(e) => {
+            eprintln!("api_admin_user_delete error: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({ "message": "Failed to delete user" }))
+        }
+    }
+}
+
+async fn api_admin_change_requests_list(
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    let coll = mongo
+        .database(&mongo_db_name())
+        .collection::<ChangeRequestItem>(ADMIN_CHANGE_REQUESTS_COLL);
+
+    match coll.find(doc! {}).sort(doc! { "updatedAt": -1 }).limit(500).await {
+        Ok(cursor) => {
+            let items = cursor
+                .try_collect::<Vec<ChangeRequestItem>>()
+                .await
+                .unwrap_or_default();
+            HttpResponse::Ok().json(serde_json::json!({
+                "generatedAt": now_iso(),
+                "counts": status_counts(&items),
+                "items": items,
+            }))
+        }
+        Err(e) => {
+            eprintln!("api_admin_change_requests_list error: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({ "message": "Failed to load change requests" }))
+        }
+    }
+}
+
+async fn api_admin_change_request_get(
+    path: web::Path<String>,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    let id = path.into_inner();
+    let coll = mongo
+        .database(&mongo_db_name())
+        .collection::<ChangeRequestItem>(ADMIN_CHANGE_REQUESTS_COLL);
+
+    match coll.find_one(doc! { "id": &id }).await {
+        Ok(Some(item)) => HttpResponse::Ok().json(serde_json::json!({ "item": item })),
+        Ok(None) => HttpResponse::NotFound().json(serde_json::json!({ "message": "Change request not found" })),
+        Err(e) => {
+            eprintln!("api_admin_change_request_get error: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({ "message": "Failed to load change request" }))
+        }
+    }
+}
+
+async fn api_admin_change_request_create(
+    body: web::Json<CreateChangeRequestInputApi>,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    let scope = body.scope.trim().to_ascii_lowercase();
+    let urgency = body.urgency.trim().to_ascii_lowercase();
+    let impact = body.impact.trim().to_ascii_lowercase();
+    let linked_repo = body.linked_repo.trim().to_ascii_lowercase();
+
+    if !["ux", "backend", "fullstack", "security"].contains(&scope.as_str()) {
+        return HttpResponse::BadRequest().json(serde_json::json!({ "message": "scope must be ux|backend|fullstack|security" }));
+    }
+    if !["low", "medium", "high"].contains(&urgency.as_str()) {
+        return HttpResponse::BadRequest().json(serde_json::json!({ "message": "urgency must be low|medium|high" }));
+    }
+    if !["small", "medium", "high"].contains(&impact.as_str()) {
+        return HttpResponse::BadRequest().json(serde_json::json!({ "message": "impact must be small|medium|high" }));
+    }
+    if !["misfits-web", "reimagined-guide", "cross-repo"].contains(&linked_repo.as_str()) {
+        return HttpResponse::BadRequest().json(serde_json::json!({ "message": "linkedRepo must be misfits-web|reimagined-guide|cross-repo" }));
+    }
+
+    let now = now_iso();
+    let item = ChangeRequestItem {
+        id: format!("cr_{}", Uuid::new_v4().simple()),
+        title: body.title.trim().to_string(),
+        problem: body.problem.trim().to_string(),
+        desired_outcome: body.desired_outcome.trim().to_string(),
+        scope: scope.clone(),
+        priority: compute_priority(&urgency, &impact),
+        status: "submitted".to_string(),
+        requested_by: body.requested_by.trim().to_string(),
+        linked_repo,
+        created_at: now.clone(),
+        updated_at: now,
+        target_release_window: if urgency == "high" {
+            "next-24h".to_string()
+        } else if urgency == "medium" {
+            "next-72h".to_string()
+        } else {
+            "next-sprint".to_string()
+        },
+        acceptance_criteria: build_acceptance_criteria(&scope),
+        workflow: build_initial_stages(),
+        changelog_entry: None,
+    };
+
+    let coll = mongo
+        .database(&mongo_db_name())
+        .collection::<ChangeRequestItem>(ADMIN_CHANGE_REQUESTS_COLL);
+
+    match coll.insert_one(&item).await {
+        Ok(_) => HttpResponse::Created().json(serde_json::json!({ "item": item })),
+        Err(e) => {
+            eprintln!("api_admin_change_request_create error: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({ "message": "Failed to create change request" }))
+        }
+    }
+}
+
+async fn api_admin_change_request_patch(
+    path: web::Path<String>,
+    body: web::Json<PatchChangeRequestInputApi>,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    let id = path.into_inner();
+    let coll = mongo
+        .database(&mongo_db_name())
+        .collection::<ChangeRequestItem>(ADMIN_CHANGE_REQUESTS_COLL);
+
+    let mut item = match coll.find_one(doc! { "id": &id }).await {
+        Ok(Some(v)) => v,
+        Ok(None) => {
+            return HttpResponse::NotFound().json(serde_json::json!({ "message": "Change request not found" }))
+        }
+        Err(e) => {
+            eprintln!("api_admin_change_request_patch read error: {}", e);
+            return HttpResponse::InternalServerError().json(serde_json::json!({ "message": "Failed to load change request" }));
+        }
+    };
+
+    if let Some(action) = &body.action {
+        let action = action.trim().to_ascii_lowercase();
+        if action == "reject" {
+            item.status = "rejected".to_string();
+            item.workflow = item
+                .workflow
+                .iter()
+                .map(|stage| {
+                    if stage.status == "active" {
+                        let mut s = stage.clone();
+                        s.status = "done".to_string();
+                        s.done_at = Some(now_iso());
+                        s
+                    } else {
+                        stage.clone()
+                    }
+                })
+                .collect();
+        } else if action == "advance" {
+            let order = admin_workflow_order();
+            let idx = order.iter().position(|x| *x == item.status).unwrap_or(0);
+            if idx < order.len() - 1 {
+                item.status = order[idx + 1].to_string();
+                item.workflow = advance_workflow(&item.workflow);
+                if item.status == "released" {
+                    item.changelog_entry = Some(serde_json::json!({
+                        "title": item.title,
+                        "summary": body.note.clone().unwrap_or_else(|| item.desired_outcome.clone()),
+                        "releasedAt": now_iso(),
+                    }));
+                }
+            }
+        } else {
+            return HttpResponse::BadRequest().json(serde_json::json!({ "message": "action must be advance|reject" }));
+        }
+    }
+
+    if let Some(title) = &body.title {
+        item.title = title.trim().to_string();
+    }
+    if let Some(problem) = &body.problem {
+        item.problem = problem.trim().to_string();
+    }
+    if let Some(desired) = &body.desired_outcome {
+        item.desired_outcome = desired.trim().to_string();
+    }
+    if let Some(status) = &body.status {
+        let status = status.trim().to_ascii_lowercase();
+        if [
+            "submitted",
+            "triaged",
+            "planned",
+            "in_progress",
+            "qa",
+            "released",
+            "rejected",
+        ]
+        .contains(&status.as_str())
+        {
+            item.status = status;
+        }
+    }
+
+    item.updated_at = now_iso();
+
+    match coll.replace_one(doc! { "id": &id }, &item).upsert(false).await {
+        Ok(_) => HttpResponse::Ok().json(serde_json::json!({ "item": item })),
+        Err(e) => {
+            eprintln!("api_admin_change_request_patch write error: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({ "message": "Failed to update change request" }))
+        }
+    }
+}
+
+async fn api_admin_change_request_delete(
+    path: web::Path<String>,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    let id = path.into_inner();
+    let coll = mongo
+        .database(&mongo_db_name())
+        .collection::<ChangeRequestItem>(ADMIN_CHANGE_REQUESTS_COLL);
+
+    match coll.delete_one(doc! { "id": &id }).await {
+        Ok(res) if res.deleted_count > 0 => HttpResponse::Ok().json(serde_json::json!({ "deleted": true, "id": id })),
+        Ok(_) => HttpResponse::NotFound().json(serde_json::json!({ "deleted": false, "message": "Change request not found" })),
+        Err(e) => {
+            eprintln!("api_admin_change_request_delete error: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({ "message": "Failed to delete change request" }))
+        }
+    }
+}
+
 // --- AI settings (Phase B1, issue #173) ----------------------------------------
 
 const AI_SETTINGS_ID: &str = "global";
@@ -5295,6 +5901,31 @@ async fn main() -> std::io::Result<()> {
                 .route(
                     "/api/security/remediation/{alert_id}/rollback",
                     web::post().to(api_security_rollback),
+                )
+                .route("/api/admin/users", web::get().to(api_admin_users_list))
+                .route("/api/admin/users", web::post().to(api_admin_user_create))
+                .route("/api/admin/users/{id}", web::get().to(api_admin_user_get))
+                .route("/api/admin/users/{id}", web::patch().to(api_admin_user_patch))
+                .route("/api/admin/users/{id}", web::delete().to(api_admin_user_delete))
+                .route(
+                    "/api/admin/change-requests",
+                    web::get().to(api_admin_change_requests_list),
+                )
+                .route(
+                    "/api/admin/change-requests",
+                    web::post().to(api_admin_change_request_create),
+                )
+                .route(
+                    "/api/admin/change-requests/{id}",
+                    web::get().to(api_admin_change_request_get),
+                )
+                .route(
+                    "/api/admin/change-requests/{id}",
+                    web::patch().to(api_admin_change_request_patch),
+                )
+                .route(
+                    "/api/admin/change-requests/{id}",
+                    web::delete().to(api_admin_change_request_delete),
                 )
                 .route(
                     "/api/admin/security/posture",
