@@ -208,6 +208,17 @@ pub struct WorkflowStage {
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct WorkflowEvent {
+    pub at: String,
+    pub actor: String,
+    pub action: String,
+    pub from_status: String,
+    pub to_status: String,
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct ChangeRequestItem {
     pub id: String,
     pub title: String,
@@ -220,8 +231,12 @@ pub struct ChangeRequestItem {
     pub linked_repo: String,
     pub created_at: String,
     pub updated_at: String,
+    pub taken_in_charge_at: Option<String>,
+    pub taken_in_charge_by: Option<String>,
     pub target_release_window: String,
     pub acceptance_criteria: Vec<String>,
     pub workflow: Vec<WorkflowStage>,
+    #[serde(default)]
+    pub workflow_events: Vec<WorkflowEvent>,
     pub changelog_entry: Option<serde_json::Value>,
 }

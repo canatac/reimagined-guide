@@ -52,7 +52,8 @@ use mongodb::bson;
 use mongodb::bson::doc;
 use reqwest;
 use simple_smtp_server::entities::{
-    AdminUserActivity, AdminUserRecord, CalendarEvent, ChangeRequestItem, Email, WorkflowStage,
+    AdminUserActivity, AdminUserRecord, CalendarEvent, ChangeRequestItem, Email, WorkflowEvent,
+    WorkflowStage,
 };
 use simple_smtp_server::external_imap::{
     CreateExternalAccountInput, ExternalImapService, ExternalMessageActionInput,
@@ -4056,6 +4057,7 @@ struct CreateChangeRequestInputApi {
 struct PatchChangeRequestInputApi {
     action: Option<String>,
     note: Option<String>,
+    actor: Option<String>,
     title: Option<String>,
     problem: Option<String>,
     desired_outcome: Option<String>,
@@ -4320,6 +4322,7 @@ async fn api_admin_change_request_create(
     }
 
     let now = now_iso();
+    let submitter = body.requested_by.trim().to_string();
     let item = ChangeRequestItem {
         id: format!("cr_{}", Uuid::new_v4().simple()),
         title: body.title.trim().to_string(),
@@ -4328,10 +4331,12 @@ async fn api_admin_change_request_create(
         scope: scope.clone(),
         priority: compute_priority(&urgency, &impact),
         status: "submitted".to_string(),
-        requested_by: body.requested_by.trim().to_string(),
+        requested_by: submitter.clone(),
         linked_repo,
         created_at: now.clone(),
-        updated_at: now,
+        updated_at: now.clone(),
+        taken_in_charge_at: None,
+        taken_in_charge_by: None,
         target_release_window: if urgency == "high" {
             "next-24h".to_string()
         } else if urgency == "medium" {
@@ -4341,6 +4346,14 @@ async fn api_admin_change_request_create(
         },
         acceptance_criteria: build_acceptance_criteria(&scope),
         workflow: build_initial_stages(),
+        workflow_events: vec![WorkflowEvent {
+            at: now,
+            actor: submitter,
+            action: "submitted".to_string(),
+            from_status: "submitted".to_string(),
+            to_status: "submitted".to_string(),
+            note: Some("Change request créée".to_string()),
+        }],
         changelog_entry: None,
     };
 
@@ -4380,6 +4393,16 @@ async fn api_admin_change_request_patch(
 
     if let Some(action) = &body.action {
         let action = action.trim().to_ascii_lowercase();
+        let actor = body
+            .actor
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("hermes")
+            .to_string();
+        let previous_status = item.status.clone();
+        let mut transition_note = body.note.clone();
+
         if action == "reject" {
             item.status = "rejected".to_string();
             item.workflow = item
@@ -4413,6 +4436,24 @@ async fn api_admin_change_request_patch(
         } else {
             return HttpResponse::BadRequest().json(serde_json::json!({ "message": "action must be advance|reject" }));
         }
+
+        if item.taken_in_charge_at.is_none() && previous_status == "submitted" && item.status != "submitted" {
+            let intake_at = now_iso();
+            item.taken_in_charge_at = Some(intake_at.clone());
+            item.taken_in_charge_by = Some(actor.clone());
+            if transition_note.is_none() {
+                transition_note = Some("Prise en charge initiale".to_string());
+            }
+        }
+
+        item.workflow_events.push(WorkflowEvent {
+            at: now_iso(),
+            actor,
+            action,
+            from_status: previous_status,
+            to_status: item.status.clone(),
+            note: transition_note,
+        });
     }
 
     if let Some(title) = &body.title {
