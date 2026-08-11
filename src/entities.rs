@@ -167,3 +167,61 @@ impl Email {
         }
     }
 }
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AdminUserActivity {
+    pub at: String,
+    pub label: String,
+    pub kind: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AdminUserRecord {
+    pub id: String,
+    pub email: String,
+    pub display_name: Option<String>,
+    pub role: String,
+    pub status: String,
+    pub two_factor_enabled: bool,
+    pub last_login_at: Option<String>,
+    pub last_activity_at: Option<String>,
+    pub sessions24h: i64,
+    pub actions7d: i64,
+    pub change_requests30d: i64,
+    pub recent_activity: Vec<AdminUserActivity>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowStage {
+    pub key: String,
+    pub label: String,
+    pub owner: String,
+    pub status: String,
+    pub checklist: Vec<String>,
+    pub done_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangeRequestItem {
+    pub id: String,
+    pub title: String,
+    pub problem: String,
+    pub desired_outcome: String,
+    pub scope: String,
+    pub priority: String,
+    pub status: String,
+    pub requested_by: String,
+    pub linked_repo: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub target_release_window: String,
+    pub acceptance_criteria: Vec<String>,
+    pub workflow: Vec<WorkflowStage>,
+    pub changelog_entry: Option<serde_json::Value>,
+}
