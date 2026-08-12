@@ -4062,6 +4062,8 @@ struct PatchChangeRequestInputApi {
     problem: Option<String>,
     desired_outcome: Option<String>,
     status: Option<String>,
+    execution_run_id: Option<String>,
+    execution_error: Option<String>,
 }
 
 async fn api_admin_users_list(mongo: web::Data<Arc<mongodb::Client>>) -> impl Responder {
@@ -4354,6 +4356,12 @@ async fn api_admin_change_request_create(
             to_status: "submitted".to_string(),
             note: Some("Change request créée".to_string()),
         }],
+        execution_state: "idle".to_string(),
+        execution_run_id: None,
+        execution_started_at: None,
+        execution_last_heartbeat_at: None,
+        execution_finished_at: None,
+        execution_last_error: None,
         changelog_entry: None,
     };
 
@@ -4419,13 +4427,32 @@ async fn api_admin_change_request_patch(
                     }
                 })
                 .collect();
+            item.execution_state = "idle".to_string();
+            item.execution_run_id = None;
+            item.execution_started_at = None;
+            item.execution_last_heartbeat_at = None;
+            item.execution_finished_at = Some(now_iso());
+            item.execution_last_error = None;
         } else if action == "advance" {
             let order = admin_workflow_order();
             let idx = order.iter().position(|x| *x == item.status).unwrap_or(0);
             if idx < order.len() - 1 {
                 item.status = order[idx + 1].to_string();
                 item.workflow = advance_workflow(&item.workflow);
+                if item.status == "in_progress" && item.execution_state == "idle" {
+                    item.execution_state = "queued".to_string();
+                    item.execution_last_error = None;
+                    item.execution_finished_at = None;
+                    if transition_note.is_none() {
+                        transition_note = Some(
+                            "Workflow in_progress atteint; en attente d’un run technique backend explicite".to_string(),
+                        );
+                    }
+                }
                 if item.status == "released" {
+                    item.execution_state = "success".to_string();
+                    item.execution_finished_at = Some(now_iso());
+                    item.execution_last_error = None;
                     item.changelog_entry = Some(serde_json::json!({
                         "title": item.title,
                         "summary": body.note.clone().unwrap_or_else(|| item.desired_outcome.clone()),
@@ -4433,8 +4460,64 @@ async fn api_admin_change_request_patch(
                     }));
                 }
             }
+        } else if action == "execution_queue" {
+            item.execution_state = "queued".to_string();
+            item.execution_finished_at = None;
+            item.execution_last_error = None;
+            if let Some(run_id) = body.execution_run_id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+                item.execution_run_id = Some(run_id.to_string());
+            }
+        } else if action == "execution_start" {
+            let now = now_iso();
+            item.execution_state = "running".to_string();
+            item.execution_started_at = Some(item.execution_started_at.clone().unwrap_or_else(|| now.clone()));
+            item.execution_last_heartbeat_at = Some(now.clone());
+            item.execution_finished_at = None;
+            item.execution_last_error = None;
+            if let Some(run_id) = body.execution_run_id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+                item.execution_run_id = Some(run_id.to_string());
+            }
+        } else if action == "execution_heartbeat" {
+            item.execution_state = "running".to_string();
+            item.execution_last_heartbeat_at = Some(now_iso());
+            if item.execution_started_at.is_none() {
+                item.execution_started_at = Some(now_iso());
+            }
+            if let Some(run_id) = body.execution_run_id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+                item.execution_run_id = Some(run_id.to_string());
+            }
+        } else if action == "execution_fail" {
+            item.execution_state = "failed".to_string();
+            item.execution_last_heartbeat_at = Some(now_iso());
+            item.execution_finished_at = Some(now_iso());
+            item.execution_last_error = body
+                .execution_error
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .or_else(|| transition_note.clone())
+                .or(Some("Execution failed".to_string()));
+            if let Some(run_id) = body.execution_run_id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+                item.execution_run_id = Some(run_id.to_string());
+            }
+        } else if action == "execution_success" {
+            item.execution_state = "success".to_string();
+            item.execution_last_heartbeat_at = Some(now_iso());
+            item.execution_finished_at = Some(now_iso());
+            item.execution_last_error = None;
+            if let Some(run_id) = body.execution_run_id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+                item.execution_run_id = Some(run_id.to_string());
+            }
+        } else if action == "execution_reset" {
+            item.execution_state = "idle".to_string();
+            item.execution_run_id = None;
+            item.execution_started_at = None;
+            item.execution_last_heartbeat_at = None;
+            item.execution_finished_at = None;
+            item.execution_last_error = None;
         } else {
-            return HttpResponse::BadRequest().json(serde_json::json!({ "message": "action must be advance|reject" }));
+            return HttpResponse::BadRequest().json(serde_json::json!({ "message": "action must be advance|reject|execution_queue|execution_start|execution_heartbeat|execution_fail|execution_success|execution_reset" }));
         }
 
         if item.taken_in_charge_at.is_none() && previous_status == "submitted" && item.status != "submitted" {

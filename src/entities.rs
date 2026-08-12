@@ -217,6 +217,10 @@ pub struct WorkflowEvent {
     pub note: Option<String>,
 }
 
+fn default_execution_state() -> String {
+    "idle".to_string()
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ChangeRequestItem {
@@ -238,5 +242,17 @@ pub struct ChangeRequestItem {
     pub workflow: Vec<WorkflowStage>,
     #[serde(default)]
     pub workflow_events: Vec<WorkflowEvent>,
+    #[serde(default = "default_execution_state")]
+    pub execution_state: String,
+    #[serde(default)]
+    pub execution_run_id: Option<String>,
+    #[serde(default)]
+    pub execution_started_at: Option<String>,
+    #[serde(default)]
+    pub execution_last_heartbeat_at: Option<String>,
+    #[serde(default)]
+    pub execution_finished_at: Option<String>,
+    #[serde(default)]
+    pub execution_last_error: Option<String>,
     pub changelog_entry: Option<serde_json::Value>,
 }
