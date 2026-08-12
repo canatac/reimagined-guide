@@ -1553,6 +1553,19 @@ async fn send_email_handler(
             let message_id = dkim_result["messageId"].as_str().unwrap_or("");
             match dkim_result["status"].as_str() {
                 Some("success") => {
+                    let sig = dkim_result["dkimSignature"]
+                        .as_str()
+                        .or_else(|| dkim_result["dkim_signature"].as_str())
+                        .unwrap_or("")
+                        .trim()
+                        .to_string();
+                    if sig.is_empty() {
+                        return HttpResponse::InternalServerError().json(serde_json::json!({
+                            "status": "error",
+                            "message": "DKIM service returned success without a DKIM signature",
+                        }));
+                    }
+
                     // Construct the email with DKIM signature
                     let email = Email {
                         id: Uuid::new_v4().to_string(),
@@ -1560,25 +1573,14 @@ async fn send_email_handler(
                         to: email_req.to.clone(),
                         subject: email_req.subject.clone(),
                         body: email_req.body.clone(),
-                        headers: vec![(
-                            "DKIM-Signature".to_string(),
-                            dkim_result["dkimSignature"]
-                                .as_str()
-                                .unwrap_or("")
-                                .to_string(),
-                        )],
+                        headers: vec![("DKIM-Signature".to_string(), sig.clone())],
                         flags: vec![],
                         sequence_number: 0,
                         uid: 0,
                         internal_date: mongodb::bson::DateTime::from_millis(
                             Utc::now().timestamp_millis(),
                         ),
-                        dkim_signature: Some(
-                            dkim_result["dkimSignature"]
-                                .as_str()
-                                .unwrap_or("")
-                                .to_string(),
-                        ),
+                        dkim_signature: Some(sig),
                     };
 
                     // Send the email
@@ -3043,6 +3045,12 @@ async fn api_send(
                 // SMTP handoff/delivery itself. Only skip direct SMTP relay when
                 // acceptance is on a non-internal remote MX hop.
                 let delivered = sig.is_empty() && effective_remote_accept;
+                if sig.is_empty() && !delivered {
+                    return HttpResponse::InternalServerError().json(serde_json::json!({
+                        "sent": false,
+                        "message": "DKIM signer returned success without signature and without remote delivery proof; refusing unsigned send",
+                    }));
+                }
                 (
                     sig,
                     mid,
