@@ -105,6 +105,7 @@ The project consists of **two async servers** (Tokio-based):
 SMTP_TLS_ADDR=0.0.0.0:8465
 SMTP_PLAIN_ADDR=0.0.0.0:8025
 SMTP_REQUIRE_STARTTLS=true
+SMTP_HOSTNAME=mail.misfits.ai
 CERT_PATH=localhost.crt
 KEY_PATH=localhost.key
 SMTP_USERNAME=admin
