@@ -25,6 +25,7 @@ The server listens on two ports:
 Environment variables (set in .env file):
 - SMTP_TLS_ADDR: Address for TLS connections (default: "0.0.0.0:8465")
 - SMTP_PLAIN_ADDR: Address for plain connections (default: "0.0.0.0:8025")
+- SMTP_REQUIRE_STARTTLS: Require STARTTLS before AUTH on plain SMTP port (default: true)
 - CERT_PATH: Path to SSL certificate file
 - KEY_PATH: Path to SSL private key file
 - SMTP_USERNAME: Username for SMTP authentication
@@ -126,6 +127,23 @@ impl AsyncBufRead for StreamType {
             StreamType::Tls(s) => std::pin::Pin::new(s).consume(amt),
             StreamType::Plain(s) => std::pin::Pin::new(s).consume(amt),
         }
+    }
+}
+
+impl StreamType {
+    fn is_tls(&self) -> bool {
+        matches!(self, StreamType::Tls(_))
+    }
+}
+
+fn env_bool(key: &str, default: bool) -> bool {
+    match env::var(key) {
+        Ok(raw) => {
+            let v = raw.trim().to_ascii_lowercase();
+            matches!(v.as_str(), "1" | "true" | "yes" | "on")
+                || (!matches!(v.as_str(), "0" | "false" | "no" | "off") && default)
+        }
+        Err(_) => default,
     }
 }
 
@@ -554,15 +572,31 @@ async fn process_command(
         command.trim().to_uppercase().as_str()
     );
 
+    let require_starttls = env_bool("SMTP_REQUIRE_STARTTLS", true);
+    let is_tls = stream.is_tls();
+
     match command.trim().to_uppercase().as_str() {
-        s if s.starts_with("HELO") || s.starts_with("EHLO") => Ok(
-            "250-mail.misfits.ai Hello\r\n250-STARTTLS\r\n250-AUTH LOGIN PLAIN\r\n250 OK\r\n"
-                .to_string(),
-        ),
+        s if s.starts_with("HELO") || s.starts_with("EHLO") => {
+            let mut caps = vec!["250-mail.misfits.ai Hello".to_string()];
+            if !is_tls {
+                caps.push("250-STARTTLS".to_string());
+            }
+            if is_tls || !require_starttls {
+                caps.push("250-AUTH LOGIN PLAIN".to_string());
+            }
+            caps.push("250 OK".to_string());
+            Ok(format!("{}\r\n", caps.join("\r\n")))
+        }
         s if s.starts_with("AUTH LOGIN") => {
+            if require_starttls && !is_tls {
+                return Ok("530 Must issue a STARTTLS command first\r\n".to_string());
+            }
             handle_auth_login(stream, logic.clone(), session_manager.clone()).await
         }
         s if s.starts_with("AUTH PLAIN") => {
+            if require_starttls && !is_tls {
+                return Ok("530 Must issue a STARTTLS command first\r\n".to_string());
+            }
             handle_auth_plain(command, session_manager.clone()).await
         }
         s if s.starts_with("MAIL FROM:") => {
@@ -608,8 +642,11 @@ async fn process_command(
             )
         }
         s if s.starts_with("AUTH") => {
-            // In a real implementation, you'd handle authentication here
-            Ok("235 Authentication successful\r\n".to_string())
+            if require_starttls && !is_tls {
+                Ok("530 Must issue a STARTTLS command first\r\n".to_string())
+            } else {
+                Ok("235 Authentication successful\r\n".to_string())
+            }
         }
         s if s.starts_with("STARTTLS") => match stream {
             StreamType::Plain(_) => Ok("220 Ready to start TLS\r\n".to_string()),
