@@ -148,6 +148,25 @@ fn env_bool(key: &str, default: bool) -> bool {
     }
 }
 
+fn recipient_domain(raw_to: &str) -> Option<String> {
+    let trimmed = raw_to.trim();
+    let addr = if let (Some(start), Some(end)) = (trimmed.rfind('<'), trimmed.rfind('>')) {
+        if start < end {
+            &trimmed[start + 1..end]
+        } else {
+            trimmed
+        }
+    } else {
+        trimmed.trim_matches(|c| c == '<' || c == '>')
+    };
+
+    addr.split('@').nth(1).map(|d| d.trim().trim_end_matches('.').to_ascii_lowercase())
+}
+
+fn is_local_recipient(raw_to: &str) -> bool {
+    matches!(recipient_domain(raw_to).as_deref(), Some("misfits.ai") | Some("mail.misfits.ai"))
+}
+
 // Struct to represent the mail server
 struct MailServer {
     mail_dir: String,
@@ -270,7 +289,23 @@ async fn handle_tls_client(
                                             &email_to_store.from,
                                             &email_to_store.to,
                                         ).await;
-                                        write_response(&mut stream, "250 OK\r\n").await?;
+                                        if is_local_recipient(&email_to_store.to) {
+                                            write_response(&mut stream, "250 OK\r\n").await?;
+                                        } else {
+                                            match send_outgoing_email(&email_to_store).await {
+                                                Ok(_) => {
+                                                    write_response(&mut stream, "250 OK\r\n").await?;
+                                                }
+                                                Err(e) => {
+                                                    error!("Failed to forward authenticated email: {}", e);
+                                                    write_response(
+                                                        &mut stream,
+                                                        "451 4.4.0 Temporary forwarding failure\r\n",
+                                                    )
+                                                    .await?;
+                                                }
+                                            }
+                                        }
                                     }
                                 } else {
                                     eprintln!(
@@ -463,7 +498,23 @@ async fn handle_plain_client(
                                             &email_to_store.from,
                                             &email_to_store.to,
                                         ).await;
-                                        write_response(&mut stream, "250 OK\r\n").await?;
+                                        if is_local_recipient(&email_to_store.to) {
+                                            write_response(&mut stream, "250 OK\r\n").await?;
+                                        } else {
+                                            match send_outgoing_email(&email_to_store).await {
+                                                Ok(_) => {
+                                                    write_response(&mut stream, "250 OK\r\n").await?;
+                                                }
+                                                Err(e) => {
+                                                    error!("Failed to forward authenticated email: {}", e);
+                                                    write_response(
+                                                        &mut stream,
+                                                        "451 4.4.0 Temporary forwarding failure\r\n",
+                                                    )
+                                                    .await?;
+                                                }
+                                            }
+                                        }
                                     }
                                 } else {
                                     eprintln!("Mailbox or username not found for session");
