@@ -484,7 +484,7 @@ async fn handle_plain_client(
                                     error!("Failed to forward email: {}", e);
                                     write_response(
                                         &mut stream,
-                                        "250 OK (stored locally, forwarding deferred)\r\n",
+                                        "451 4.4.0 Temporary forwarding failure\r\n",
                                     )
                                     .await?;
                                 }
