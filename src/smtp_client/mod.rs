@@ -121,6 +121,30 @@ async fn expect_code<T: AsyncReadExt + Unpin>(
         format!("Timed out waiting for SMTP {} response: {}", expected, acc),
     ))
 }
+fn ehlo_hostname() -> String {
+    if let Ok(value) = env::var("SMTP_HOSTNAME") {
+        let v = value.trim().trim_end_matches('.');
+        if !v.is_empty() {
+            return v.to_string();
+        }
+    }
+
+    if let Ok(value) = env::var("DOMAIN_NAME") {
+        let d = value.trim().trim_end_matches('.');
+        if !d.is_empty() {
+            if d.eq_ignore_ascii_case("misfits.ai") {
+                return "mail.misfits.ai".to_string();
+            }
+            if d.starts_with("mail.") {
+                return d.to_string();
+            }
+            return format!("mail.{}", d);
+        }
+    }
+
+    "mail.misfits.ai".to_string()
+}
+
 pub async fn send_outgoing_email(email: &Email) -> std::io::Result<()> {
     if let Ok(relay_host) = env::var("SMTP_RELAY_HOST") {
         return send_via_relay(email, &relay_host).await;
@@ -147,9 +171,7 @@ async fn send_via_relay(email: &Email, relay_host: &str) -> std::io::Result<()> 
     }
     email_content.push_str(&format!("\r\n{}", email.body));
 
-    let ehlo_hostname = env::var("SMTP_HOSTNAME")
-        .or_else(|_| env::var("DOMAIN_NAME"))
-        .unwrap_or_else(|_| "misfits.ai".to_string());
+    let ehlo_hostname = ehlo_hostname();
 
     let mut stream = timeout(
         Duration::from_secs(10),
@@ -396,9 +418,7 @@ async fn send_via_mx(email: &Email) -> std::io::Result<()> {
     // Wrap all pre-send SMTP steps so errors still emit a Bounced monitoring event.
     let handshake_result: std::io::Result<(StreamType, u64, String)> = async {
         expect_code(&mut stream, "220").await?;
-        let ehlo_hostname = std::env::var("SMTP_HOSTNAME")
-            .or_else(|_| std::env::var("DOMAIN_NAME"))
-            .unwrap_or_else(|_| "misfits.ai".to_string());
+        let ehlo_hostname = ehlo_hostname();
         stream.write_all(format!("EHLO {}\r\n", ehlo_hostname).as_bytes()).await?;
         expect_code(&mut stream, "250").await?;
 
