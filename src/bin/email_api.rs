@@ -4684,6 +4684,13 @@ struct HermesRunsProxyRequest {
     session_key: Option<String>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HermesRunsListQuery {
+    #[serde(default)]
+    limit: Option<u32>,
+}
+
 fn normalize_hermes_base_url(raw: &str) -> String {
     let trimmed = raw.trim().trim_end_matches('/');
     if let Some(without_v1) = trimmed.strip_suffix("/v1") {
@@ -4772,6 +4779,48 @@ async fn api_hermes_chat(
         .send()
         .await
     {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Hermes upstream request error: {}", e);
+            return HttpResponse::BadGateway().json(serde_json::json!({
+                "error": "Hermes upstream unavailable"
+            }));
+        }
+    };
+
+    let status = response.status();
+    let body_json = match response.json::<serde_json::Value>().await {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("Hermes upstream JSON parse error: {}", e);
+            return HttpResponse::BadGateway().json(serde_json::json!({
+                "error": "Invalid Hermes upstream response"
+            }));
+        }
+    };
+
+    HttpResponse::build(
+        actix_web::http::StatusCode::from_u16(status.as_u16())
+            .unwrap_or(actix_web::http::StatusCode::BAD_GATEWAY),
+    )
+    .json(body_json)
+}
+
+async fn api_hermes_runs_list(query: web::Query<HermesRunsListQuery>) -> impl Responder {
+    let base = resolve_hermes_base_url();
+    let api_key = match env::var("HERMES_API_KEY") {
+        Ok(v) if !v.trim().is_empty() => v,
+        _ => {
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": "HERMES_API_KEY is not configured"
+            }))
+        }
+    };
+
+    let limit = query.limit.unwrap_or(40).clamp(10, 200);
+    let url = format!("{}/v1/runs?limit={}", base, limit);
+    let client = reqwest::Client::new();
+    let response = match client.get(url).bearer_auth(api_key).send().await {
         Ok(r) => r,
         Err(e) => {
             eprintln!("Hermes upstream request error: {}", e);
@@ -5863,6 +5912,7 @@ async fn main() -> std::io::Result<()> {
                 .route("/api/settings/ai", web::get().to(api_get_ai_settings))
                 .route("/api/settings/ai", web::put().to(api_put_ai_settings))
                 .route("/api/hermes/chat", web::post().to(api_hermes_chat))
+                .route("/api/hermes/runs", web::get().to(api_hermes_runs_list))
                 .route("/api/hermes/runs", web::post().to(api_hermes_runs))
                 .route(
                     "/api/hermes/runs/{run_id}",
