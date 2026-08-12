@@ -65,6 +65,7 @@ use tokio_rustls::server::TlsStream;
 
 use simple_smtp_server::entities::Email;
 use simple_smtp_server::logic::Logic;
+use simple_smtp_server::monitoring;
 use simple_smtp_server::session::SessionManager;
 use simple_smtp_server::smtp_client::{extract_email_address, send_outgoing_email};
 
@@ -856,8 +857,18 @@ async fn main() -> Result<(), MainError> {
             info!("MongoDB connection ready.");
         }
     }
-    let logic = Arc::new(Logic::new(client));
+    let logic = Arc::new(Logic::new(client.clone()));
     let session_manager = Arc::new(SessionManager::new());
+
+    if monitoring::monitoring_enabled() {
+        monitoring::init_bus();
+        monitoring::storage::start_persistence_task(client.clone());
+        let monitor_idx_client = client.clone();
+        tokio::spawn(async move {
+            monitoring::storage::ensure_indexes(&monitor_idx_client).await;
+        });
+        info!("SMTP monitoring bus initialized in smtp_server");
+    }
 
     loop {
         tokio::select! {
