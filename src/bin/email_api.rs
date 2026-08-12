@@ -3041,14 +3041,15 @@ async fn api_send(
                 );
                 let effective_remote_accept = accepted_by_remote_mx && !internal_hop;
 
-                // No DKIM signature means the Node service likely already performed
-                // SMTP handoff/delivery itself. Only skip direct SMTP relay when
-                // acceptance is on a non-internal remote MX hop.
-                let delivered = sig.is_empty() && effective_remote_accept;
+                // No DKIM signature means dkim-service likely performed SMTP itself.
+                // Accept this path only with explicit SMTP handoff proof (`accepted*`).
+                // We still keep `effective_remote_accept` separate so status can tell
+                // true remote MX acceptance from internal relay handoff.
+                let delivered = sig.is_empty() && accepted_by_remote_mx;
                 if sig.is_empty() && !delivered {
                     return HttpResponse::InternalServerError().json(serde_json::json!({
                         "sent": false,
-                        "message": "DKIM signer returned success without signature and without remote delivery proof; refusing unsigned send",
+                        "message": "DKIM signer returned success without signature and without SMTP handoff proof; refusing unsigned send",
                     }));
                 }
                 (
