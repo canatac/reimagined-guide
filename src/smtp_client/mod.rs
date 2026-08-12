@@ -56,6 +56,105 @@ enum StreamType {
     Tls(TlsStream<TcpStream>),
 }
 
+fn normalize_crlf(input: &str) -> String {
+    input
+        .replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .replace('\n', "\r\n")
+}
+
+fn strip_tags_simple(html: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+    let mut in_tag = false;
+    for c in html.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => out.push(c),
+            _ => {}
+        }
+    }
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn body_looks_like_html(body: &str) -> bool {
+    let lower = body.to_ascii_lowercase();
+    lower.contains("<html")
+        || lower.contains("<body")
+        || lower.contains("<p")
+        || lower.contains("<div")
+        || lower.contains("<br")
+        || lower.contains("<table")
+        || lower.contains("<span")
+        || lower.contains("</")
+}
+
+fn ensure_html_document(raw: &str) -> String {
+    let trimmed = raw.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.contains("<html") {
+        return trimmed.to_string();
+    }
+    format!("<!DOCTYPE html><html><body>{}</body></html>", trimmed)
+}
+
+fn upsert_content_type(headers: &mut Vec<(String, String)>, value: String) {
+    if let Some((_, existing)) = headers
+        .iter_mut()
+        .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+    {
+        *existing = value;
+    } else {
+        headers.push(("Content-Type".to_string(), value));
+    }
+}
+
+fn compose_smtp_payload(email: &Email) -> String {
+    let mut headers = email.headers.clone();
+    let body = email.body.trim();
+
+    let has_multipart = headers.iter().any(|(k, v)| {
+        k.eq_ignore_ascii_case("content-type") && v.to_ascii_lowercase().contains("multipart/")
+    });
+
+    let payload_body = if has_multipart {
+        body.to_string()
+    } else if body_looks_like_html(body) {
+        let html = normalize_crlf(&ensure_html_document(body));
+        let mut plain = strip_tags_simple(&html);
+        if plain.trim().is_empty() {
+            plain = body.to_string();
+        }
+        plain = normalize_crlf(plain.trim());
+
+        let boundary = format!("misfits-alt-{}", Uuid::new_v4().simple());
+        upsert_content_type(
+            &mut headers,
+            format!("multipart/alternative; boundary=\"{}\"", boundary),
+        );
+
+        format!(
+            "--{b}\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n{plain}\r\n--{b}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n{html}\r\n--{b}--\r\n",
+            b = boundary,
+            plain = plain,
+            html = html,
+        )
+    } else {
+        upsert_content_type(&mut headers, "text/plain; charset=utf-8".to_string());
+        normalize_crlf(body)
+    };
+
+    let mut email_content = format!(
+        "From: {}\r\nTo: {}\r\nSubject: {}\r\n",
+        email.from, email.to, email.subject
+    );
+    for (key, value) in &headers {
+        email_content.push_str(&format!("{}: {}\r\n", key, value));
+    }
+    email_content.push_str(&format!("\r\n{}", payload_body));
+    email_content
+}
+
 async fn test_smtp_port(host: &str, port: u16) -> bool {
     match timeout(CONNECTION_TIMEOUT, TcpStream::connect((host, port))).await {
         Ok(Ok(_)) => true,
@@ -162,14 +261,7 @@ async fn send_via_relay(email: &Email, relay_host: &str) -> std::io::Result<()> 
     let relay_user = env::var("SMTP_RELAY_USER").unwrap_or_default();
     let relay_pass = env::var("SMTP_RELAY_PASSWORD").unwrap_or_default();
 
-    let mut email_content = format!(
-        "From: {}\r\nTo: {}\r\nSubject: {}\r\n",
-        email.from, email.to, email.subject
-    );
-    for (key, value) in &email.headers {
-        email_content.push_str(&format!("{}: {}\r\n", key, value));
-    }
-    email_content.push_str(&format!("\r\n{}", email.body));
+    let email_content = compose_smtp_payload(email);
 
     let ehlo_hostname = ehlo_hostname();
 
@@ -254,14 +346,7 @@ async fn send_via_mx(email: &Email) -> std::io::Result<()> {
 
     println!("Sending email: {}", email.body);
 
-    let mut email_content = format!(
-        "From: {}\r\nTo: {}\r\nSubject: {}\r\n",
-        email.from, email.to, email.subject
-    );
-    for (key, value) in &email.headers {
-        email_content.push_str(&format!("{}: {}\r\n", key, value));
-    }
-    email_content.push_str(&format!("\r\n{}", email.body));
+    let email_content = compose_smtp_payload(email);
 
     let recipient_email = extract_email_address(&email_content, "To:")
         .ok_or_else(|| IoError::new(ErrorKind::InvalidInput, "Invalid recipient email"))?;
