@@ -167,15 +167,17 @@ fn is_local_recipient(raw_to: &str) -> bool {
     matches!(recipient_domain(raw_to).as_deref(), Some("misfits.ai") | Some("mail.misfits.ai"))
 }
 
-fn parse_message_id_header(raw_line: &str) -> Option<String> {
-    if !raw_line.to_ascii_lowercase().starts_with("message-id:") {
+fn parse_header_line(raw_line: &str) -> Option<(String, String)> {
+    let (name, value) = raw_line.split_once(':')?;
+    let name = name.trim();
+    if name.is_empty() {
         return None;
     }
+    Some((name.to_string(), value.trim().to_string()))
+}
 
-    let value = raw_line
-        .split_once(':')
-        .map(|(_, v)| v.trim())
-        .unwrap_or("")
+fn parse_message_id_header(value: &str) -> Option<String> {
+    let value = value
         .trim_matches(|c| c == '<' || c == '>')
         .trim();
 
@@ -357,29 +359,29 @@ async fn handle_tls_client(
                                 // Traitez les en-têtes
                                 let trimmed_line = line.trim();
                                 if !trimmed_line.is_empty() {
-                                    let line = trimmed_line.to_string();
-                                    current_email
-                                        .email
-                                        .headers
-                                        .push((line.clone(), line.clone()));
-                                    if trimmed_line.starts_with("DKIM-Signature:") {
-                                        current_email.dkim_signature = Some(line);
-                                    } else if trimmed_line.starts_with("From:") {
-                                        current_email.email.from =
-                                            extract_email_address(trimmed_line, "From:")
-                                                .unwrap_or_default();
-                                    } else if trimmed_line.starts_with("To:") {
-                                        current_email.email.to =
-                                            extract_email_address(trimmed_line, "To:")
-                                                .unwrap_or_default();
-                                    } else if trimmed_line.starts_with("Subject:") {
-                                        current_email.email.subject = trimmed_line
-                                            .trim_start_matches("Subject:")
-                                            .trim()
-                                            .to_string();
-                                    } else if let Some(mid) = parse_message_id_header(trimmed_line)
-                                    {
-                                        current_email.email.id = mid;
+                                    if let Some((name, value)) = parse_header_line(trimmed_line) {
+                                        current_email
+                                            .email
+                                            .headers
+                                            .push((name.clone(), value.clone()));
+
+                                        if name.eq_ignore_ascii_case("DKIM-Signature") {
+                                            current_email.dkim_signature = Some(value);
+                                        } else if name.eq_ignore_ascii_case("From") {
+                                            current_email.email.from =
+                                                extract_email_address(trimmed_line, "From:")
+                                                    .unwrap_or_default();
+                                        } else if name.eq_ignore_ascii_case("To") {
+                                            current_email.email.to =
+                                                extract_email_address(trimmed_line, "To:")
+                                                    .unwrap_or_default();
+                                        } else if name.eq_ignore_ascii_case("Subject") {
+                                            current_email.email.subject = value;
+                                        } else if name.eq_ignore_ascii_case("Message-ID") {
+                                            if let Some(mid) = parse_message_id_header(&value) {
+                                                current_email.email.id = mid;
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -572,30 +574,29 @@ async fn handle_plain_client(
                                 // Traitez les en-têtes
                                 let trimmed_buffer = buffer.trim();
                                 if !trimmed_buffer.is_empty() {
-                                    let line = trimmed_buffer.to_string();
-                                    current_email
-                                        .email
-                                        .headers
-                                        .push((line.clone(), line.clone()));
-                                    if trimmed_buffer.starts_with("DKIM-Signature:") {
-                                        current_email.dkim_signature = Some(line);
-                                    } else if trimmed_buffer.starts_with("From:") {
-                                        current_email.email.from =
-                                            extract_email_address(trimmed_buffer, "From:")
-                                                .unwrap_or_default();
-                                    } else if trimmed_buffer.starts_with("To:") {
-                                        current_email.email.to =
-                                            extract_email_address(trimmed_buffer, "To:")
-                                                .unwrap_or_default();
-                                    } else if trimmed_buffer.starts_with("Subject:") {
-                                        current_email.email.subject = trimmed_buffer
-                                            .trim_start_matches("Subject:")
-                                            .trim()
-                                            .to_string();
-                                    } else if let Some(mid) =
-                                        parse_message_id_header(trimmed_buffer)
-                                    {
-                                        current_email.email.id = mid;
+                                    if let Some((name, value)) = parse_header_line(trimmed_buffer) {
+                                        current_email
+                                            .email
+                                            .headers
+                                            .push((name.clone(), value.clone()));
+
+                                        if name.eq_ignore_ascii_case("DKIM-Signature") {
+                                            current_email.dkim_signature = Some(value);
+                                        } else if name.eq_ignore_ascii_case("From") {
+                                            current_email.email.from =
+                                                extract_email_address(trimmed_buffer, "From:")
+                                                    .unwrap_or_default();
+                                        } else if name.eq_ignore_ascii_case("To") {
+                                            current_email.email.to =
+                                                extract_email_address(trimmed_buffer, "To:")
+                                                    .unwrap_or_default();
+                                        } else if name.eq_ignore_ascii_case("Subject") {
+                                            current_email.email.subject = value;
+                                        } else if name.eq_ignore_ascii_case("Message-ID") {
+                                            if let Some(mid) = parse_message_id_header(&value) {
+                                                current_email.email.id = mid;
+                                            }
+                                        }
                                     }
                                 }
                             }
