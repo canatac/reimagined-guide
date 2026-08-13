@@ -3068,7 +3068,7 @@ async fn api_send(
                 eprintln!("DKIM service error on /api/send: {}", e);
                 return HttpResponse::InternalServerError().json(serde_json::json!({
                     "sent": false,
-                    "message": "Failed to generate DKIM signature",
+                    "message": format!("Failed to generate DKIM signature: {}", e),
                 }));
             }
         };
@@ -6336,15 +6336,20 @@ impl DkimService for RealDkimService {
             .await
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
-        if response.status().is_success() {
-            response
-                .json()
-                .await
+        let status = response.status();
+        let body = response
+            .text()
+            .await
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+        if status.is_success() {
+            serde_json::from_str::<serde_json::Value>(&body)
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
         } else {
+            let snippet = if body.len() > 1200 { &body[..1200] } else { &body };
             Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
-                "Failed to sign email",
+                format!("DKIM service HTTP {}: {}", status.as_u16(), snippet),
             ))
         }
     }
