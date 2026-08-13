@@ -147,6 +147,7 @@ services:
       - SMTP_USER=${SMTP_USERNAME}
       - SMTP_PASS=${SMTP_PASSWORD}
       - DOMAIN_NAME=${DOMAIN_NAME}
+      - DKIM_DOMAINS=${DKIM_DOMAINS:-${DOMAIN_NAME}}
       - KEY_SELECTOR=${KEY_SELECTOR:-default}
       - PRIVATE_KEY_PATH=dkim/dkim-private.pem
     healthcheck:
