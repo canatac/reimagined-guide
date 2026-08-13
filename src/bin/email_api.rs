@@ -45,7 +45,7 @@ use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 use serde::{Deserialize, Serialize};
 use sha1::Sha1;
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use dotenv::dotenv;
 use futures_util::{stream, TryStreamExt};
 use mongodb::bson;
@@ -56,12 +56,12 @@ use simple_smtp_server::entities::{
     WorkflowStage,
 };
 use simple_smtp_server::external_imap::{
-    CreateExternalAccountInput, ExternalImapService, ExternalMessageActionInput,
-    ExternalFolderMappingInput, StartSyncInput, UpdateExternalAccountInput,
+    CreateExternalAccountInput, ExternalFolderMappingInput, ExternalImapService,
+    ExternalMessageActionInput, StartSyncInput, UpdateExternalAccountInput,
 };
+use simple_smtp_server::i18n;
 use simple_smtp_server::logic::Logic;
 use simple_smtp_server::smtp_client::send_outgoing_email;
-use simple_smtp_server::i18n;
 use std::collections::HashMap;
 use std::env;
 use std::fs::{create_dir_all, File};
@@ -418,6 +418,45 @@ struct DeliverabilityDiagnosticsQuery {
     #[serde(default = "default_window")]
     window: String,
     domain: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct DeliverabilityProcedureUpdateRequest {
+    checklist: Option<Vec<DeliverabilityChecklistUpdate>>,
+    reminder: Option<DeliverabilityReminderUpdate>,
+}
+
+#[derive(Deserialize)]
+struct DeliverabilityChecklistUpdate {
+    id: String,
+    checked: bool,
+    note: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct DeliverabilityReminderUpdate {
+    enabled: bool,
+    cadence_hours: u32,
+}
+
+async fn dns_txt_lookup(name: &str) -> Vec<String> {
+    use trust_dns_resolver::config::{ResolverConfig, ResolverOpts};
+    use trust_dns_resolver::TokioAsyncResolver;
+
+    let resolver = TokioAsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default());
+    let mut rows: Vec<String> = Vec::new();
+
+    if let Ok(lookup) = resolver.txt_lookup(name).await {
+        for txt in lookup.iter() {
+            for part in txt.txt_data() {
+                if let Ok(s) = std::str::from_utf8(part) {
+                    rows.push(s.to_string());
+                }
+            }
+        }
+    }
+
+    rows
 }
 
 /// GET /api/monitoring/summary?window=15m
@@ -983,9 +1022,17 @@ async fn api_admin_deliverability_diagnostics(
     let since = since_str(&query.window);
     let mut filter = doc! { "ts": { "$gte": &since } };
 
-    if let Some(domain) = query.domain.as_ref().map(|d| d.trim()).filter(|d| !d.is_empty()) {
+    if let Some(domain) = query
+        .domain
+        .as_ref()
+        .map(|d| d.trim())
+        .filter(|d| !d.is_empty())
+    {
         let safe_domain = domain.replace('.', "\\.");
-        filter.insert("to", doc! { "$regex": format!("@{}$", safe_domain), "$options": "i" });
+        filter.insert(
+            "to",
+            doc! { "$regex": format!("@{}$", safe_domain), "$options": "i" },
+        );
     }
 
     let total = storage::count_events(&mongo, filter.clone()).await;
@@ -1112,6 +1159,309 @@ async fn api_admin_deliverability_diagnostics(
     }))
 }
 
+async fn api_admin_deliverability_procedure(
+    query: web::Query<AdminWindowQuery>,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    let domain = env::var("DOMAIN_NAME")
+        .or_else(|_| env::var("MAIL_DOMAIN"))
+        .unwrap_or_else(|_| "misfits.ai".to_string())
+        .trim()
+        .trim_end_matches('.')
+        .to_string();
+    let selector = env::var("KEY_SELECTOR").unwrap_or_else(|_| "default".to_string());
+
+    let spf_rows = dns_txt_lookup(&domain).await;
+    let dmarc_rows = dns_txt_lookup(&format!("_dmarc.{}", domain)).await;
+    let helo_rows = dns_txt_lookup(&format!("mail.{}", domain)).await;
+    let dkim_rows = dns_txt_lookup(&format!("{}._domainkey.{}", selector, domain)).await;
+
+    let spf_joined = spf_rows.join(" ").to_ascii_lowercase();
+    let dmarc_joined = dmarc_rows.join(" ").to_ascii_lowercase();
+    let helo_joined = helo_rows.join(" ").to_ascii_lowercase();
+
+    let dmarc_policy = if dmarc_joined.contains("p=reject") {
+        "reject"
+    } else if dmarc_joined.contains("p=quarantine") {
+        "quarantine"
+    } else if dmarc_joined.contains("p=none") {
+        "none"
+    } else {
+        "missing"
+    };
+
+    let smtp_public_ip =
+        env::var("SMTP_PUBLIC_IP").unwrap_or_else(|_| "51.158.114.182".to_string());
+    let spf_apex_ok = spf_joined.contains("v=spf1") && spf_joined.contains(&smtp_public_ip);
+    let dkim_dns_ok = dkim_rows
+        .iter()
+        .any(|row| row.to_ascii_lowercase().contains("v=dkim1"));
+    let helo_spf_ok = helo_joined.contains("v=spf1");
+
+    let since = since_str(&query.window);
+    let gmail_blocks = storage::count_events(
+        &mongo,
+        doc! {
+            "ts": {"$gte": &since},
+            "to": {"$regex": "@gmail\\.com$", "$options": "i"},
+            "smtp_reply": {"$regex": "NotAuthorizedError|550-5\\.7\\.1", "$options": "i"}
+        },
+    )
+    .await;
+
+    let dkim_alerts = simple_smtp_server::security::audit::query_active_alerts(&mongo, 300)
+        .await
+        .into_iter()
+        .filter(|a| a.rule_name.to_ascii_lowercase().contains("dkim"))
+        .count() as u64;
+
+    let db = env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
+    let coll = mongo
+        .database(&db)
+        .collection::<bson::Document>("admin_runbooks");
+    let saved = coll
+        .find_one(doc! {"key": "deliverability_procedure"})
+        .await
+        .ok()
+        .flatten();
+
+    let mut reminder_enabled = true;
+    let mut reminder_cadence_hours = 24u32;
+    let mut reminder_anchor = Utc::now();
+    let mut checklist_overrides = bson::Document::new();
+
+    if let Some(saved_doc) = saved.as_ref() {
+        if let Ok(reminder) = saved_doc.get_document("reminder") {
+            reminder_enabled = reminder.get_bool("enabled").unwrap_or(true);
+            reminder_cadence_hours = reminder
+                .get_i32("cadence_hours")
+                .ok()
+                .map(|v| v.max(1) as u32)
+                .unwrap_or(24);
+
+            if let Ok(last_ack_at) = reminder.get_str("last_ack_at") {
+                if let Ok(parsed) = DateTime::parse_from_rfc3339(last_ack_at) {
+                    reminder_anchor = parsed.with_timezone(&Utc);
+                }
+            }
+        }
+
+        if let Ok(updated_at) = saved_doc.get_str("updated_at") {
+            if let Ok(parsed) = DateTime::parse_from_rfc3339(updated_at) {
+                reminder_anchor = parsed.with_timezone(&Utc);
+            }
+        }
+
+        if let Ok(overrides) = saved_doc.get_document("checklist_overrides") {
+            checklist_overrides = overrides.clone();
+        }
+    }
+
+    let next_reminder_due_at = if reminder_enabled {
+        (reminder_anchor + chrono::Duration::hours(reminder_cadence_hours as i64)).to_rfc3339()
+    } else {
+        String::new()
+    };
+
+    let mut checklist = vec![
+        serde_json::json!({
+            "id": "dmarc-enforcement",
+            "title": "Activer DMARC enforcement progressif",
+            "status": if dmarc_policy == "reject" {"done"} else if dmarc_policy == "quarantine" {"in_progress"} else {"todo"},
+            "evidence": format!("policy actuelle: {}", dmarc_policy),
+            "cta": {
+                "label": "Mettre à jour _dmarc",
+                "kind": "dns",
+                "details": "v=DMARC1; p=quarantine; pct=25; adkim=s; aspf=s; rua=mailto:dmarc@misfits.ai"
+            }
+        }),
+        serde_json::json!({
+            "id": "spf-helo",
+            "title": "Corriger SPF_HELO_NONE",
+            "status": if helo_spf_ok {"done"} else {"todo"},
+            "evidence": if helo_spf_ok {"TXT SPF trouvé sur mail.<domain>"} else {"TXT SPF absent sur mail.<domain>"},
+            "cta": {
+                "label": "Ajouter TXT SPF HELO",
+                "kind": "dns",
+                "details": "host=mail value=v=spf1 a -all"
+            }
+        }),
+        serde_json::json!({
+            "id": "dkim-dns",
+            "title": "Vérifier la clé DKIM publique",
+            "status": if dkim_dns_ok {"done"} else {"todo"},
+            "evidence": format!("selector {}._domainkey.{}", selector, domain),
+            "cta": {
+                "label": "Valider la clé DKIM",
+                "kind": "dns",
+                "details": format!("dig +short TXT {}._domainkey.{}", selector, domain)
+            }
+        }),
+        serde_json::json!({
+            "id": "gmail-policy",
+            "title": "Traiter les rejets policy Gmail",
+            "status": if gmail_blocks == 0 {"done"} else {"blocked"},
+            "evidence": format!("NotAuthorizedError sur fenêtre {}: {}", query.window, gmail_blocks),
+            "cta": {
+                "label": "Lancer plan warmup Gmail",
+                "kind": "ops",
+                "details": "Réputation IP/domain + Postmaster + ramp-up progressif"
+            }
+        }),
+        serde_json::json!({
+            "id": "dkim-runtime",
+            "title": "Confirmer absence de régression DKIM",
+            "status": if dkim_alerts == 0 {"done"} else {"todo"},
+            "evidence": format!("alertes DKIM actives: {}", dkim_alerts),
+            "cta": {
+                "label": "Exécuter un probe externe",
+                "kind": "probe",
+                "details": "Envoyer un test mail-tester + vérifier DKIM/SPF/DMARC"
+            }
+        }),
+        serde_json::json!({
+            "id": "apex-spf",
+            "title": "Conserver SPF apex aligné IP prod",
+            "status": if spf_apex_ok {"done"} else {"todo"},
+            "evidence": format!("SPF apex contient {}: {}", smtp_public_ip, spf_apex_ok),
+            "cta": {
+                "label": "Mettre à jour SPF apex",
+                "kind": "dns",
+                "details": format!("v=spf1 ip4:{} -all", smtp_public_ip)
+            }
+        }),
+    ];
+
+    for entry in &mut checklist {
+        if let Some(id) = entry.get("id").and_then(|v| v.as_str()) {
+            if let Ok(override_doc) = checklist_overrides.get_document(id) {
+                if let Ok(checked) = override_doc.get_bool("checked") {
+                    if checked {
+                        entry["status"] = serde_json::json!("done_manual");
+                    }
+                }
+                if let Ok(note) = override_doc.get_str("note") {
+                    if !note.trim().is_empty() {
+                        entry["operator_note"] = serde_json::json!(note);
+                    }
+                }
+            }
+        }
+    }
+
+    let done_count = checklist
+        .iter()
+        .filter(|item| {
+            item.get("status")
+                .and_then(|v| v.as_str())
+                .map(|s| s == "done" || s == "done_manual")
+                .unwrap_or(false)
+        })
+        .count();
+
+    let overall_status = if gmail_blocks > 0 {
+        "blocked_gmail_policy"
+    } else if done_count == checklist.len() {
+        "ready_for_reject"
+    } else {
+        "in_progress"
+    };
+
+    HttpResponse::Ok().json(serde_json::json!({
+        "window": query.window,
+        "domain": domain,
+        "overall_status": overall_status,
+        "progress": {
+            "done": done_count,
+            "total": checklist.len()
+        },
+        "automation": {
+            "auto_checks": ["dns_txt", "smtp_events", "security_alerts"],
+            "last_computed_at": Utc::now().to_rfc3339(),
+            "next_recompute_hint": "refresh tab or call endpoint"
+        },
+        "reminder": {
+            "enabled": reminder_enabled,
+            "cadence_hours": reminder_cadence_hours,
+            "next_due_at": next_reminder_due_at
+        },
+        "checklist": checklist,
+        "cta_details": [
+            {
+                "id": "run_external_probe",
+                "label": "Lancer un test externe",
+                "description": "Envoi test + vérification mail-tester + trace monitoring"
+            },
+            {
+                "id": "publish_dmarc_stage",
+                "label": "Publier DMARC stage suivant",
+                "description": "none -> quarantine(25) -> quarantine(100) -> reject(100)"
+            },
+            {
+                "id": "ack_review",
+                "label": "Marquer revue hebdomadaire",
+                "description": "Cocher les items validés et conserver une note opérateur"
+            }
+        ]
+    }))
+}
+
+async fn api_admin_deliverability_procedure_update(
+    body: web::Json<DeliverabilityProcedureUpdateRequest>,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    let db = env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
+    let coll = mongo
+        .database(&db)
+        .collection::<bson::Document>("admin_runbooks");
+
+    let mut set_doc = doc! {
+        "key": "deliverability_procedure",
+        "updated_at": Utc::now().to_rfc3339(),
+    };
+
+    if let Some(reminder) = body.reminder.as_ref() {
+        set_doc.insert(
+            "reminder",
+            doc! {
+                "enabled": reminder.enabled,
+                "cadence_hours": (reminder.cadence_hours.max(1) as i32),
+                "updated_at": Utc::now().to_rfc3339(),
+            },
+        );
+    }
+
+    if let Some(items) = body.checklist.as_ref() {
+        let mut overrides = bson::Document::new();
+        for item in items {
+            overrides.insert(
+                item.id.clone(),
+                bson::Bson::Document(doc! {
+                    "checked": item.checked,
+                    "note": item.note.clone().unwrap_or_default(),
+                    "updated_at": Utc::now().to_rfc3339(),
+                }),
+            );
+        }
+        set_doc.insert("checklist_overrides", overrides);
+    }
+
+    match coll
+        .update_one(
+            doc! {"key": "deliverability_procedure"},
+            doc! {"$set": set_doc},
+        )
+        .upsert(true)
+        .await
+    {
+        Ok(_) => HttpResponse::Ok().json(serde_json::json!({"ok": true})),
+        Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({
+            "ok": false,
+            "error": format!("deliverability_procedure_update_failed: {}", e)
+        })),
+    }
+}
+
 async fn api_admin_observability_overview(
     query: web::Query<AdminWindowQuery>,
     mongo: web::Data<Arc<mongodb::Client>>,
@@ -1228,7 +1578,10 @@ async fn api_admin_observability_overview(
         .iter()
         .filter(|a| {
             let n = a.rule_name.to_ascii_lowercase();
-            n.contains("volume") || n.contains("spike") || n.contains("anormal") || n.contains("anomaly")
+            n.contains("volume")
+                || n.contains("spike")
+                || n.contains("anormal")
+                || n.contains("anomaly")
         })
         .count();
 
@@ -1268,10 +1621,12 @@ async fn api_admin_observability_overview(
     };
     let suspicious_logins_top = suspicious_login_docs
         .into_iter()
-        .map(|d| serde_json::json!({
-            "ip": d.get_str("_id").unwrap_or("unknown"),
-            "attempts": d.get_i64("attempts").unwrap_or(0)
-        }))
+        .map(|d| {
+            serde_json::json!({
+                "ip": d.get_str("_id").unwrap_or("unknown"),
+                "attempts": d.get_i64("attempts").unwrap_or(0)
+            })
+        })
         .collect::<Vec<_>>();
 
     let by_domain_docs = storage::aggregate(
@@ -1653,7 +2008,11 @@ fn welcome_email_html(
     alias_email: Option<&str>,
 ) -> String {
     let dir = if i18n::is_rtl(locale) { "rtl" } else { "ltr" };
-    let text_align = if i18n::is_rtl(locale) { "right" } else { "left" };
+    let text_align = if i18n::is_rtl(locale) {
+        "right"
+    } else {
+        "left"
+    };
     let greeting = i18n::t(locale, "email-welcome-greeting", &[("name", display_name)]);
     let intro = i18n::t(locale, "email-welcome-intro", &[]);
     let primary_label = i18n::t(locale, "email-welcome-primary-label", &[]);
@@ -1857,14 +2216,22 @@ async fn auth_register(
 
     // Email de bienvenue HTML avec support RTL
     let welcome_subject = i18n::t(&locale, "email-welcome-subject", &[]);
-    let welcome_body = welcome_email_html(&locale, &display_name, &primary_email, alias_email.as_deref());
+    let welcome_body = welcome_email_html(
+        &locale,
+        &display_name,
+        &primary_email,
+        alias_email.as_deref(),
+    );
     let welcome = Email {
         id: Uuid::new_v4().to_string(),
         from: "noreply@misfits.ai".to_string(),
         to: primary_email.clone(),
         subject: welcome_subject,
         body: welcome_body,
-        headers: vec![("Content-Type".to_string(), "text/html; charset=utf-8".to_string())],
+        headers: vec![(
+            "Content-Type".to_string(),
+            "text/html; charset=utf-8".to_string(),
+        )],
         flags: vec![],
         sequence_number: 1,
         uid: 1,
@@ -2357,9 +2724,7 @@ async fn api_2fa_verify(
     let db = mongo_db_name();
 
     if body.method == "totp" {
-        let coll = mongo
-            .database(&db)
-            .collection::<bson::Document>("users");
+        let coll = mongo.database(&db).collection::<bson::Document>("users");
         let local = body.email.split('@').next().unwrap_or(&body.email);
         let user_doc = match coll
             .find_one(doc! { "$or": [{ "username": local }, { "username": &body.email }] })
@@ -2377,7 +2742,11 @@ async fn api_2fa_verify(
             }
         };
 
-        let totp_secret = match user_doc.get_str("totp_secret").ok().filter(|s| !s.is_empty()) {
+        let totp_secret = match user_doc
+            .get_str("totp_secret")
+            .ok()
+            .filter(|s| !s.is_empty())
+        {
             Some(s) => s.to_string(),
             None => {
                 return HttpResponse::BadRequest().json(serde_json::json!({
@@ -2426,7 +2795,12 @@ async fn api_2fa_verify(
         }
     }
 
-    let display = body.email.split('@').next().unwrap_or(&body.email).to_string();
+    let display = body
+        .email
+        .split('@')
+        .next()
+        .unwrap_or(&body.email)
+        .to_string();
     let session = make_session(&body.email, &display);
     HttpResponse::Ok().json(serde_json::json!({ "verified": true, "session": session.session }))
 }
@@ -2442,9 +2816,7 @@ async fn api_password_reset_request(
     let email = body.email.trim().to_lowercase();
     let local = email.split('@').next().unwrap_or(&email).to_string();
 
-    let users_coll = mongo
-        .database(&db)
-        .collection::<bson::Document>("users");
+    let users_coll = mongo.database(&db).collection::<bson::Document>("users");
     let user_exists = matches!(
         users_coll
             .find_one(doc! { "$or": [{ "username": &local }, { "username": &email }] })
@@ -2460,8 +2832,7 @@ async fn api_password_reset_request(
     }
 
     let token = Uuid::new_v4().to_string();
-    let expires_at =
-        bson::DateTime::from_millis(Utc::now().timestamp_millis() + 3_600_000); // 1 hour
+    let expires_at = bson::DateTime::from_millis(Utc::now().timestamp_millis() + 3_600_000); // 1 hour
 
     let tokens_coll = mongo
         .database(&db)
@@ -2488,8 +2859,8 @@ async fn api_password_reset_request(
             .json(serde_json::json!({ "error": "Failed to create reset token" }));
     }
 
-    let frontend_url = env::var("FRONTEND_URL")
-        .unwrap_or_else(|_| "https://app.misfits.ai".to_string());
+    let frontend_url =
+        env::var("FRONTEND_URL").unwrap_or_else(|_| "https://app.misfits.ai".to_string());
     let reset_url = format!("{}/auth/reset-password?token={}", frontend_url, token);
     let body_html = format!(
         "<p>Click <a href=\"{url}\">here</a> to reset your password. This link expires in 1 hour.</p>\
@@ -2502,7 +2873,10 @@ async fn api_password_reset_request(
         to: email.clone(),
         subject: "Password Reset Request".to_string(),
         body: body_html,
-        headers: vec![("Content-Type".to_string(), "text/html; charset=utf-8".to_string())],
+        headers: vec![(
+            "Content-Type".to_string(),
+            "text/html; charset=utf-8".to_string(),
+        )],
         flags: vec![],
         sequence_number: 0,
         uid: 0,
@@ -2570,9 +2944,7 @@ async fn api_password_reset_confirm(
         }
     };
 
-    let users_coll = mongo
-        .database(&db)
-        .collection::<bson::Document>("users");
+    let users_coll = mongo.database(&db).collection::<bson::Document>("users");
     match users_coll
         .update_one(
             doc! { "$or": [{ "username": &local }, { "username": &email }] },
@@ -2581,8 +2953,7 @@ async fn api_password_reset_confirm(
         .await
     {
         Ok(r) if r.matched_count == 0 => {
-            return HttpResponse::NotFound()
-                .json(serde_json::json!({ "error": "User not found" }))
+            return HttpResponse::NotFound().json(serde_json::json!({ "error": "User not found" }))
         }
         Err(e) => {
             return HttpResponse::InternalServerError()
@@ -3001,88 +3372,88 @@ async fn api_send(
         dkim_mx_host,
         dkim_remote_ip,
         dkim_remote_port,
-    ) =
-        match dkim_service.sign_email(&email_req).await {
-            Ok(dkim_result) => {
-                let status = dkim_result["status"].as_str().unwrap_or("");
-                if status != "success" {
-                    let msg = dkim_result["message"]
-                        .as_str()
-                        .or_else(|| dkim_result["error"].as_str())
-                        .unwrap_or("DKIM signing failed");
-                    return HttpResponse::InternalServerError().json(serde_json::json!({
-                        "sent": false,
-                        "message": format!("Failed to sign email: {}", msg),
-                    }));
-                }
-
-                let sig = dkim_result["dkimSignature"]
+    ) = match dkim_service.sign_email(&email_req).await {
+        Ok(dkim_result) => {
+            let status = dkim_result["status"].as_str().unwrap_or("");
+            if status != "success" {
+                let msg = dkim_result["message"]
                     .as_str()
-                    .or_else(|| dkim_result["dkim_signature"].as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let mid = dkim_result["messageId"]
-                    .as_str()
-                    .or_else(|| dkim_result["message_id"].as_str())
-                    .unwrap_or("")
-                    .to_string();
+                    .or_else(|| dkim_result["error"].as_str())
+                    .unwrap_or("DKIM signing failed");
+                return HttpResponse::InternalServerError().json(serde_json::json!({
+                    "sent": false,
+                    "message": format!("Failed to sign email: {}", msg),
+                }));
+            }
 
-                let accepted_by_remote_mx = dkim_result["acceptedByRemoteMx"].as_bool().unwrap_or(false)
+            let sig = dkim_result["dkimSignature"]
+                .as_str()
+                .or_else(|| dkim_result["dkim_signature"].as_str())
+                .unwrap_or("")
+                .to_string();
+            let mid = dkim_result["messageId"]
+                .as_str()
+                .or_else(|| dkim_result["message_id"].as_str())
+                .unwrap_or("")
+                .to_string();
+
+            let accepted_by_remote_mx =
+                dkim_result["acceptedByRemoteMx"].as_bool().unwrap_or(false)
                     || dkim_result["accepted"]
                         .as_array()
                         .map(|a| !a.is_empty())
                         .unwrap_or(false);
-                let rejected_by_remote_mx = dkim_result["rejected"]
-                    .as_array()
-                    .map(|a| !a.is_empty())
-                    .unwrap_or(false);
-                let upstream_response = dkim_result["response"].as_str().map(|s| s.to_string());
-                let upstream_mx_host = dkim_result["smtpHost"].as_str().map(|s| s.to_string());
-                let upstream_remote_ip = dkim_result["remoteIp"].as_str().map(|s| s.to_string());
-                let upstream_remote_port = dkim_result["smtpPort"]
-                    .as_u64()
-                    .and_then(|p| u16::try_from(p).ok());
+            let rejected_by_remote_mx = dkim_result["rejected"]
+                .as_array()
+                .map(|a| !a.is_empty())
+                .unwrap_or(false);
+            let upstream_response = dkim_result["response"].as_str().map(|s| s.to_string());
+            let upstream_mx_host = dkim_result["smtpHost"].as_str().map(|s| s.to_string());
+            let upstream_remote_ip = dkim_result["remoteIp"].as_str().map(|s| s.to_string());
+            let upstream_remote_port = dkim_result["smtpPort"]
+                .as_u64()
+                .and_then(|p| u16::try_from(p).ok());
 
-                // Distinguish true remote-MX acceptance from internal relay handoff.
-                let internal_hop = is_internal_delivery_hop(
-                    upstream_mx_host.as_deref(),
-                    upstream_remote_ip.as_deref(),
-                    upstream_remote_port,
-                    Some("dkim-service"),
-                );
-                let effective_remote_accept = accepted_by_remote_mx && !internal_hop;
+            // Distinguish true remote-MX acceptance from internal relay handoff.
+            let internal_hop = is_internal_delivery_hop(
+                upstream_mx_host.as_deref(),
+                upstream_remote_ip.as_deref(),
+                upstream_remote_port,
+                Some("dkim-service"),
+            );
+            let effective_remote_accept = accepted_by_remote_mx && !internal_hop;
 
-                // No DKIM signature means dkim-service likely performed SMTP itself.
-                // Accept this path only with explicit SMTP handoff proof (`accepted*`).
-                // We still keep `effective_remote_accept` separate so status can tell
-                // true remote MX acceptance from internal relay handoff.
-                let delivered = sig.is_empty() && accepted_by_remote_mx;
-                if sig.is_empty() && !delivered {
-                    return HttpResponse::InternalServerError().json(serde_json::json!({
+            // No DKIM signature means dkim-service likely performed SMTP itself.
+            // Accept this path only with explicit SMTP handoff proof (`accepted*`).
+            // We still keep `effective_remote_accept` separate so status can tell
+            // true remote MX acceptance from internal relay handoff.
+            let delivered = sig.is_empty() && accepted_by_remote_mx;
+            if sig.is_empty() && !delivered {
+                return HttpResponse::InternalServerError().json(serde_json::json!({
                         "sent": false,
                         "message": "DKIM signer returned success without signature and without SMTP handoff proof; refusing unsigned send",
                     }));
-                }
-                (
-                    sig,
-                    mid,
-                    delivered,
-                    effective_remote_accept,
-                    rejected_by_remote_mx,
-                    upstream_response,
-                    upstream_mx_host,
-                    upstream_remote_ip,
-                    upstream_remote_port,
-                )
             }
-            Err(e) => {
-                eprintln!("DKIM service error on /api/send: {}", e);
-                return HttpResponse::InternalServerError().json(serde_json::json!({
-                    "sent": false,
-                    "message": format!("Failed to generate DKIM signature: {}", e),
-                }));
-            }
-        };
+            (
+                sig,
+                mid,
+                delivered,
+                effective_remote_accept,
+                rejected_by_remote_mx,
+                upstream_response,
+                upstream_mx_host,
+                upstream_remote_ip,
+                upstream_remote_port,
+            )
+        }
+        Err(e) => {
+            eprintln!("DKIM service error on /api/send: {}", e);
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "sent": false,
+                "message": format!("Failed to generate DKIM signature: {}", e),
+            }));
+        }
+    };
 
     let id = Uuid::new_v4().to_string();
     let message_id = if message_id_hdr.is_empty() {
@@ -3311,8 +3682,9 @@ async fn api_send_undo(
             "cancelled": false,
             "reason": "Email not found, already sent, or undo window has passed"
         })),
-        Err(e) => HttpResponse::InternalServerError()
-            .json(serde_json::json!({ "error": e.to_string() })),
+        Err(e) => {
+            HttpResponse::InternalServerError().json(serde_json::json!({ "error": e.to_string() }))
+        }
     }
 }
 
@@ -3380,16 +3752,16 @@ async fn api_send_schedule(
         Ok(_) => HttpResponse::Ok().json(serde_json::json!({
             "queued": true, "id": id, "sendAt": body.send_at
         })),
-        Err(e) => HttpResponse::InternalServerError()
-            .json(serde_json::json!({ "error": e.to_string() })),
+        Err(e) => {
+            HttpResponse::InternalServerError().json(serde_json::json!({ "error": e.to_string() }))
+        }
     }
 }
 
 // --- Send queue background worker ---
 
 async fn send_queue_worker(mongo: Arc<mongodb::Client>) {
-    let db_name =
-        std::env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
+    let db_name = std::env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
@@ -3428,14 +3800,8 @@ async fn send_queue_worker(mongo: Arc<mongodb::Client>) {
             let body_text = entry.get_str("body").unwrap_or("").to_string();
             let cc = entry.get_str("cc").unwrap_or("").to_string();
             let bcc = entry.get_str("bcc").unwrap_or("").to_string();
-            let dkim_sig = entry
-                .get_str("dkim_signature")
-                .unwrap_or("")
-                .to_string();
-            let message_id = entry
-                .get_str("message_id")
-                .unwrap_or("")
-                .to_string();
+            let dkim_sig = entry.get_str("dkim_signature").unwrap_or("").to_string();
+            let message_id = entry.get_str("message_id").unwrap_or("").to_string();
 
             // Optimistic lock: claim entry before sending
             let claim = coll
@@ -3457,14 +3823,22 @@ async fn send_queue_worker(mongo: Arc<mongodb::Client>) {
                 (
                     "Message-ID".to_string(),
                     if message_id.is_empty() {
-                        format!("<{}@{}>", id, std::env::var("DOMAIN_NAME").unwrap_or_else(|_| "misfits.ai".to_string()))
+                        format!(
+                            "<{}@{}>",
+                            id,
+                            std::env::var("DOMAIN_NAME")
+                                .unwrap_or_else(|_| "misfits.ai".to_string())
+                        )
                     } else {
                         message_id
                     },
                 ),
                 ("Date".to_string(), Utc::now().to_rfc2822()),
                 ("MIME-Version".to_string(), "1.0".to_string()),
-                ("Content-Type".to_string(), "text/html; charset=utf-8".to_string()),
+                (
+                    "Content-Type".to_string(),
+                    "text/html; charset=utf-8".to_string(),
+                ),
             ];
             if !cc.is_empty() {
                 headers.push(("Cc".to_string(), cc));
@@ -3586,7 +3960,10 @@ async fn api_send_status(
             )
     });
     let bounced_or_failed = events.iter().any(|e| {
-        matches!(e.status, monitoring::SmtpStatus::Bounced | monitoring::SmtpStatus::Failed)
+        matches!(
+            e.status,
+            monitoring::SmtpStatus::Bounced | monitoring::SmtpStatus::Failed
+        )
     });
     let saw_internal_handoff = events.iter().any(|e| {
         is_internal_delivery_hop(
@@ -3598,15 +3975,18 @@ async fn api_send_status(
     });
     let handoff_only = !accepted_by_remote_mx && !bounced_or_failed && saw_internal_handoff;
 
-    let latest = events.iter().find(|e| {
-        matches!(
-            e.status,
-            monitoring::SmtpStatus::Delivered
-                | monitoring::SmtpStatus::Bounced
-                | monitoring::SmtpStatus::Failed
-                | monitoring::SmtpStatus::Deferred
-        )
-    }).or_else(|| events.first());
+    let latest = events
+        .iter()
+        .find(|e| {
+            matches!(
+                e.status,
+                monitoring::SmtpStatus::Delivered
+                    | monitoring::SmtpStatus::Bounced
+                    | monitoring::SmtpStatus::Failed
+                    | monitoring::SmtpStatus::Deferred
+            )
+        })
+        .or_else(|| events.first());
     let delivery_state = if accepted_by_remote_mx {
         "sent"
     } else if bounced_or_failed {
@@ -3773,7 +4153,11 @@ async fn api_drafts_list(
     {
         Ok(cursor) => {
             let mut drafts: Vec<serde_json::Value> = Vec::new();
-            for mut docu in cursor.try_collect::<Vec<bson::Document>>().await.unwrap_or_default() {
+            for mut docu in cursor
+                .try_collect::<Vec<bson::Document>>()
+                .await
+                .unwrap_or_default()
+            {
                 docu.remove("_id");
                 docu.remove("user_id");
                 if let Ok(v) = bson::from_bson::<serde_json::Value>(bson::Bson::Document(docu)) {
@@ -3811,10 +4195,19 @@ async fn api_drafts_upsert(
         .unwrap_or_else(|| Uuid::new_v4().to_string());
 
     let now = Utc::now().to_rfc3339();
-    obj.insert("id".to_string(), serde_json::Value::String(draft_id.clone()));
-    obj.insert("updatedAt".to_string(), serde_json::Value::String(now.clone()));
+    obj.insert(
+        "id".to_string(),
+        serde_json::Value::String(draft_id.clone()),
+    );
+    obj.insert(
+        "updatedAt".to_string(),
+        serde_json::Value::String(now.clone()),
+    );
     if !obj.contains_key("createdAt") {
-        obj.insert("createdAt".to_string(), serde_json::Value::String(now.clone()));
+        obj.insert(
+            "createdAt".to_string(),
+            serde_json::Value::String(now.clone()),
+        );
     }
 
     let draft_value = serde_json::Value::Object(obj.clone());
@@ -3904,7 +4297,14 @@ fn now_iso() -> String {
 }
 
 fn admin_workflow_order() -> Vec<&'static str> {
-    vec!["submitted", "triaged", "planned", "in_progress", "qa", "released"]
+    vec![
+        "submitted",
+        "triaged",
+        "planned",
+        "in_progress",
+        "qa",
+        "released",
+    ]
 }
 
 fn compute_priority(urgency: &str, impact: &str) -> String {
@@ -4099,9 +4499,17 @@ async fn api_admin_users_list(mongo: web::Data<Arc<mongodb::Client>>) -> impl Re
         .database(&mongo_db_name())
         .collection::<AdminUserRecord>(ADMIN_USERS_COLL);
 
-    match coll.find(doc! {}).sort(doc! { "lastActivityAt": -1 }).limit(500).await {
+    match coll
+        .find(doc! {})
+        .sort(doc! { "lastActivityAt": -1 })
+        .limit(500)
+        .await
+    {
         Ok(cursor) => {
-            let users = cursor.try_collect::<Vec<AdminUserRecord>>().await.unwrap_or_default();
+            let users = cursor
+                .try_collect::<Vec<AdminUserRecord>>()
+                .await
+                .unwrap_or_default();
             HttpResponse::Ok().json(serde_json::json!({
                 "generatedAt": now_iso(),
                 "users": users,
@@ -4109,7 +4517,8 @@ async fn api_admin_users_list(mongo: web::Data<Arc<mongodb::Client>>) -> impl Re
         }
         Err(e) => {
             eprintln!("api_admin_users_list error: {}", e);
-            HttpResponse::InternalServerError().json(serde_json::json!({ "message": "Failed to load admin users" }))
+            HttpResponse::InternalServerError()
+                .json(serde_json::json!({ "message": "Failed to load admin users" }))
         }
     }
 }
@@ -4125,10 +4534,13 @@ async fn api_admin_user_get(
 
     match coll.find_one(doc! { "id": &id }).await {
         Ok(Some(user)) => HttpResponse::Ok().json(serde_json::json!({ "user": user })),
-        Ok(None) => HttpResponse::NotFound().json(serde_json::json!({ "message": "User not found" })),
+        Ok(None) => {
+            HttpResponse::NotFound().json(serde_json::json!({ "message": "User not found" }))
+        }
         Err(e) => {
             eprintln!("api_admin_user_get error: {}", e);
-            HttpResponse::InternalServerError().json(serde_json::json!({ "message": "Failed to load user" }))
+            HttpResponse::InternalServerError()
+                .json(serde_json::json!({ "message": "Failed to load user" }))
         }
     }
 }
@@ -4139,7 +4551,8 @@ async fn api_admin_user_create(
 ) -> impl Responder {
     let role = body.role.trim().to_ascii_lowercase();
     if !["user", "admin", "support"].contains(&role.as_str()) {
-        return HttpResponse::BadRequest().json(serde_json::json!({ "message": "role must be user|admin|support" }));
+        return HttpResponse::BadRequest()
+            .json(serde_json::json!({ "message": "role must be user|admin|support" }));
     }
 
     let status = body
@@ -4149,7 +4562,8 @@ async fn api_admin_user_create(
         .trim()
         .to_ascii_lowercase();
     if !["active", "restricted"].contains(&status.as_str()) {
-        return HttpResponse::BadRequest().json(serde_json::json!({ "message": "status must be active|restricted" }));
+        return HttpResponse::BadRequest()
+            .json(serde_json::json!({ "message": "status must be active|restricted" }));
     }
 
     let id = body
@@ -4187,7 +4601,8 @@ async fn api_admin_user_create(
         Ok(_) => HttpResponse::Created().json(serde_json::json!({ "user": user })),
         Err(e) => {
             eprintln!("api_admin_user_create error: {}", e);
-            HttpResponse::InternalServerError().json(serde_json::json!({ "message": "Failed to create user" }))
+            HttpResponse::InternalServerError()
+                .json(serde_json::json!({ "message": "Failed to create user" }))
         }
     }
 }
@@ -4205,11 +4620,13 @@ async fn api_admin_user_patch(
     let current = match coll.find_one(doc! { "id": &id }).await {
         Ok(Some(v)) => v,
         Ok(None) => {
-            return HttpResponse::NotFound().json(serde_json::json!({ "message": "User not found" }))
+            return HttpResponse::NotFound()
+                .json(serde_json::json!({ "message": "User not found" }))
         }
         Err(e) => {
             eprintln!("api_admin_user_patch read error: {}", e);
-            return HttpResponse::InternalServerError().json(serde_json::json!({ "message": "Failed to load user" }));
+            return HttpResponse::InternalServerError()
+                .json(serde_json::json!({ "message": "Failed to load user" }));
         }
     };
 
@@ -4219,7 +4636,8 @@ async fn api_admin_user_patch(
     if let Some(role) = &body.role {
         let role = role.trim().to_ascii_lowercase();
         if !["user", "admin", "support"].contains(&role.as_str()) {
-            return HttpResponse::BadRequest().json(serde_json::json!({ "message": "role must be user|admin|support" }));
+            return HttpResponse::BadRequest()
+                .json(serde_json::json!({ "message": "role must be user|admin|support" }));
         }
         updated.role = role;
     }
@@ -4227,7 +4645,8 @@ async fn api_admin_user_patch(
     if let Some(status) = &body.status {
         let status = status.trim().to_ascii_lowercase();
         if !["active", "restricted"].contains(&status.as_str()) {
-            return HttpResponse::BadRequest().json(serde_json::json!({ "message": "status must be active|restricted" }));
+            return HttpResponse::BadRequest()
+                .json(serde_json::json!({ "message": "status must be active|restricted" }));
         }
         updated.status = status;
     }
@@ -4260,7 +4679,8 @@ async fn api_admin_user_patch(
         Ok(_) => HttpResponse::Ok().json(serde_json::json!({ "user": updated })),
         Err(e) => {
             eprintln!("api_admin_user_patch write error: {}", e);
-            HttpResponse::InternalServerError().json(serde_json::json!({ "message": "Failed to update user" }))
+            HttpResponse::InternalServerError()
+                .json(serde_json::json!({ "message": "Failed to update user" }))
         }
     }
 }
@@ -4275,23 +4695,30 @@ async fn api_admin_user_delete(
         .collection::<AdminUserRecord>(ADMIN_USERS_COLL);
 
     match coll.delete_one(doc! { "id": &id }).await {
-        Ok(res) if res.deleted_count > 0 => HttpResponse::Ok().json(serde_json::json!({ "deleted": true, "id": id })),
-        Ok(_) => HttpResponse::NotFound().json(serde_json::json!({ "deleted": false, "message": "User not found" })),
+        Ok(res) if res.deleted_count > 0 => {
+            HttpResponse::Ok().json(serde_json::json!({ "deleted": true, "id": id }))
+        }
+        Ok(_) => HttpResponse::NotFound()
+            .json(serde_json::json!({ "deleted": false, "message": "User not found" })),
         Err(e) => {
             eprintln!("api_admin_user_delete error: {}", e);
-            HttpResponse::InternalServerError().json(serde_json::json!({ "message": "Failed to delete user" }))
+            HttpResponse::InternalServerError()
+                .json(serde_json::json!({ "message": "Failed to delete user" }))
         }
     }
 }
 
-async fn api_admin_change_requests_list(
-    mongo: web::Data<Arc<mongodb::Client>>,
-) -> impl Responder {
+async fn api_admin_change_requests_list(mongo: web::Data<Arc<mongodb::Client>>) -> impl Responder {
     let coll = mongo
         .database(&mongo_db_name())
         .collection::<ChangeRequestItem>(ADMIN_CHANGE_REQUESTS_COLL);
 
-    match coll.find(doc! {}).sort(doc! { "updatedAt": -1 }).limit(500).await {
+    match coll
+        .find(doc! {})
+        .sort(doc! { "updatedAt": -1 })
+        .limit(500)
+        .await
+    {
         Ok(cursor) => {
             let items = cursor
                 .try_collect::<Vec<ChangeRequestItem>>()
@@ -4305,7 +4732,8 @@ async fn api_admin_change_requests_list(
         }
         Err(e) => {
             eprintln!("api_admin_change_requests_list error: {}", e);
-            HttpResponse::InternalServerError().json(serde_json::json!({ "message": "Failed to load change requests" }))
+            HttpResponse::InternalServerError()
+                .json(serde_json::json!({ "message": "Failed to load change requests" }))
         }
     }
 }
@@ -4321,10 +4749,12 @@ async fn api_admin_change_request_get(
 
     match coll.find_one(doc! { "id": &id }).await {
         Ok(Some(item)) => HttpResponse::Ok().json(serde_json::json!({ "item": item })),
-        Ok(None) => HttpResponse::NotFound().json(serde_json::json!({ "message": "Change request not found" })),
+        Ok(None) => HttpResponse::NotFound()
+            .json(serde_json::json!({ "message": "Change request not found" })),
         Err(e) => {
             eprintln!("api_admin_change_request_get error: {}", e);
-            HttpResponse::InternalServerError().json(serde_json::json!({ "message": "Failed to load change request" }))
+            HttpResponse::InternalServerError()
+                .json(serde_json::json!({ "message": "Failed to load change request" }))
         }
     }
 }
@@ -4339,13 +4769,16 @@ async fn api_admin_change_request_create(
     let linked_repo = body.linked_repo.trim().to_ascii_lowercase();
 
     if !["ux", "backend", "fullstack", "security"].contains(&scope.as_str()) {
-        return HttpResponse::BadRequest().json(serde_json::json!({ "message": "scope must be ux|backend|fullstack|security" }));
+        return HttpResponse::BadRequest()
+            .json(serde_json::json!({ "message": "scope must be ux|backend|fullstack|security" }));
     }
     if !["low", "medium", "high"].contains(&urgency.as_str()) {
-        return HttpResponse::BadRequest().json(serde_json::json!({ "message": "urgency must be low|medium|high" }));
+        return HttpResponse::BadRequest()
+            .json(serde_json::json!({ "message": "urgency must be low|medium|high" }));
     }
     if !["small", "medium", "high"].contains(&impact.as_str()) {
-        return HttpResponse::BadRequest().json(serde_json::json!({ "message": "impact must be small|medium|high" }));
+        return HttpResponse::BadRequest()
+            .json(serde_json::json!({ "message": "impact must be small|medium|high" }));
     }
     if !["misfits-web", "reimagined-guide", "cross-repo"].contains(&linked_repo.as_str()) {
         return HttpResponse::BadRequest().json(serde_json::json!({ "message": "linkedRepo must be misfits-web|reimagined-guide|cross-repo" }));
@@ -4401,7 +4834,8 @@ async fn api_admin_change_request_create(
         Ok(_) => HttpResponse::Created().json(serde_json::json!({ "item": item })),
         Err(e) => {
             eprintln!("api_admin_change_request_create error: {}", e);
-            HttpResponse::InternalServerError().json(serde_json::json!({ "message": "Failed to create change request" }))
+            HttpResponse::InternalServerError()
+                .json(serde_json::json!({ "message": "Failed to create change request" }))
         }
     }
 }
@@ -4419,11 +4853,13 @@ async fn api_admin_change_request_patch(
     let mut item = match coll.find_one(doc! { "id": &id }).await {
         Ok(Some(v)) => v,
         Ok(None) => {
-            return HttpResponse::NotFound().json(serde_json::json!({ "message": "Change request not found" }))
+            return HttpResponse::NotFound()
+                .json(serde_json::json!({ "message": "Change request not found" }))
         }
         Err(e) => {
             eprintln!("api_admin_change_request_patch read error: {}", e);
-            return HttpResponse::InternalServerError().json(serde_json::json!({ "message": "Failed to load change request" }));
+            return HttpResponse::InternalServerError()
+                .json(serde_json::json!({ "message": "Failed to load change request" }));
         }
     };
 
@@ -4492,17 +4928,31 @@ async fn api_admin_change_request_patch(
             item.execution_state = "queued".to_string();
             item.execution_finished_at = None;
             item.execution_last_error = None;
-            if let Some(run_id) = body.execution_run_id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            if let Some(run_id) = body
+                .execution_run_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
                 item.execution_run_id = Some(run_id.to_string());
             }
         } else if action == "execution_start" {
             let now = now_iso();
             item.execution_state = "running".to_string();
-            item.execution_started_at = Some(item.execution_started_at.clone().unwrap_or_else(|| now.clone()));
+            item.execution_started_at = Some(
+                item.execution_started_at
+                    .clone()
+                    .unwrap_or_else(|| now.clone()),
+            );
             item.execution_last_heartbeat_at = Some(now.clone());
             item.execution_finished_at = None;
             item.execution_last_error = None;
-            if let Some(run_id) = body.execution_run_id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            if let Some(run_id) = body
+                .execution_run_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
                 item.execution_run_id = Some(run_id.to_string());
             }
         } else if action == "execution_heartbeat" {
@@ -4511,7 +4961,12 @@ async fn api_admin_change_request_patch(
             if item.execution_started_at.is_none() {
                 item.execution_started_at = Some(now_iso());
             }
-            if let Some(run_id) = body.execution_run_id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            if let Some(run_id) = body
+                .execution_run_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
                 item.execution_run_id = Some(run_id.to_string());
             }
         } else if action == "execution_fail" {
@@ -4526,7 +4981,12 @@ async fn api_admin_change_request_patch(
                 .map(|s| s.to_string())
                 .or_else(|| transition_note.clone())
                 .or(Some("Execution failed".to_string()));
-            if let Some(run_id) = body.execution_run_id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            if let Some(run_id) = body
+                .execution_run_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
                 item.execution_run_id = Some(run_id.to_string());
             }
         } else if action == "execution_success" {
@@ -4534,7 +4994,12 @@ async fn api_admin_change_request_patch(
             item.execution_last_heartbeat_at = Some(now_iso());
             item.execution_finished_at = Some(now_iso());
             item.execution_last_error = None;
-            if let Some(run_id) = body.execution_run_id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            if let Some(run_id) = body
+                .execution_run_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
                 item.execution_run_id = Some(run_id.to_string());
             }
         } else if action == "execution_reset" {
@@ -4548,7 +5013,10 @@ async fn api_admin_change_request_patch(
             return HttpResponse::BadRequest().json(serde_json::json!({ "message": "action must be advance|reject|execution_queue|execution_start|execution_heartbeat|execution_fail|execution_success|execution_reset" }));
         }
 
-        if item.taken_in_charge_at.is_none() && previous_status == "submitted" && item.status != "submitted" {
+        if item.taken_in_charge_at.is_none()
+            && previous_status == "submitted"
+            && item.status != "submitted"
+        {
             let intake_at = now_iso();
             item.taken_in_charge_at = Some(intake_at.clone());
             item.taken_in_charge_by = Some(actor.clone());
@@ -4595,11 +5063,16 @@ async fn api_admin_change_request_patch(
 
     item.updated_at = now_iso();
 
-    match coll.replace_one(doc! { "id": &id }, &item).upsert(false).await {
+    match coll
+        .replace_one(doc! { "id": &id }, &item)
+        .upsert(false)
+        .await
+    {
         Ok(_) => HttpResponse::Ok().json(serde_json::json!({ "item": item })),
         Err(e) => {
             eprintln!("api_admin_change_request_patch write error: {}", e);
-            HttpResponse::InternalServerError().json(serde_json::json!({ "message": "Failed to update change request" }))
+            HttpResponse::InternalServerError()
+                .json(serde_json::json!({ "message": "Failed to update change request" }))
         }
     }
 }
@@ -4614,11 +5087,15 @@ async fn api_admin_change_request_delete(
         .collection::<ChangeRequestItem>(ADMIN_CHANGE_REQUESTS_COLL);
 
     match coll.delete_one(doc! { "id": &id }).await {
-        Ok(res) if res.deleted_count > 0 => HttpResponse::Ok().json(serde_json::json!({ "deleted": true, "id": id })),
-        Ok(_) => HttpResponse::NotFound().json(serde_json::json!({ "deleted": false, "message": "Change request not found" })),
+        Ok(res) if res.deleted_count > 0 => {
+            HttpResponse::Ok().json(serde_json::json!({ "deleted": true, "id": id }))
+        }
+        Ok(_) => HttpResponse::NotFound()
+            .json(serde_json::json!({ "deleted": false, "message": "Change request not found" })),
         Err(e) => {
             eprintln!("api_admin_change_request_delete error: {}", e);
-            HttpResponse::InternalServerError().json(serde_json::json!({ "message": "Failed to delete change request" }))
+            HttpResponse::InternalServerError()
+                .json(serde_json::json!({ "message": "Failed to delete change request" }))
         }
     }
 }
@@ -5287,7 +5764,9 @@ async fn api_swagger_ui() -> impl Responder {
 </script>
 </body>
 </html>"##;
-    HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html)
+    HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(html)
 }
 
 async fn api_external_openapi() -> impl Responder {
@@ -5397,8 +5876,9 @@ async fn api_external_account_test(
                 }))
             }
         }
-        Err(e) => HttpResponse::InternalServerError()
-            .json(serde_json::json!({"error": {"code": "IMAP_TEST_FAILED", "message": e.to_string()}})),
+        Err(e) => HttpResponse::InternalServerError().json(
+            serde_json::json!({"error": {"code": "IMAP_TEST_FAILED", "message": e.to_string()}}),
+        ),
     }
 }
 
@@ -5482,7 +5962,8 @@ async fn api_external_sync_start(
                 .await
                 .ok()
                 .flatten();
-            HttpResponse::Ok().json(serde_json::json!({ "runId": run.id, "status": "success", "run": updated }))
+            HttpResponse::Ok()
+                .json(serde_json::json!({ "runId": run.id, "status": "success", "run": updated }))
         }
         Err(e) => {
             let _ = svc
@@ -5912,9 +6393,8 @@ async fn main() -> std::io::Result<()> {
         mongo_client.unwrap_or(fallback_client),
     )));
     let mongo_data = web::Data::new(shared_mongo.clone());
-    let external_imap_service = web::Data::new(Arc::new(ExternalImapService::new(
-        shared_mongo.clone(),
-    )));
+    let external_imap_service =
+        web::Data::new(Arc::new(ExternalImapService::new(shared_mongo.clone())));
 
     let (event_tx, _) = broadcast::channel::<MailEvent>(256);
     let event_bus = web::Data::new(event_tx);
@@ -5973,30 +6453,87 @@ async fn main() -> std::io::Result<()> {
                 .app_data(http_external_imap.clone())
                 .route("/api/openapi.json", web::get().to(api_openapi_json))
                 .route("/api/docs", web::get().to(api_swagger_ui))
-                .route("/api/openapi/external-imap.yaml", web::get().to(api_external_openapi))
-                .route("/api/external-accounts", web::get().to(api_external_accounts_list))
-                .route("/api/external-accounts", web::post().to(api_external_accounts_create))
-                .route("/api/external-accounts/{id}", web::get().to(api_external_account_get))
-                .route("/api/external-accounts/{id}", web::patch().to(api_external_account_patch))
-                .route("/api/external-accounts/{id}", web::delete().to(api_external_account_delete))
-                .route("/api/external-accounts/{id}/test", web::post().to(api_external_account_test))
-                .route("/api/external-accounts/{id}/folders", web::get().to(api_external_folders_list))
-                .route("/api/external-accounts/{id}/folders/discover", web::post().to(api_external_folders_discover))
-                .route("/api/external-accounts/{id}/folders/{folder_id}/mapping", web::put().to(api_external_folder_mapping_put))
-                .route("/api/external-accounts/{id}/sync", web::post().to(api_external_sync_start))
-                .route("/api/external-accounts/{id}/sync/status", web::get().to(api_external_sync_status))
-                .route("/api/external-accounts/{id}/sync/pause", web::post().to(api_external_sync_pause))
-                .route("/api/external-accounts/{id}/sync/resume", web::post().to(api_external_sync_resume))
-                .route("/api/external-sync-runs/{run_id}", web::get().to(api_external_sync_run_get))
-                .route("/api/external-messages", web::get().to(api_external_messages_list))
-                .route("/api/external-messages/{id}/action", web::post().to(api_external_message_action))
+                .route(
+                    "/api/openapi/external-imap.yaml",
+                    web::get().to(api_external_openapi),
+                )
+                .route(
+                    "/api/external-accounts",
+                    web::get().to(api_external_accounts_list),
+                )
+                .route(
+                    "/api/external-accounts",
+                    web::post().to(api_external_accounts_create),
+                )
+                .route(
+                    "/api/external-accounts/{id}",
+                    web::get().to(api_external_account_get),
+                )
+                .route(
+                    "/api/external-accounts/{id}",
+                    web::patch().to(api_external_account_patch),
+                )
+                .route(
+                    "/api/external-accounts/{id}",
+                    web::delete().to(api_external_account_delete),
+                )
+                .route(
+                    "/api/external-accounts/{id}/test",
+                    web::post().to(api_external_account_test),
+                )
+                .route(
+                    "/api/external-accounts/{id}/folders",
+                    web::get().to(api_external_folders_list),
+                )
+                .route(
+                    "/api/external-accounts/{id}/folders/discover",
+                    web::post().to(api_external_folders_discover),
+                )
+                .route(
+                    "/api/external-accounts/{id}/folders/{folder_id}/mapping",
+                    web::put().to(api_external_folder_mapping_put),
+                )
+                .route(
+                    "/api/external-accounts/{id}/sync",
+                    web::post().to(api_external_sync_start),
+                )
+                .route(
+                    "/api/external-accounts/{id}/sync/status",
+                    web::get().to(api_external_sync_status),
+                )
+                .route(
+                    "/api/external-accounts/{id}/sync/pause",
+                    web::post().to(api_external_sync_pause),
+                )
+                .route(
+                    "/api/external-accounts/{id}/sync/resume",
+                    web::post().to(api_external_sync_resume),
+                )
+                .route(
+                    "/api/external-sync-runs/{run_id}",
+                    web::get().to(api_external_sync_run_get),
+                )
+                .route(
+                    "/api/external-messages",
+                    web::get().to(api_external_messages_list),
+                )
+                .route(
+                    "/api/external-messages/{id}/action",
+                    web::post().to(api_external_message_action),
+                )
                 .route("/api/auth/login", web::post().to(auth_login))
                 .route("/api/auth/register", web::post().to(auth_register))
                 .route("/api/auth/logout", web::post().to(auth_logout))
                 .route("/api/auth/refresh", web::post().to(auth_refresh))
                 .route("/api/auth/2fa/verify", web::post().to(api_2fa_verify))
-                .route("/api/auth/password-reset/request", web::post().to(api_password_reset_request))
-                .route("/api/auth/password-reset/confirm", web::post().to(api_password_reset_confirm))
+                .route(
+                    "/api/auth/password-reset/request",
+                    web::post().to(api_password_reset_request),
+                )
+                .route(
+                    "/api/auth/password-reset/confirm",
+                    web::post().to(api_password_reset_confirm),
+                )
                 .route("/api/user/locale", web::patch().to(api_patch_user_locale))
                 .route(
                     "/api/auth/oauth/{provider}",
@@ -6107,8 +6644,14 @@ async fn main() -> std::io::Result<()> {
                 .route("/api/admin/users", web::get().to(api_admin_users_list))
                 .route("/api/admin/users", web::post().to(api_admin_user_create))
                 .route("/api/admin/users/{id}", web::get().to(api_admin_user_get))
-                .route("/api/admin/users/{id}", web::patch().to(api_admin_user_patch))
-                .route("/api/admin/users/{id}", web::delete().to(api_admin_user_delete))
+                .route(
+                    "/api/admin/users/{id}",
+                    web::patch().to(api_admin_user_patch),
+                )
+                .route(
+                    "/api/admin/users/{id}",
+                    web::delete().to(api_admin_user_delete),
+                )
                 .route(
                     "/api/admin/change-requests",
                     web::get().to(api_admin_change_requests_list),
@@ -6136,6 +6679,14 @@ async fn main() -> std::io::Result<()> {
                 .route(
                     "/api/admin/deliverability/diagnostics",
                     web::get().to(api_admin_deliverability_diagnostics),
+                )
+                .route(
+                    "/api/admin/deliverability/procedure",
+                    web::get().to(api_admin_deliverability_procedure),
+                )
+                .route(
+                    "/api/admin/deliverability/procedure",
+                    web::post().to(api_admin_deliverability_procedure_update),
                 )
                 .route(
                     "/api/admin/observability/overview",
@@ -6365,7 +6916,11 @@ impl DkimService for RealDkimService {
             serde_json::from_str::<serde_json::Value>(&body)
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
         } else {
-            let snippet = if body.len() > 1200 { &body[..1200] } else { &body };
+            let snippet = if body.len() > 1200 {
+                &body[..1200]
+            } else {
+                &body
+            };
             Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
                 format!("DKIM service HTTP {}: {}", status.as_u16(), snippet),
