@@ -167,6 +167,25 @@ fn is_local_recipient(raw_to: &str) -> bool {
     matches!(recipient_domain(raw_to).as_deref(), Some("misfits.ai") | Some("mail.misfits.ai"))
 }
 
+fn parse_message_id_header(raw_line: &str) -> Option<String> {
+    if !raw_line.to_ascii_lowercase().starts_with("message-id:") {
+        return None;
+    }
+
+    let value = raw_line
+        .split_once(':')
+        .map(|(_, v)| v.trim())
+        .unwrap_or("")
+        .trim_matches(|c| c == '<' || c == '>')
+        .trim();
+
+    if value.is_empty() {
+        None
+    } else {
+        Some(value.to_string())
+    }
+}
+
 // Struct to represent the mail server
 struct MailServer {
     mail_dir: String,
@@ -358,6 +377,9 @@ async fn handle_tls_client(
                                             .trim_start_matches("Subject:")
                                             .trim()
                                             .to_string();
+                                    } else if let Some(mid) = parse_message_id_header(trimmed_line)
+                                    {
+                                        current_email.email.id = mid;
                                     }
                                 }
                             }
@@ -570,6 +592,10 @@ async fn handle_plain_client(
                                             .trim_start_matches("Subject:")
                                             .trim()
                                             .to_string();
+                                    } else if let Some(mid) =
+                                        parse_message_id_header(trimmed_buffer)
+                                    {
+                                        current_email.email.id = mid;
                                     }
                                 }
                             }
