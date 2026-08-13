@@ -28,6 +28,7 @@ The client will attempt to connect to the SMTP server, send the email, and repor
 
 use rustls::pki_types::{CertificateDer, ServerName};
 use rustls::{ClientConfig, RootCertStore};
+use chrono::Utc;
 use std::io::{Error as IoError, ErrorKind};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -111,6 +112,25 @@ fn upsert_content_type(headers: &mut Vec<(String, String)>, value: String) {
 
 fn compose_smtp_payload(email: &Email) -> String {
     let mut headers = email.headers.clone();
+    headers.retain(|(k, _)| {
+        !(k.eq_ignore_ascii_case("from")
+            || k.eq_ignore_ascii_case("to")
+            || k.eq_ignore_ascii_case("subject"))
+    });
+
+    if !headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("date")) {
+        headers.push(("Date".to_string(), Utc::now().to_rfc2822()));
+    }
+    if !headers
+        .iter()
+        .any(|(k, _)| k.eq_ignore_ascii_case("message-id"))
+    {
+        headers.push((
+            "Message-ID".to_string(),
+            format!("<{}@misfits.ai>", Uuid::new_v4()),
+        ));
+    }
+
     let body = email.body.trim();
 
     let has_multipart = headers.iter().any(|(k, v)| {
