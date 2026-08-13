@@ -566,7 +566,18 @@ async fn api_monitoring_trace(
     }
 
     let status = events
-        .last()
+        .iter()
+        .rev()
+        .find(|e| {
+            matches!(
+                e.status,
+                monitoring::SmtpStatus::Delivered
+                    | monitoring::SmtpStatus::Bounced
+                    | monitoring::SmtpStatus::Failed
+                    | monitoring::SmtpStatus::Deferred
+            )
+        })
+        .or_else(|| events.last())
         .map(|e| format!("{:?}", e.status))
         .unwrap_or_default();
     let total_ms = events.iter().filter_map(|e| e.total_ms).max();
@@ -3587,7 +3598,15 @@ async fn api_send_status(
     });
     let handoff_only = !accepted_by_remote_mx && !bounced_or_failed && saw_internal_handoff;
 
-    let latest = events.first();
+    let latest = events.iter().find(|e| {
+        matches!(
+            e.status,
+            monitoring::SmtpStatus::Delivered
+                | monitoring::SmtpStatus::Bounced
+                | monitoring::SmtpStatus::Failed
+                | monitoring::SmtpStatus::Deferred
+        )
+    }).or_else(|| events.first());
     let delivery_state = if accepted_by_remote_mx {
         "sent"
     } else if bounced_or_failed {
