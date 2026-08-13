@@ -406,7 +406,7 @@ async fn handle_tls_client(
                                 in_body = true; // Ligne vide détectée, commencez à capturer le corps
                             } else {
                                 // Traitez les en-têtes
-                                let trimmed_line = line.trim();
+                                let trimmed_line = line.trim_end_matches(|c| c == '\r' || c == '\n');
                                 if !trimmed_line.is_empty() {
                                     apply_parsed_header(&mut current_email, trimmed_line);
                                 }
@@ -598,7 +598,7 @@ async fn handle_plain_client(
                                 in_body = true; // Ligne vide détectée, commencez à capturer le corps
                             } else {
                                 // Traitez les en-têtes
-                                let trimmed_buffer = buffer.trim();
+                                let trimmed_buffer = buffer.trim_end_matches(|c| c == '\r' || c == '\n');
                                 if !trimmed_buffer.is_empty() {
                                     apply_parsed_header(&mut current_email, trimmed_buffer);
                                 }
