@@ -112,11 +112,6 @@ fn upsert_content_type(headers: &mut Vec<(String, String)>, value: String) {
 
 fn compose_smtp_payload(email: &Email) -> String {
     let mut headers = email.headers.clone();
-    headers.retain(|(k, _)| {
-        !(k.eq_ignore_ascii_case("from")
-            || k.eq_ignore_ascii_case("to")
-            || k.eq_ignore_ascii_case("subject"))
-    });
 
     if !headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("date")) {
         headers.push(("Date".to_string(), Utc::now().to_rfc2822()));
@@ -131,14 +126,50 @@ fn compose_smtp_payload(email: &Email) -> String {
         ));
     }
 
-    let body = email.body.trim();
+    let has_dkim_signature = headers
+        .iter()
+        .any(|(k, _)| k.eq_ignore_ascii_case("dkim-signature"));
+
+    if has_dkim_signature {
+        let mut email_content = String::new();
+
+        let has_from = headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("from"));
+        let has_to = headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("to"));
+        let has_subject = headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("subject"));
+
+        if !has_from {
+            email_content.push_str(&format!("From: {}\r\n", email.from));
+        }
+        if !has_to {
+            email_content.push_str(&format!("To: {}\r\n", email.to));
+        }
+        if !has_subject {
+            email_content.push_str(&format!("Subject: {}\r\n", email.subject));
+        }
+
+        for (key, value) in &headers {
+            email_content.push_str(&format!("{}: {}\r\n", key, value));
+        }
+
+        email_content.push_str("\r\n");
+        email_content.push_str(&normalize_crlf(&email.body));
+        return email_content;
+    }
+
+    headers.retain(|(k, _)| {
+        !(k.eq_ignore_ascii_case("from")
+            || k.eq_ignore_ascii_case("to")
+            || k.eq_ignore_ascii_case("subject"))
+    });
+
+    let body = email.body.as_str();
 
     let has_multipart = headers.iter().any(|(k, v)| {
         k.eq_ignore_ascii_case("content-type") && v.to_ascii_lowercase().contains("multipart/")
     });
 
     let payload_body = if has_multipart {
-        body.to_string()
+        normalize_crlf(body)
     } else if body_looks_like_html(body) {
         let html = normalize_crlf(&ensure_html_document(body));
         let mut plain = strip_tags_simple(&html);

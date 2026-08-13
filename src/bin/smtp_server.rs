@@ -188,6 +188,55 @@ fn parse_message_id_header(value: &str) -> Option<String> {
     }
 }
 
+fn apply_parsed_header(current_email: &mut CustomEmail, raw_line: &str) {
+    if raw_line.starts_with(' ') || raw_line.starts_with('\t') {
+        if let Some((last_name, last_value)) = current_email.email.headers.last_mut() {
+            let continuation = raw_line.trim();
+            if !continuation.is_empty() {
+                if !last_value.is_empty() {
+                    last_value.push(' ');
+                }
+                last_value.push_str(continuation);
+
+                if last_name.eq_ignore_ascii_case("DKIM-Signature") {
+                    current_email.dkim_signature = Some(last_value.clone());
+                } else if last_name.eq_ignore_ascii_case("Subject") {
+                    current_email.email.subject = last_value.clone();
+                } else if last_name.eq_ignore_ascii_case("Message-ID") {
+                    if let Some(mid) = parse_message_id_header(last_value) {
+                        current_email.email.id = mid;
+                    }
+                }
+            }
+        }
+        return;
+    }
+
+    if let Some((name, value)) = parse_header_line(raw_line) {
+        current_email
+            .email
+            .headers
+            .push((name.clone(), value.clone()));
+
+        if name.eq_ignore_ascii_case("DKIM-Signature") {
+            current_email.dkim_signature = Some(value.clone());
+        } else if name.eq_ignore_ascii_case("From") {
+            let canonical = format!("From: {}", value);
+            current_email.email.from =
+                extract_email_address(&canonical, "From:").unwrap_or_default();
+        } else if name.eq_ignore_ascii_case("To") {
+            let canonical = format!("To: {}", value);
+            current_email.email.to = extract_email_address(&canonical, "To:").unwrap_or_default();
+        } else if name.eq_ignore_ascii_case("Subject") {
+            current_email.email.subject = value;
+        } else if name.eq_ignore_ascii_case("Message-ID") {
+            if let Some(mid) = parse_message_id_header(&value) {
+                current_email.email.id = mid;
+            }
+        }
+    }
+}
+
 // Struct to represent the mail server
 struct MailServer {
     mail_dir: String,
@@ -359,30 +408,7 @@ async fn handle_tls_client(
                                 // Traitez les en-têtes
                                 let trimmed_line = line.trim();
                                 if !trimmed_line.is_empty() {
-                                    if let Some((name, value)) = parse_header_line(trimmed_line) {
-                                        current_email
-                                            .email
-                                            .headers
-                                            .push((name.clone(), value.clone()));
-
-                                        if name.eq_ignore_ascii_case("DKIM-Signature") {
-                                            current_email.dkim_signature = Some(value);
-                                        } else if name.eq_ignore_ascii_case("From") {
-                                            current_email.email.from =
-                                                extract_email_address(trimmed_line, "From:")
-                                                    .unwrap_or_default();
-                                        } else if name.eq_ignore_ascii_case("To") {
-                                            current_email.email.to =
-                                                extract_email_address(trimmed_line, "To:")
-                                                    .unwrap_or_default();
-                                        } else if name.eq_ignore_ascii_case("Subject") {
-                                            current_email.email.subject = value;
-                                        } else if name.eq_ignore_ascii_case("Message-ID") {
-                                            if let Some(mid) = parse_message_id_header(&value) {
-                                                current_email.email.id = mid;
-                                            }
-                                        }
-                                    }
+                                    apply_parsed_header(&mut current_email, trimmed_line);
                                 }
                             }
                         } else {
@@ -574,30 +600,7 @@ async fn handle_plain_client(
                                 // Traitez les en-têtes
                                 let trimmed_buffer = buffer.trim();
                                 if !trimmed_buffer.is_empty() {
-                                    if let Some((name, value)) = parse_header_line(trimmed_buffer) {
-                                        current_email
-                                            .email
-                                            .headers
-                                            .push((name.clone(), value.clone()));
-
-                                        if name.eq_ignore_ascii_case("DKIM-Signature") {
-                                            current_email.dkim_signature = Some(value);
-                                        } else if name.eq_ignore_ascii_case("From") {
-                                            current_email.email.from =
-                                                extract_email_address(trimmed_buffer, "From:")
-                                                    .unwrap_or_default();
-                                        } else if name.eq_ignore_ascii_case("To") {
-                                            current_email.email.to =
-                                                extract_email_address(trimmed_buffer, "To:")
-                                                    .unwrap_or_default();
-                                        } else if name.eq_ignore_ascii_case("Subject") {
-                                            current_email.email.subject = value;
-                                        } else if name.eq_ignore_ascii_case("Message-ID") {
-                                            if let Some(mid) = parse_message_id_header(&value) {
-                                                current_email.email.id = mid;
-                                            }
-                                        }
-                                    }
+                                    apply_parsed_header(&mut current_email, trimmed_buffer);
                                 }
                             }
                         } else {
