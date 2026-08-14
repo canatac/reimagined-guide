@@ -886,6 +886,10 @@ async fn main() -> std::io::Result<()> {
                 )
                 .route("/api/emails", web::get().to(api_emails))
                 .route("/api/emails/{id}", web::get().to(api_email_by_id))
+                .route(
+                    "/api/emails/{id}/attachments/{attachment_id}",
+                    web::get().to(api_email_attachment_download),
+                )
                 .route("/api/emails/{id}/action", web::post().to(api_email_action))
                 .route("/api/tags", web::get().to(api_tags))
                 .route("/api/send", web::post().to(api_send))
