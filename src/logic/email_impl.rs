@@ -75,23 +75,15 @@ impl Logic {
     }
 
     pub async fn store_email_flag(&self, username: &str, email_id: &str, flag: &str) -> Result<()> {
+        // Boucle 4 — port hexagonal : délègue au repo.
+        let _ = username;
         #[cfg(not(test))]
         {
-            let database_name =
-                std::env::var("MONGODB_DATABASE").expect("MONGODB_DATABASE must be set");
-            let collection = self
-                .client
-                .database(&database_name)
-                .collection::<Email>("emails");
-            let filter = doc! { "user_id": username, "id": email_id };
-            let update = doc! { "$addToSet": { "flags": flag } };
-            collection.update_one(filter, update).await?;
-            Ok(())
+            self.repo.update_email_flag(email_id, flag).await
         }
         #[cfg(test)]
         {
-            //For test, we need to return an empty result
-            Ok(())
+            self.client.update_email_flag(email_id, flag).await
         }
     }
 
@@ -179,17 +171,11 @@ impl Logic {
     }
 
     pub async fn delete_email(&self, username: &str, email_id: &str) -> Result<()> {
+        // Boucle 4 — port hexagonal : délègue au repo.
+        let _ = username;
         #[cfg(not(test))]
         {
-            let database_name =
-                std::env::var("MONGODB_DATABASE").expect("MONGODB_DATABASE must be set");
-            let collection = self
-                .client
-                .database(&database_name)
-                .collection::<Email>("emails");
-            let filter = doc! { "user_id": username, "id": email_id };
-            collection.delete_one(filter).await?;
-            Ok(())
+            self.repo.delete_email(email_id).await
         }
         #[cfg(test)]
         {
@@ -198,30 +184,11 @@ impl Logic {
     }
 
     pub async fn archive_email(&self, username: &str, email_id: &str) -> Result<()> {
+        // Boucle 4 — port hexagonal : délègue au repo.
+        let _ = username;
         #[cfg(not(test))]
         {
-            let database_name =
-                std::env::var("MONGODB_DATABASE").expect("MONGODB_DATABASE must be set");
-            let collection = self
-                .client
-                .database(&database_name)
-                .collection::<Email>("emails");
-            let archive_collection = self
-                .client
-                .database(&database_name)
-                .collection::<Email>("archive");
-
-            let filter = doc! { "user_id": username, "id": email_id };
-            if let Some(document) = collection.find_one(filter.clone()).await? {
-                archive_collection.insert_one(document).await?;
-                collection.delete_one(filter).await?;
-                Ok(())
-            } else {
-                Err(Error::from(std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    "Email not found",
-                )))
-            }
+            self.repo.archive_email(email_id).await
         }
         #[cfg(test)]
         {

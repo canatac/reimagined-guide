@@ -376,40 +376,14 @@ impl Logic {
     }
 
     pub async fn store_email(&self, username: &str, mailbox: &str, email: &Email) -> Result<()> {
+        // Boucle 4 — port hexagonal : délègue au repo.
         #[cfg(not(test))]
         {
-            let database_name =
-                std::env::var("MONGODB_DATABASE").expect("MONGODB_DATABASE must be set");
-            let collection = self
-                .client
-                .database(&database_name)
-                .collection::<mongodb::bson::Document>("emails");
-
-            // Count existing emails to generate sequence_number and uid
-            let count = collection
-                .count_documents(doc! {"user_id": username, "mailbox": mailbox})
-                .await?;
-            let sequence_number = (count + 1) as u32;
-            let uid = (count + 1) as u32;
-
-            // Serialize the Email struct into a BSON document
-            let mut document = bson::to_document(email)?;
-            document.insert("user_id", username);
-            document.insert("mailbox", mailbox);
-            document.insert("sequence_number", sequence_number as i64);
-            document.insert("uid", uid as i64);
-            // Store internal_date as BSON datetime
-            document.insert(
-                "internal_date",
-                mongodb::bson::DateTime::from_millis(email.internal_date.timestamp_millis()),
-            );
-            // Insert the document into the collection
-            collection.insert_one(document).await?;
-            Ok(())
+            self.repo.store_email(username, mailbox, email).await
         }
         #[cfg(test)]
         {
-            Ok(())
+            self.client.store_email(username, mailbox, email).await
         }
     }
 
