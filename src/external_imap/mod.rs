@@ -655,7 +655,7 @@ impl ExternalImapService {
         let since_bson = run.since.unwrap_or_else(|| {
             bson::DateTime::from_millis(Utc::now().timestamp_millis())
         });
-        let since_chrono: chrono::DateTime<Utc> = since_bson.into();
+        let since_chrono: chrono::DateTime<Utc> = since_bson.to_chrono();
         let since_imap = format_imap_date(&since_chrono);
 
         // Fetch remote headers via a real IMAP session (blocking dialog).
