@@ -144,12 +144,71 @@ pub(crate) fn strip_tags(html: &str) -> String {
     out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-pub(crate) fn email_to_dto(email: &Email, folder: &str, include_body: bool) -> EmailDto {
-    let flags_l: Vec<String> = email.flags.iter().map(|f| f.to_ascii_lowercase()).collect();
-    let is_read = flags_l.iter().any(|f| f == "seen" || f == "\\seen");
-    let is_starred = flags_l
-        .iter()
-        .any(|f| f == "flagged" || f == "\\flagged" || f == "starred");
+fn compact_preview(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn walk_mime_parts(part: &mailparse::ParsedMail<'_>, html: &mut Option<String>, text: &mut Option<String>) {
+    if part.subparts.is_empty() {
+        let mt = part.ctype.mimetype.to_ascii_lowercase();
+        if mt == "text/html" && html.is_none() {
+            if let Ok(b) = part.get_body() {
+                *html = Some(b);
+            }
+        } else if mt == "text/plain" && text.is_none() {
+            if let Ok(b) = part.get_body() {
+                *text = Some(b);
+            }
+        }
+        return;
+    }
+
+    for sub in &part.subparts {
+        walk_mime_parts(sub, html, text);
+    }
+}
+
+fn decoded_mail_body_for_ui(email: &Email) -> (String, String, String) {
+    let raw_mime = if email.headers.is_empty() {
+        email.body.clone()
+    } else {
+        let headers = email
+            .headers
+            .iter()
+            .map(|(k, v)| format!("{}: {}", k, v))
+            .collect::<Vec<_>>()
+            .join("\r\n");
+        format!("{}\r\n\r\n{}", headers, email.body)
+    };
+
+    if let Ok(parsed) = mailparse::parse_mail(raw_mime.as_bytes()) {
+        let mut html = None;
+        let mut text = None;
+        walk_mime_parts(&parsed, &mut html, &mut text);
+
+        if let Some(html_body) = html {
+            let preview = compact_preview(&strip_tags(&html_body)).chars().take(160).collect();
+            return (html_body, "html".to_string(), preview);
+        }
+        if let Some(text_body) = text {
+            let preview = compact_preview(&text_body).chars().take(160).collect();
+            return (text_body, "text".to_string(), preview);
+        }
+
+        if let Ok(body) = parsed.get_body() {
+            let looks_html = body.to_ascii_lowercase().contains("<html")
+                || body.contains("</")
+                || body.contains("<p");
+            if looks_html {
+                let preview = compact_preview(&strip_tags(&body)).chars().take(160).collect();
+                return (body, "html".to_string(), preview);
+            }
+            let preview = compact_preview(&body).chars().take(160).collect();
+            return (body, "text".to_string(), preview);
+        }
+    }
+
+    // Fallback (legacy behavior) when MIME parse fails
     let body_type = if email.body.to_ascii_lowercase().contains("<html")
         || email.body.contains("</")
         || email.body.contains("<p")
@@ -163,7 +222,17 @@ pub(crate) fn email_to_dto(email: &Email, folder: &str, include_body: bool) -> E
     } else {
         email.body.clone()
     };
-    let preview: String = plain.chars().take(160).collect();
+    let preview = compact_preview(&plain).chars().take(160).collect();
+    (email.body.clone(), body_type.to_string(), preview)
+}
+
+pub(crate) fn email_to_dto(email: &Email, folder: &str, include_body: bool) -> EmailDto {
+    let flags_l: Vec<String> = email.flags.iter().map(|f| f.to_ascii_lowercase()).collect();
+    let is_read = flags_l.iter().any(|f| f == "seen" || f == "\\seen");
+    let is_starred = flags_l
+        .iter()
+        .any(|f| f == "flagged" || f == "\\flagged" || f == "starred");
+    let (decoded_body, body_type, preview) = decoded_mail_body_for_ui(email);
     let date = {
         let ms = email.internal_date.timestamp_millis();
         chrono::DateTime::from_timestamp_millis(ms)
@@ -225,11 +294,11 @@ pub(crate) fn email_to_dto(email: &Email, folder: &str, include_body: bool) -> E
         preview,
         // List payloads stay lean — detail fetch fills body via GET /api/emails/:id
         body: if include_body {
-            email.body.clone()
+            decoded_body.clone()
         } else {
             String::new()
         },
-        body_type: body_type.to_string(),
+        body_type,
         date: date.clone(),
         received_at: date,
         is_read,
