@@ -654,6 +654,7 @@ fn welcome_email_html(
 // mailbox + send + drafts → mailbox_handlers module
 // admin CRUD + change-requests + deliverability → admin_ops_handlers module
 
+#[actix_web::main]
 async fn main() -> std::io::Result<()> {
     dotenv().ok();
 
