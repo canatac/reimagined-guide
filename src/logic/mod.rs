@@ -454,6 +454,7 @@ pub trait LogicTrait: Send + Sync {
     async fn create_user(&self, username: &str, password: &str, mailbox: &str) -> Result<()>;
 }
 
+#[async_trait::async_trait]
 impl LogicTrait for Logic {
     async fn create_user(&self, username: &str, password: &str, mailbox: &str) -> Result<()> {
         self.create_user(username, password, mailbox).await
