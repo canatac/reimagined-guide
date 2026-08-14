@@ -101,27 +101,27 @@ use simple_smtp_server::security;
 
 
 #[derive(Deserialize)]
-pub(crate) struct DeliverabilityDiagnosticsQuery {
+pub struct DeliverabilityDiagnosticsQuery {
     #[serde(default = "default_window")]
     window: String,
     domain: Option<String>,
 }
 
 #[derive(Deserialize)]
-pub(crate) struct DeliverabilityProcedureUpdateRequest {
+pub struct DeliverabilityProcedureUpdateRequest {
     checklist: Option<Vec<DeliverabilityChecklistUpdate>>,
     reminder: Option<DeliverabilityReminderUpdate>,
 }
 
 #[derive(Deserialize)]
-pub(crate) struct DeliverabilityChecklistUpdate {
+pub struct DeliverabilityChecklistUpdate {
     id: String,
     checked: bool,
     note: Option<String>,
 }
 
 #[derive(Deserialize)]
-pub(crate) struct DeliverabilityReminderUpdate {
+pub struct DeliverabilityReminderUpdate {
     enabled: bool,
     cadence_hours: u32,
 }

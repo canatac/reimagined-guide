@@ -49,16 +49,16 @@ pub struct EmailRequest {
 }
 
 #[derive(Deserialize)]
-pub(crate) struct MailingListRequest {
-    label: String,
-    emails: Vec<String>,
+pub struct MailingListRequest {
+    pub label: String,
+    pub emails: Vec<String>,
 }
 
 #[derive(Deserialize)]
-pub(crate) struct MailingListEmailRequest {
-    from: String,
-    subject: String,
-    body: String,
-    mailing_list: String,
+pub struct MailingListEmailRequest {
+    pub from: String,
+    pub subject: String,
+    pub body: String,
+    pub mailing_list: String,
 }
 

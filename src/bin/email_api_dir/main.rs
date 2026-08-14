@@ -65,11 +65,13 @@ pub use monitoring_handlers::*;
 pub use mailbox::*;
 pub use admin_ops::*;
 pub use external_handlers::*;
+// Sprint 9: pub use pour que admin_ops/diag_handlers.rs voie les types remontés
 pub use event_handlers::*;
-pub use oauth_utils::*;
-pub use mailing_list_handlers::*;
-pub use send_dispatch::*;
-pub use web_utils::*;
+// Autres helpers Sprint 9 : usage local uniquement
+use oauth_utils::*;
+use mailing_list_handlers::*;
+use send_dispatch::*;
+use web_utils::*;
 
 use sha1::Sha1;
 
