@@ -12,7 +12,7 @@
  * an account: the credentials never touch mongo unless the user confirms.
  */
 
-use crate::external_imap::live_probe::run_probe_stream;
+use simple_smtp_server::external_imap::live_probe::run_probe_stream;
 use actix_web::{web, HttpResponse, Responder};
 use futures_util::stream;
 use serde::Deserialize;
