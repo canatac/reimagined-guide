@@ -74,7 +74,7 @@ async fn issue_session_if_admin(
     let db_name = std::env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
     let coll = mongo
         .database(&db_name)
-        .collection::<AdminUserRecord>(super::admin_ops_handlers::ADMIN_USERS_COLL);
+        .collection::<AdminUserRecord>(super::admin_ops::ADMIN_USERS_COLL);
     let email_lc = email.trim().to_lowercase();
     let user_opt = match coll.find_one(doc! { "email": &email_lc }).await {
         Ok(Some(u)) => Some(u),

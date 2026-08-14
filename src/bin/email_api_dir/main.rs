@@ -51,13 +51,13 @@ mod admin_auth;
 mod auth_handlers;
 mod monitoring_handlers;
 mod mailbox_handlers;
-mod admin_ops_handlers;
+mod admin_ops;
 mod external_handlers;
 
 pub use auth_handlers::*;
 pub use monitoring_handlers::*;
 pub use mailbox_handlers::*;
-pub use admin_ops_handlers::*;
+pub use admin_ops::*;
 pub use external_handlers::*;
 
 use sha1::Sha1;
