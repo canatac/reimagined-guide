@@ -1979,10 +1979,10 @@ pub(crate) async fn api_hermes_run_events(path: web::Path<HermesRunPath>, req: H
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ExternalMessagesQuery {
-    account_id: String,
-    folder: Option<String>,
-    page: Option<u64>,
-    page_size: Option<u64>,
+    pub(crate) account_id: String,
+    pub(crate) folder: Option<String>,
+    pub(crate) page: Option<u64>,
+    pub(crate) page_size: Option<u64>,
 }
 
 
