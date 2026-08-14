@@ -907,12 +907,19 @@ pub(crate) async fn api_admin_user_reset_password(
         }
     };
 
-    // Si aucun mot de passe fourni, on génère un temporaire.
+    // Si aucun mot de passe fourni, on génère un temporaire (16 chars,
+    // alphanumérique + 2 symboles insérés à des positions déterministes).
+    // Base: 2 UUID hex concaténés (32 chars aléatoires) tronqués à 14,
+    // puis '!' et '#' injectés pour satisfaire les politiques classiques.
     let (new_password, generated) = match &body.new_password {
         Some(p) if !p.trim().is_empty() => (p.trim().to_string(), false),
         _ => {
-            let random = Uuid::new_v4().simple().to_string();
-            (random[..12].to_string(), true)
+            let a = Uuid::new_v4().simple().to_string();
+            let b = Uuid::new_v4().simple().to_string();
+            let mixed = format!("{}{}", &a[..7], &b[..7]);
+            // Insertion de 2 symboles à positions fixes → 16 chars finaux.
+            let temp = format!("{}!{}#", &mixed[..7], &mixed[7..]);
+            (temp, true)
         }
     };
 
@@ -920,6 +927,15 @@ pub(crate) async fn api_admin_user_reset_password(
         return HttpResponse::BadRequest()
             .json(serde_json::json!({ "message": "password must be at least 8 chars" }));
     }
+
+    // Conserver la valeur en clair pour la réponse (uniquement dans le cas
+    // `generated=true` — pour un mot de passe fourni par l'admin, aucun
+    // intérêt à le lui renvoyer).
+    let clear_for_response = if generated {
+        Some(new_password.clone())
+    } else {
+        None
+    };
 
     let hash = match web::block(move || bcrypt::hash(&new_password, 12)).await {
         Ok(Ok(h)) => h,
@@ -972,7 +988,7 @@ pub(crate) async fn api_admin_user_reset_password(
         let sessions = mongo
             .database(&mongo_db_name())
             .collection::<admin_auth::AdminSession>(admin_auth::ADMIN_SESSIONS_COLL);
-        if let Err(e) = sessions.delete_many(doc! { "userId": &id }).await {
+        if let Err(e) = sessions.delete_many(doc! { "user_id": &id }).await {
             eprintln!("reset_password: revoke sessions error: {}", e);
         }
     }
@@ -991,7 +1007,11 @@ pub(crate) async fn api_admin_user_reset_password(
     HttpResponse::Ok().json(serde_json::json!({
         "reset": true,
         "user": user,
-        "generatedPassword": if generated { serde_json::Value::Bool(true) } else { serde_json::Value::Null },
+        "generated": generated,
+        // Mot de passe en clair — présent UNIQUEMENT si `generated=true`.
+        // L'admin doit le communiquer au propriétaire hors-bande puis
+        // exiger un changement à la prochaine connexion.
+        "password": clear_for_response,
     }))
 }
 
@@ -1009,7 +1029,7 @@ pub(crate) async fn api_admin_user_revoke_sessions(
     let sessions = mongo
         .database(&mongo_db_name())
         .collection::<admin_auth::AdminSession>(admin_auth::ADMIN_SESSIONS_COLL);
-    match sessions.delete_many(doc! { "userId": &id }).await {
+    match sessions.delete_many(doc! { "user_id": &id }).await {
         Ok(res) => {
             log_admin_action(
                 mongo.as_ref(),
