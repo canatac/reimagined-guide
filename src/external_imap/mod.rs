@@ -188,8 +188,8 @@ impl ExternalImapService {
     pub async fn list_accounts(&self, owner_user_id: &str) -> Result<Vec<ExternalImapAccount>> {
         let cursor = self
             .coll_accounts()
-            .find(doc! { "owner_user_id": owner_user_id })
-            .sort(doc! { "created_at": -1 })
+            .find(doc! { "ownerUserId": owner_user_id })
+            .sort(doc! { "createdAt": -1 })
             .await?;
         let mut out: Vec<ExternalImapAccount> = cursor.try_collect().await?;
         out.iter_mut().for_each(|a| a.secret_value = None);
@@ -203,7 +203,7 @@ impl ExternalImapService {
     ) -> Result<Option<ExternalImapAccount>> {
         let found = self
             .coll_accounts()
-            .find_one(doc! { "owner_user_id": owner_user_id, "id": account_id })
+            .find_one(doc! { "ownerUserId": owner_user_id, "id": account_id })
             .await?;
         Ok(found.map(redact_account))
     }
@@ -214,7 +214,7 @@ impl ExternalImapService {
         account_id: &str,
     ) -> Result<Option<ExternalImapAccount>> {
         self.coll_accounts()
-            .find_one(doc! { "owner_user_id": owner_user_id, "id": account_id })
+            .find_one(doc! { "ownerUserId": owner_user_id, "id": account_id })
             .await
     }
 
@@ -225,42 +225,42 @@ impl ExternalImapService {
         input: UpdateExternalAccountInput,
     ) -> Result<Option<ExternalImapAccount>> {
         let mut set_doc = doc! {
-            "updated_at": bson::DateTime::from_millis(Utc::now().timestamp_millis())
+            "updatedAt": bson::DateTime::from_millis(Utc::now().timestamp_millis())
         };
 
         if let Some(v) = input.provider { set_doc.insert("provider", v); }
         if let Some(v) = input.email { set_doc.insert("email", v); }
-        if let Some(v) = input.auth_type { set_doc.insert("auth_type", v); }
+        if let Some(v) = input.auth_type { set_doc.insert("authType", v); }
         if let Some(v) = input.status { set_doc.insert("status", v); }
-        if let Some(v) = input.last_error { set_doc.insert("last_error", v); }
+        if let Some(v) = input.last_error { set_doc.insert("lastError", v); }
 
         if let Some(imap) = input.imap {
-            set_doc.insert("imap_host", imap.host);
-            set_doc.insert("imap_port", i64::from(imap.port));
-            set_doc.insert("imap_tls", imap.tls);
+            set_doc.insert("imapHost", imap.host);
+            set_doc.insert("imapPort", i64::from(imap.port));
+            set_doc.insert("imapTls", imap.tls);
         }
 
         if let Some(smtp) = input.smtp {
-            set_doc.insert("smtp_host", smtp.host);
-            set_doc.insert("smtp_port", smtp.port.map(i64::from));
-            set_doc.insert("smtp_tls", smtp.tls);
+            set_doc.insert("smtpHost", smtp.host);
+            set_doc.insert("smtpPort", smtp.port.map(i64::from));
+            set_doc.insert("smtpTls", smtp.tls);
         }
 
         if let Some(creds) = input.credentials {
-            set_doc.insert("secret_ref", creds.secret_ref);
-            set_doc.insert("secret_value", creds.secret_value);
+            set_doc.insert("secretRef", creds.secret_ref);
+            set_doc.insert("secretValue", creds.secret_value);
         }
 
         self.coll_accounts()
             .update_one(
-                doc! { "owner_user_id": owner_user_id, "id": account_id },
+                doc! { "ownerUserId": owner_user_id, "id": account_id },
                 doc! { "$set": set_doc },
             )
             .await?;
 
         let found = self
             .coll_accounts()
-            .find_one(doc! { "owner_user_id": owner_user_id, "id": account_id })
+            .find_one(doc! { "ownerUserId": owner_user_id, "id": account_id })
             .await?;
         Ok(found.map(redact_account))
     }
@@ -268,16 +268,16 @@ impl ExternalImapService {
     pub async fn delete_account(&self, owner_user_id: &str, account_id: &str) -> Result<bool> {
         let deleted = self
             .coll_accounts()
-            .delete_one(doc! { "owner_user_id": owner_user_id, "id": account_id })
+            .delete_one(doc! { "ownerUserId": owner_user_id, "id": account_id })
             .await?;
         self.coll_folders()
-            .delete_many(doc! { "owner_user_id": owner_user_id, "account_id": account_id })
+            .delete_many(doc! { "ownerUserId": owner_user_id, "accountId": account_id })
             .await?;
         self.coll_messages()
-            .delete_many(doc! { "owner_user_id": owner_user_id, "account_id": account_id })
+            .delete_many(doc! { "ownerUserId": owner_user_id, "accountId": account_id })
             .await?;
         self.coll_sync_runs()
-            .delete_many(doc! { "owner_user_id": owner_user_id, "account_id": account_id })
+            .delete_many(doc! { "ownerUserId": owner_user_id, "accountId": account_id })
             .await?;
         Ok(deleted.deleted_count > 0)
     }
@@ -289,8 +289,8 @@ impl ExternalImapService {
     ) -> Result<Vec<ExternalImapFolder>> {
         let cursor = self
             .coll_folders()
-            .find(doc! { "owner_user_id": owner_user_id, "account_id": account_id })
-            .sort(doc! { "remote_name": 1 })
+            .find(doc! { "ownerUserId": owner_user_id, "accountId": account_id })
+            .sort(doc! { "remoteName": 1 })
             .await?;
         cursor.try_collect().await
     }
@@ -305,14 +305,14 @@ impl ExternalImapService {
         self.coll_folders()
             .update_one(
                 doc! {
-                    "owner_user_id": owner_user_id,
-                    "account_id": account_id,
+                    "ownerUserId": owner_user_id,
+                    "accountId": account_id,
                     "id": folder_id,
                 },
                 doc! {
                     "$set": {
-                        "local_role": local_role,
-                        "updated_at": bson::DateTime::from_millis(Utc::now().timestamp_millis()),
+                        "localRole": local_role,
+                        "updatedAt": bson::DateTime::from_millis(Utc::now().timestamp_millis()),
                     }
                 },
             )
@@ -321,8 +321,8 @@ impl ExternalImapService {
         self.coll_folders()
             .find_one(
                 doc! {
-                    "owner_user_id": owner_user_id,
-                    "account_id": account_id,
+                    "ownerUserId": owner_user_id,
+                    "accountId": account_id,
                     "id": folder_id,
                 },
             )
@@ -340,17 +340,17 @@ impl ExternalImapService {
         let existing = self
             .coll_folders()
             .find_one(doc! {
-                "owner_user_id": owner_user_id,
-                "account_id": account_id,
-                "remote_name": remote_name,
+                "ownerUserId": owner_user_id,
+                "accountId": account_id,
+                "remoteName": remote_name,
             })
             .await?;
 
         if let Some(mut folder) = existing {
             self.coll_folders()
                 .update_one(
-                    doc! { "id": &folder.id, "owner_user_id": owner_user_id, "account_id": account_id },
-                    doc! { "$set": { "local_role": local_role, "updated_at": now } },
+                    doc! { "id": &folder.id, "ownerUserId": owner_user_id, "accountId": account_id },
+                    doc! { "$set": { "localRole": local_role, "updatedAt": now } },
                 )
                 .await?;
             folder.local_role = local_role.to_string();
@@ -412,14 +412,14 @@ impl ExternalImapService {
     ) -> Result<Option<ExternalSyncRun>> {
         self.coll_sync_runs()
             .update_one(
-                doc! { "owner_user_id": owner_user_id, "id": run_id },
+                doc! { "ownerUserId": owner_user_id, "id": run_id },
                 doc! {
                     "$set": {
                         "status": status,
                         "stats_fetched": i64::try_from(stats.fetched).unwrap_or(i64::MAX),
                         "stats_updated": i64::try_from(stats.updated).unwrap_or(i64::MAX),
                         "stats_deleted": i64::try_from(stats.deleted).unwrap_or(i64::MAX),
-                        "ended_at": bson::DateTime::from_millis(Utc::now().timestamp_millis()),
+                        "endedAt": bson::DateTime::from_millis(Utc::now().timestamp_millis()),
                         "error": error,
                     }
                 },
@@ -427,13 +427,13 @@ impl ExternalImapService {
             .await?;
 
         self.coll_sync_runs()
-            .find_one(doc! { "owner_user_id": owner_user_id, "id": run_id })
+            .find_one(doc! { "ownerUserId": owner_user_id, "id": run_id })
             .await
     }
 
     pub async fn get_sync_run(&self, owner_user_id: &str, run_id: &str) -> Result<Option<ExternalSyncRun>> {
         self.coll_sync_runs()
-            .find_one(doc! { "owner_user_id": owner_user_id, "id": run_id })
+            .find_one(doc! { "ownerUserId": owner_user_id, "id": run_id })
             .await
     }
 
@@ -443,8 +443,8 @@ impl ExternalImapService {
         account_id: &str,
     ) -> Result<Option<ExternalSyncRun>> {
         self.coll_sync_runs()
-            .find(doc! { "owner_user_id": owner_user_id, "account_id": account_id })
-            .sort(doc! { "started_at": -1 })
+            .find(doc! { "ownerUserId": owner_user_id, "accountId": account_id })
+            .sort(doc! { "startedAt": -1 })
             .limit(1)
             .await?
             .try_next()
@@ -459,13 +459,13 @@ impl ExternalImapService {
     ) -> Result<Option<ExternalImapAccount>> {
         self.coll_accounts()
             .update_one(
-                doc! { "owner_user_id": owner_user_id, "id": account_id },
-                doc! { "$set": { "status": status, "updated_at": bson::DateTime::from_millis(Utc::now().timestamp_millis()) } },
+                doc! { "ownerUserId": owner_user_id, "id": account_id },
+                doc! { "$set": { "status": status, "updatedAt": bson::DateTime::from_millis(Utc::now().timestamp_millis()) } },
             )
             .await?;
         let found = self
             .coll_accounts()
-            .find_one(doc! { "owner_user_id": owner_user_id, "id": account_id })
+            .find_one(doc! { "ownerUserId": owner_user_id, "id": account_id })
             .await?;
         Ok(found.map(redact_account))
     }
@@ -479,19 +479,19 @@ impl ExternalImapService {
         page_size: u64,
     ) -> Result<Vec<ExternalImapMessage>> {
         let mut filter = doc! {
-            "owner_user_id": owner_user_id,
-            "account_id": account_id,
+            "ownerUserId": owner_user_id,
+            "accountId": account_id,
             "deleted": false,
         };
         if let Some(folder_name) = folder {
             if let Some(folder_doc) = self
                 .coll_folders()
                 .find_one(doc! {
-                    "owner_user_id": owner_user_id,
-                    "account_id": account_id,
+                    "ownerUserId": owner_user_id,
+                    "accountId": account_id,
                     "$or": [
-                        {"remote_name": folder_name},
-                        {"local_role": folder_name},
+                        {"remoteName": folder_name},
+                        {"localRole": folder_name},
                     ]
                 })
                 .await?
@@ -504,7 +504,7 @@ impl ExternalImapService {
         let cursor = self
             .coll_messages()
             .find(filter)
-            .sort(doc! { "internal_date": -1, "created_at": -1 })
+            .sort(doc! { "internalDate": -1, "createdAt": -1 })
             .skip(skip)
             .limit(i64::try_from(page_size).unwrap_or(50))
             .await?;
@@ -519,7 +519,7 @@ impl ExternalImapService {
     ) -> Result<Option<ExternalImapMessage>> {
         let found = self
             .coll_messages()
-            .find_one(doc! { "owner_user_id": owner_user_id, "id": message_id })
+            .find_one(doc! { "ownerUserId": owner_user_id, "id": message_id })
             .await?;
 
         let Some(current) = found else {
@@ -527,7 +527,7 @@ impl ExternalImapService {
         };
 
         let now = bson::DateTime::from_millis(Utc::now().timestamp_millis());
-        let mut set_doc = doc! { "updated_at": now };
+        let mut set_doc = doc! { "updatedAt": now };
         let mut flags = current.flags.clone();
 
         match input.action.as_str() {
@@ -567,13 +567,13 @@ impl ExternalImapService {
 
         self.coll_messages()
             .update_one(
-                doc! { "owner_user_id": owner_user_id, "id": message_id },
+                doc! { "ownerUserId": owner_user_id, "id": message_id },
                 doc! { "$set": set_doc },
             )
             .await?;
 
         self.coll_messages()
-            .find_one(doc! { "owner_user_id": owner_user_id, "id": message_id })
+            .find_one(doc! { "ownerUserId": owner_user_id, "id": message_id })
             .await
     }
 
@@ -693,8 +693,8 @@ impl ExternalImapService {
                 let _ = self
                     .coll_accounts()
                     .update_one(
-                        doc! { "owner_user_id": owner_user_id, "id": &account.id },
-                        doc! { "$set": { "last_error": &e } },
+                        doc! { "ownerUserId": owner_user_id, "id": &account.id },
+                        doc! { "$set": { "lastError": &e } },
                     )
                     .await;
                 return Err(mongodb::error::Error::custom(format!(
@@ -745,7 +745,7 @@ impl ExternalImapService {
             // Upsert on (account_id, remote_uid) so re-syncs don't duplicate.
             self.coll_messages()
                 .replace_one(
-                    doc! { "account_id": &account.id, "remote_uid": h.uid as i64 },
+                    doc! { "accountId": &account.id, "remoteUid": h.uid as i64 },
                     &msg,
                 )
                 .upsert(true)
@@ -755,11 +755,11 @@ impl ExternalImapService {
 
         self.coll_accounts()
             .update_one(
-                doc! { "owner_user_id": owner_user_id, "id": &account.id },
+                doc! { "ownerUserId": owner_user_id, "id": &account.id },
                 doc! { "$set": {
-                    "last_sync_at": bson::DateTime::from_millis(Utc::now().timestamp_millis()),
-                    "last_error": bson::Bson::Null,
-                    "updated_at": bson::DateTime::from_millis(Utc::now().timestamp_millis())
+                    "lastSyncAt": bson::DateTime::from_millis(Utc::now().timestamp_millis()),
+                    "lastError": bson::Bson::Null,
+                    "updatedAt": bson::DateTime::from_millis(Utc::now().timestamp_millis())
                 }},
             )
             .await?;
