@@ -53,6 +53,7 @@ mod monitoring_handlers;
 mod mailbox_handlers;
 mod admin_ops;
 mod external_handlers;
+mod external_probe_handlers;
 
 pub use auth_handlers::*;
 pub use monitoring_handlers::*;
@@ -801,6 +802,10 @@ async fn main() -> std::io::Result<()> {
                 .route(
                     "/api/external-accounts",
                     web::get().to(api_external_accounts_list),
+                )
+                .route(
+                    "/api/external-accounts/probe-stream",
+                    web::post().to(external_probe_handlers::api_external_probe_stream),
                 )
                 .route(
                     "/api/external-accounts",
