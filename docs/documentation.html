@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>misfits.ai Mail — Documentation intégrateur</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/lucide@latest"></script>
+<style>
+  html,body{background:#0A0A0B;color:#E0E0E0;}
+  ::selection{background:#C49B66;color:#0A0A0B;}
+  .custom-scrollbar::-webkit-scrollbar{width:8px;height:8px}
+  .custom-scrollbar::-webkit-scrollbar-thumb{background:#242427;border-radius:8px}
+  .pill.active{background:#C49B66;color:#0A0A0B;border-color:#C49B66}
+  details[open] summary .chev{transform:rotate(90deg)}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+</style>
+</head>
+<body class="min-h-screen">
+<main class="max-w-6xl mx-auto p-6 lg:p-10 space-y-8 select-none">
+
+  <!-- HERO -->
+  <section class="relative p-6 lg:p-8 rounded-3xl border border-[#242427] shadow-2xl overflow-hidden"
+           style="background:linear-gradient(90deg,#121214,#1D1D20,#121214)">
+    <div class="absolute -right-10 -bottom-10 w-64 h-64 rounded-full blur-3xl pointer-events-none" style="background:rgba(196,155,102,.10)"></div>
+    <div class="relative z-10 max-w-3xl space-y-3">
+      <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-mono font-medium"
+           style="background:rgba(196,155,102,.15);border:1px solid rgba(196,155,102,.30);color:#C49B66">
+        <i data-lucide="book-open" class="w-3.5 h-3.5"></i>
+        <span>Documentation intégrateur • misfits.ai Mail</span>
+      </div>
+      <h1 class="text-2xl lg:text-3xl font-extrabold text-white tracking-tight leading-tight">
+        Intégrer misfits.ai Mail dans votre application
+      </h1>
+      <p class="text-xs lg:text-sm leading-relaxed" style="color:#A1A1AA">
+        Ce guide s'adresse aux développeurs qui souhaitent envoyer, recevoir et lire des e-mails via
+        misfits.ai Mail. Il présente les protocoles standards (SMTP, IMAP), l'API publique de haut niveau
+        et les principes d'authentification, sans référence à l'infrastructure interne.
+      </p>
+
+      <!-- Search -->
+      <div class="relative mt-4 max-w-xl">
+        <i data-lucide="search" class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2" style="color:#71717A"></i>
+        <input id="search" type="text" placeholder="Rechercher dans la FAQ…"
+               class="w-full pl-9 pr-3 py-2 rounded-xl text-sm outline-none focus:ring-2"
+               style="background:#0A0A0B;border:1px solid #242427;color:#E0E0E0" />
+      </div>
+    </div>
+  </section>
+
+  <!-- CATEGORY PILLS -->
+  <nav id="pills" class="flex flex-wrap gap-2"></nav>
+
+  <!-- SECTIONS -->
+  <section data-cat="overview" class="rounded-2xl border p-6 space-y-5" style="background:#121214;border-color:#242427">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-xl flex items-center justify-center" style="background:rgba(196,155,102,.15);border:1px solid rgba(196,155,102,.30)">
+        <i data-lucide="file-text" class="w-5 h-5" style="color:#C49B66"></i>
+      </div>
+      <div>
+        <h2 class="text-lg font-bold text-white">1. Présentation</h2>
+        <p class="text-xs" style="color:#A1A1AA">Qu'est-ce que misfits.ai Mail et à qui s'adresse cette documentation.</p>
+      </div>
+    </div>
+    <div class="grid md:grid-cols-2 gap-4">
+      <article class="rounded-xl p-4 border" style="background:#1D1D20;border-color:#242427">
+        <h3 class="text-sm font-semibold text-white mb-1">Un service e-mail programmable</h3>
+        <p class="text-xs leading-relaxed" style="color:#A1A1AA">
+          misfits.ai Mail expose une plateforme de messagerie compatible avec les standards
+          <span style="color:#38BDF8">SMTP</span> et <span style="color:#38BDF8">IMAP</span>, complétée
+          d'une <span style="color:#C49B66">API publique</span> pour intégrer l'envoi et la lecture dans
+          vos applications.
+        </p>
+      </article>
+      <article class="rounded-xl p-4 border" style="background:#1D1D20;border-color:#242427">
+        <h3 class="text-sm font-semibold text-white mb-1">Public visé</h3>
+        <p class="text-xs leading-relaxed" style="color:#A1A1AA">
+          Développeurs qui construisent un client, un backend ou un automatisme au-dessus de
+          misfits.ai Mail. Aucun accès administrateur n'est requis pour suivre ce guide.
+        </p>
+      </article>
+      <article class="rounded-xl p-4 border md:col-span-2" style="background:#1D1D20;border-color:#242427">
+        <h3 class="text-sm font-semibold text-white mb-2 flex items-center gap-2">
+          <i data-lucide="git-branch" class="w-4 h-4" style="color:#4ADE80"></i> Flux général
+        </h3>
+        <pre class="text-xs leading-relaxed overflow-x-auto" style="color:#A1A1AA">
+Expéditeur ──SMTP──▶  misfits.ai Mail  ──stockage──▶  Boîte destinataire
+                            │
+                            └──IMAP / API──▶ Votre client (lecture, tri, réponse)
+        </pre>
+      </article>
+    </div>
+  </section>
+
+  <section data-cat="send" class="rounded-2xl border p-6 space-y-5" style="background:#121214;border-color:#242427">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-xl flex items-center justify-center" style="background:rgba(56,189,248,.15);border:1px solid rgba(56,189,248,.30)">
+        <i data-lucide="send" class="w-5 h-5" style="color:#38BDF8"></i>
+      </div>
+      <div>
+        <h2 class="text-lg font-bold text-white">2. Envoyer un e-mail</h2>
+        <p class="text-xs" style="color:#A1A1AA">Utilisation du protocole SMTP standard.</p>
+      </div>
+    </div>
+    <div class="grid md:grid-cols-2 gap-4">
+      <article class="rounded-xl p-4 border" style="background:#1D1D20;border-color:#242427">
+        <h3 class="text-sm font-semibold text-white mb-1">SMTP compatible</h3>
+        <p class="text-xs leading-relaxed" style="color:#A1A1AA">
+          Configurez votre client ou votre bibliothèque (Nodemailer, lettre, JavaMail, etc.) avec les
+          identifiants qui vous ont été fournis. STARTTLS et l'authentification par mot de passe sont
+          pris en charge selon les usages standards.
+        </p>
+        <div class="mt-2 flex flex-wrap gap-2 text-[10px]">
+          <span class="px-2 py-1 rounded" style="background:#1D1D20;border:1px solid #242427;color:#A1A1AA">STARTTLS</span>
+          <span class="px-2 py-1 rounded" style="background:#1D1D20;border:1px solid #242427;color:#A1A1AA">AUTH LOGIN</span>
+          <span class="px-2 py-1 rounded" style="background:#1D1D20;border:1px solid #242427;color:#A1A1AA">MIME</span>
+        </div>
+      </article>
+      <article class="rounded-xl p-4 border" style="background:#1D1D20;border-color:#242427">
+        <h3 class="text-sm font-semibold text-white mb-1">Bonnes pratiques</h3>
+        <ul class="text-xs space-y-1 list-disc pl-4" style="color:#A1A1AA">
+          <li>Renseignez un <code style="color:#C49B66">From</code> valide au domaine autorisé.</li>
+          <li>Ajoutez <code style="color:#C49B66">Message-Id</code> et <code style="color:#C49B66">Date</code>.</li>
+          <li>Utilisez multipart/alternative pour joindre HTML + texte.</li>
+          <li>Respectez les politiques SPF/DKIM/DMARC de votre domaine.</li>
+        </ul>
+      </article>
+    </div>
+  </section>
+
+  <section data-cat="receive" class="rounded-2xl border p-6 space-y-5" style="background:#121214;border-color:#242427">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-xl flex items-center justify-center" style="background:rgba(74,222,128,.15);border:1px solid rgba(74,222,128,.30)">
+        <i data-lucide="inbox" class="w-5 h-5" style="color:#4ADE80"></i>
+      </div>
+      <div>
+        <h2 class="text-lg font-bold text-white">3. Recevoir et lire</h2>
+        <p class="text-xs" style="color:#A1A1AA">Deux voies : IMAP standard ou API publique de haut niveau.</p>
+      </div>
+    </div>
+    <div class="grid md:grid-cols-2 gap-4">
+      <article class="rounded-xl p-4 border" style="background:#1D1D20;border-color:#242427">
+        <h3 class="text-sm font-semibold text-white mb-1 flex items-center gap-2">
+          <i data-lucide="mail" class="w-4 h-4" style="color:#4ADE80"></i> Via IMAP
+        </h3>
+        <p class="text-xs leading-relaxed" style="color:#A1A1AA">
+          Tout client compatible IMAP (Thunderbird, mutt, imapclient, etc.) peut se connecter avec les
+          identifiants du compte. Les dossiers standards (INBOX, Sent, Drafts, Trash) sont exposés.
+        </p>
+      </article>
+      <article class="rounded-xl p-4 border" style="background:#1D1D20;border-color:#242427">
+        <h3 class="text-sm font-semibold text-white mb-1 flex items-center gap-2">
+          <i data-lucide="code-2" class="w-4 h-4" style="color:#38BDF8"></i> Via API publique
+        </h3>
+        <p class="text-xs leading-relaxed" style="color:#A1A1AA">
+          L'API HTTP expose des opérations de haut niveau : lister les messages d'un dossier, récupérer
+          un message par identifiant, marquer lu/non-lu, déplacer, supprimer. Elle renvoie du JSON et
+          suit une convention REST.
+        </p>
+      </article>
+      <article class="rounded-xl p-4 border md:col-span-2" style="background:#1D1D20;border-color:#242427">
+        <h3 class="text-sm font-semibold text-white mb-2 flex items-center gap-2">
+          <i data-lucide="list" class="w-4 h-4" style="color:#C49B66"></i> Opérations typiques
+        </h3>
+        <ul class="text-xs space-y-1 list-disc pl-4" style="color:#A1A1AA">
+          <li>Lister les messages d'un dossier avec pagination.</li>
+          <li>Récupérer un message : en-têtes, corps HTML/texte, pièces jointes.</li>
+          <li>Mettre à jour les flags (lu, favori, archivé).</li>
+          <li>Envoyer un message via l'endpoint dédié (alternative à SMTP).</li>
+        </ul>
+        <p class="text-[10px] mt-2" style="color:#71717A">
+          L'URL de base et la liste exhaustive des routes vous sont communiquées à l'activation de votre
+          compte intégrateur.
+        </p>
+      </article>
+    </div>
+  </section>
+
+  <section data-cat="security" class="rounded-2xl border p-6 space-y-5" style="background:#121214;border-color:#242427">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-xl flex items-center justify-center" style="background:rgba(196,155,102,.15);border:1px solid rgba(196,155,102,.30)">
+        <i data-lucide="shield-check" class="w-5 h-5" style="color:#C49B66"></i>
+      </div>
+      <div>
+        <h2 class="text-lg font-bold text-white">4. Sécurité & authentification</h2>
+        <p class="text-xs" style="color:#A1A1AA">Comment vos requêtes API sont identifiées.</p>
+      </div>
+    </div>
+    <div class="grid md:grid-cols-2 gap-4">
+      <article class="rounded-xl p-4 border" style="background:#1D1D20;border-color:#242427">
+        <h3 class="text-sm font-semibold text-white mb-1">En-tête d'identification</h3>
+        <p class="text-xs leading-relaxed" style="color:#A1A1AA">
+          Chaque appel API porte un en-tête d'identification utilisateur (par convention
+          <code style="color:#C49B66">x-user-id</code>) que votre backend ajoute à partir de la session
+          authentifiée de l'utilisateur final. Les valeurs concrètes ne sont jamais codées en dur côté
+          client.
+        </p>
+      </article>
+      <article class="rounded-xl p-4 border" style="background:#1D1D20;border-color:#242427">
+        <h3 class="text-sm font-semibold text-white mb-1">Transport</h3>
+        <ul class="text-xs space-y-1 list-disc pl-4" style="color:#A1A1AA">
+          <li>HTTPS obligatoire pour l'API.</li>
+          <li>TLS pour SMTP et IMAP.</li>
+          <li>Ne pas stocker les identifiants en clair côté client.</li>
+        </ul>
+      </article>
+      <article class="rounded-xl p-4 border md:col-span-2" style="background:#1D1D20;border-color:#242427">
+        <h3 class="text-sm font-semibold text-white mb-1">Modèle d'autorisation</h3>
+        <p class="text-xs leading-relaxed" style="color:#A1A1AA">
+          Un utilisateur ne peut lire et manipuler que ses propres messages. Les routes d'administration
+          ne font pas partie de cette documentation intégrateur.
+        </p>
+      </article>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section data-cat="faq" class="rounded-2xl border p-6 space-y-4" style="background:#121214;border-color:#242427">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-xl flex items-center justify-center" style="background:rgba(56,189,248,.15);border:1px solid rgba(56,189,248,.30)">
+        <i data-lucide="help-circle" class="w-5 h-5" style="color:#38BDF8"></i>
+      </div>
+      <div>
+        <h2 class="text-lg font-bold text-white">5. FAQ</h2>
+        <p class="text-xs" style="color:#A1A1AA">Questions fréquentes des intégrateurs.</p>
+      </div>
+    </div>
+    <div id="faq-list" class="space-y-2"></div>
+    <p id="faq-empty" class="text-xs hidden" style="color:#71717A">Aucun résultat pour cette recherche.</p>
+  </section>
+
+  <footer class="pt-4 pb-8 text-center text-[11px]" style="color:#71717A">
+    misfits.ai Mail • Documentation intégrateur • Design inspiré du système novamail
+  </footer>
+</main>
+
+<script>
+const CATS = [
+  { id:'all',      label:'Guide complet',       icon:'compass' },
+  { id:'overview', label:'1. Présentation',     icon:'file-text' },
+  { id:'send',     label:'2. Envoyer',          icon:'send' },
+  { id:'receive',  label:'3. Recevoir / lire',  icon:'inbox' },
+  { id:'security', label:'4. Sécurité',         icon:'shield-check' },
+  { id:'faq',      label:'5. FAQ',              icon:'help-circle' },
+];
+
+const FAQ = [
+  { q:"Ai-je besoin d'un compte administrateur pour intégrer misfits.ai Mail ?",
+    a:"Non. Un compte intégrateur suffit. Vous recevez les paramètres SMTP/IMAP et l'URL de base de l'API publique. Aucune action d'administration système n'est requise de votre part." },
+  { q:"Dois-je utiliser SMTP ou l'API pour envoyer ?",
+    a:"Les deux sont valides. SMTP est idéal si vous disposez déjà d'une pile de messagerie standard. L'API est pratique pour les intégrations HTTP ou lorsque vous voulez éviter la configuration d'un client SMTP." },
+  { q:"Comment authentifier les requêtes API côté serveur ?",
+    a:"Votre backend ajoute l'en-tête d'identification de l'utilisateur connecté (par convention x-user-id) à chaque requête. La valeur provient de votre session authentifiée, jamais du navigateur." },
+  { q:"Puis-je lire les e-mails d'un autre utilisateur ?",
+    a:"Non. Chaque utilisateur n'accède qu'à ses propres messages. Toute tentative d'accès croisé est refusée." },
+  { q:"Les pièces jointes sont-elles supportées ?",
+    a:"Oui, en envoi via multipart MIME (SMTP) ou via les champs dédiés de l'API, et en lecture via les endpoints de récupération de message." },
+  { q:"Existe-t-il une limite de volume ?",
+    a:"Des quotas raisonnables sont appliqués pour protéger la plateforme. Contactez le support si votre cas d'usage nécessite un ajustement." },
+];
+
+// Pills
+const pills = document.getElementById('pills');
+CATS.forEach((c,i)=>{
+  const b = document.createElement('button');
+  b.className = 'pill inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium transition'
+              + (i===0 ? ' active' : '');
+  b.style.cssText = 'background:#1D1D20;border:1px solid #242427;color:#E0E0E0';
+  b.dataset.cat = c.id;
+  b.innerHTML = `<i data-lucide="${c.icon}" class="w-3.5 h-3.5"></i><span>${c.label}</span>`;
+  b.addEventListener('click',()=>{
+    document.querySelectorAll('.pill').forEach(p=>p.classList.remove('active'));
+    b.classList.add('active');
+    const cat = c.id;
+    document.querySelectorAll('section[data-cat]').forEach(s=>{
+      s.style.display = (cat==='all' || s.dataset.cat===cat) ? '' : 'none';
+    });
+  });
+  pills.appendChild(b);
+});
+
+// FAQ render + search
+const faqList = document.getElementById('faq-list');
+function renderFaq(q=''){
+  const needle = q.trim().toLowerCase();
+  faqList.innerHTML = '';
+  let n = 0;
+  FAQ.forEach(item=>{
+    if(needle && !(item.q.toLowerCase().includes(needle) || item.a.toLowerCase().includes(needle))) return;
+    n++;
+    const d = document.createElement('details');
+    d.className = 'rounded-xl border p-3';
+    d.style.cssText = 'background:#1D1D20;border-color:#242427';
+    d.innerHTML = `
+      <summary class="cursor-pointer flex items-start gap-2 text-sm text-white list-none">
+        <i data-lucide="chevron-right" class="chev w-4 h-4 mt-0.5 transition" style="color:#C49B66"></i>
+        <span>${item.q}</span>
+      </summary>
+      <p class="mt-2 pl-6 text-xs leading-relaxed" style="color:#A1A1AA">${item.a}</p>`;
+    faqList.appendChild(d);
+  });
+  document.getElementById('faq-empty').classList.toggle('hidden', n>0);
+  lucide.createIcons();
+}
+renderFaq();
+document.getElementById('search').addEventListener('input', e=>renderFaq(e.target.value));
+
+lucide.createIcons();
+</script>
+</body>
+</html>
