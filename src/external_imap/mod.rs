@@ -1,6 +1,9 @@
 use crate::entities::{
     ExternalImapAccount, ExternalImapFolder, ExternalImapMessage, ExternalSyncRun,
 };
+
+pub mod live_probe;
+
 use chrono::Utc;
 use futures_util::TryStreamExt;
 use mongodb::bson;
