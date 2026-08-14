@@ -323,13 +323,6 @@ struct DeliverabilityReminderUpdate {
     cadence_hours: u32,
 }
 
-            }
-        }
-    }
-
-    rows
-}
-
 /// GET /api/monitoring/summary?window=15m
 // monitoring + security handlers → monitoring_handlers module
 
