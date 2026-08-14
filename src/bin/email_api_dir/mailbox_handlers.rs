@@ -42,7 +42,7 @@ fn canonical_folder(folder: &str) -> Option<String> {
 }
 
 /// Resolve mailbox local-part. Convention: user_id = `admin` (not admin@misfits.ai).
-fn resolve_user_id(req: &actix_web::HttpRequest) -> String {
+pub(crate) fn resolve_user_id(req: &actix_web::HttpRequest) -> String {
     if let Some(id) = req
         .headers()
         .get("x-user-id")
