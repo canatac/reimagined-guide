@@ -292,7 +292,7 @@ fn walk_mime_attachments(
 
     let content_type = part.ctype.mimetype.to_ascii_lowercase();
     let disp = part.get_content_disposition();
-    let disp_kind = disp.disposition.to_ascii_lowercase();
+    let disp_kind = format!("{:?}", disp.disposition).to_ascii_lowercase();
     let filename = disp
         .params
         .get("filename")
