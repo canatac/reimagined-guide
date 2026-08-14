@@ -43,6 +43,11 @@ use data_encoding::BASE32;
 use hmac::{Hmac, Mac};
 use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 use serde::{Deserialize, Serialize};
+
+// PR1 (RBAC admin) — module local, gated par ADMIN_RBAC_ENFORCE (feature flag).
+// Ne modifie AUCUN comportement tant que le flag est OFF (défaut).
+#[path = "admin_auth.rs"]
+mod admin_auth;
 use sha1::Sha1;
 
 use chrono::{DateTime, Utc};
@@ -4494,7 +4499,13 @@ struct PatchChangeRequestInputApi {
     execution_error: Option<String>,
 }
 
-async fn api_admin_users_list(mongo: web::Data<Arc<mongodb::Client>>) -> impl Responder {
+async fn api_admin_users_list(
+    req: HttpRequest,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    if let Err(resp) = admin_auth::require_admin(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
     let coll = mongo
         .database(&mongo_db_name())
         .collection::<AdminUserRecord>(ADMIN_USERS_COLL);
@@ -4524,9 +4535,13 @@ async fn api_admin_users_list(mongo: web::Data<Arc<mongodb::Client>>) -> impl Re
 }
 
 async fn api_admin_user_get(
+    req: HttpRequest,
     path: web::Path<String>,
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
+    if let Err(resp) = admin_auth::require_admin(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
     let id = path.into_inner();
     let coll = mongo
         .database(&mongo_db_name())
@@ -4546,9 +4561,13 @@ async fn api_admin_user_get(
 }
 
 async fn api_admin_user_create(
+    req: HttpRequest,
     body: web::Json<CreateAdminUserInput>,
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
+    if let Err(resp) = admin_auth::require_admin(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
     let role = body.role.trim().to_ascii_lowercase();
     if !["user", "admin", "support"].contains(&role.as_str()) {
         return HttpResponse::BadRequest()
@@ -4608,10 +4627,14 @@ async fn api_admin_user_create(
 }
 
 async fn api_admin_user_patch(
+    req: HttpRequest,
     path: web::Path<String>,
     body: web::Json<UpdateAdminUserInput>,
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
+    if let Err(resp) = admin_auth::require_admin(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
     let id = path.into_inner();
     let coll = mongo
         .database(&mongo_db_name())
@@ -4686,9 +4709,13 @@ async fn api_admin_user_patch(
 }
 
 async fn api_admin_user_delete(
+    req: HttpRequest,
     path: web::Path<String>,
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
+    if let Err(resp) = admin_auth::require_admin(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
     let id = path.into_inner();
     let coll = mongo
         .database(&mongo_db_name())
@@ -4705,6 +4732,28 @@ async fn api_admin_user_delete(
             HttpResponse::InternalServerError()
                 .json(serde_json::json!({ "message": "Failed to delete user" }))
         }
+    }
+}
+
+/// PR1 (RBAC) — GET /api/admin/whoami
+///
+/// Utilisé par le frontend pour connaître le rôle réel de l'utilisateur
+/// courant et adapter l'UI (viewer vs admin). Respecte le feature flag :
+/// - RBAC OFF → répond `{ role: "admin", email: "system@...", enforced: false }`
+///   (compat rétro : le front continue à voir un admin).
+/// - RBAC ON  → nécessite un token valide, renvoie l'identité réelle.
+async fn api_admin_whoami(
+    req: HttpRequest,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    match admin_auth::require_admin(&req, &mongo, &mongo_db_name()).await {
+        Ok(user) => HttpResponse::Ok().json(serde_json::json!({
+            "userId": user.user_id,
+            "email": user.email,
+            "role": user.role,
+            "enforced": admin_auth::rbac_enabled(),
+        })),
+        Err(resp) => resp,
     }
 }
 
@@ -6643,6 +6692,7 @@ async fn main() -> std::io::Result<()> {
                 )
                 .route("/api/admin/users", web::get().to(api_admin_users_list))
                 .route("/api/admin/users", web::post().to(api_admin_user_create))
+                .route("/api/admin/whoami", web::get().to(api_admin_whoami))
                 .route("/api/admin/users/{id}", web::get().to(api_admin_user_get))
                 .route(
                     "/api/admin/users/{id}",
