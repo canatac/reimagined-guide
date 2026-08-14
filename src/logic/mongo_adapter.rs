@@ -114,14 +114,40 @@ impl DatabaseInterface for MongoDatabaseAdapter {
     // stubs permet de satisfaire le compilateur en attendant.
     // ---------------------------------------------------------------------
 
-    async fn update_email_flag(&self, _email_id: &str, _flag: &str) -> Result<()> {
-        // TODO(hex): implémenter via MongoDB (voir Logic::update_email_flag)
+    async fn update_email_flag(&self, email_id: &str, flag: &str) -> Result<()> {
+        // Boucle 4 — impl réelle : ajoute un flag au tableau `flags` de l'email.
+        let db_name = Self::database_name();
+        let collection = self
+            .client
+            .database(&db_name)
+            .collection::<Email>("emails");
+        let filter = doc! { "id": email_id };
+        let update = doc! { "$addToSet": { "flags": flag } };
+        collection.update_one(filter, update).await?;
         Ok(())
     }
-    async fn delete_email(&self, _email_id: &str) -> Result<()> {
+    async fn delete_email(&self, email_id: &str) -> Result<()> {
+        // Boucle 4 — impl réelle : delete_one par id (portage depuis Logic::delete_email).
+        let db_name = Self::database_name();
+        let collection = self
+            .client
+            .database(&db_name)
+            .collection::<Email>("emails");
+        collection.delete_one(doc! { "id": email_id }).await?;
         Ok(())
     }
-    async fn archive_email(&self, _email_id: &str) -> Result<()> {
+    async fn archive_email(&self, email_id: &str) -> Result<()> {
+        // Boucle 4 — impl réelle : bascule le mailbox de l'email vers "archive".
+        // Simplification vs Logic::archive_email (qui déplace entre collections) :
+        // on met le champ `mailbox` à "archive" — même effet côté requêtes utilisateur.
+        let db_name = Self::database_name();
+        let collection = self
+            .client
+            .database(&db_name)
+            .collection::<Email>("emails");
+        let filter = doc! { "id": email_id };
+        let update = doc! { "$set": { "mailbox": "archive" } };
+        collection.update_one(filter, update).await?;
         Ok(())
     }
     async fn select_mailbox(&self, mailbox: &str) -> Result<Mailbox> {
@@ -193,10 +219,34 @@ impl DatabaseInterface for MongoDatabaseAdapter {
     }
     async fn store_email(
         &self,
-        _username: &str,
-        _mailbox: &str,
-        _message: &str,
+        username: &str,
+        mailbox: &str,
+        email: &Email,
     ) -> Result<()> {
+        // Boucle 4 — impl réelle : porte la logique de Logic::store_email
+        // (mailbox_impl.rs) — sequence_number/uid dérivés du count courant.
+        let db_name = Self::database_name();
+        let collection = self
+            .client
+            .database(&db_name)
+            .collection::<bson::Document>("emails");
+
+        let count = collection
+            .count_documents(doc! { "user_id": username, "mailbox": mailbox })
+            .await?;
+        let sequence_number = (count + 1) as i64;
+        let uid = (count + 1) as i64;
+
+        let mut document = bson::to_document(email)?;
+        document.insert("user_id", username);
+        document.insert("mailbox", mailbox);
+        document.insert("sequence_number", sequence_number);
+        document.insert("uid", uid);
+        document.insert(
+            "internal_date",
+            bson::DateTime::from_millis(email.internal_date.timestamp_millis()),
+        );
+        collection.insert_one(document).await?;
         Ok(())
     }
     async fn get_mailbox_status(&self, _username: &str, mailbox: &str) -> Result<Mailbox> {
@@ -243,7 +293,30 @@ impl DatabaseInterface for MongoDatabaseAdapter {
         username: &str,
         password: &str,
     ) -> Result<Option<User>> {
-        self.find_user(username, password).await
+        // Boucle 4 — impl réelle : porte la logique de Logic::authenticate_user
+        // (bcrypt + fallback legacy plaintext, lookup par username sur la
+        // collection users dédiée).
+        let db_name = Self::database_name();
+        let coll_name = Self::users_collection_name();
+        let users = self
+            .client
+            .database(&db_name)
+            .collection::<User>(&coll_name);
+        let filter = doc! { "username": username };
+        match users.find_one(filter).await? {
+            Some(user) => {
+                let ok = if user.password.starts_with("$2") {
+                    bcrypt::verify(password, &user.password).unwrap_or(false)
+                } else {
+                    constant_time_eq::constant_time_eq(
+                        password.as_bytes(),
+                        user.password.as_bytes(),
+                    )
+                };
+                Ok(if ok { Some(user) } else { None })
+            }
+            None => Ok(None),
+        }
     }
     async fn list_mailboxes(
         &self,

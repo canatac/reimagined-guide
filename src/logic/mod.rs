@@ -242,31 +242,10 @@ impl Logic {
     }
 
     pub async fn authenticate_user(&self, username: &str, password: &str) -> Result<Option<User>> {
+        // Boucle 4 — port hexagonal : délègue au repo (MongoDatabaseAdapter en prod).
         #[cfg(not(test))]
         {
-            let database_name =
-                std::env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
-            // Prefer dedicated users collection — never scan "emails" with a User shape.
-            let collection_name =
-                std::env::var("MONGODB_USERS_COLLECTION").unwrap_or_else(|_| "users".to_string());
-            let collection = self
-                .client
-                .database(&database_name)
-                .collection::<User>(&collection_name);
-
-            let filter = doc! { "username": username };
-            match collection.find_one(filter).await? {
-                Some(user) => {
-                    // Verify bcrypt hash; fall back to plaintext for legacy accounts.
-                    let ok = if user.password.starts_with("$2") {
-                        bcrypt::verify(password, &user.password).unwrap_or(false)
-                    } else {
-                        constant_time_eq::constant_time_eq(password.as_bytes(), user.password.as_bytes())
-                    };
-                    Ok(if ok { Some(user) } else { None })
-                }
-                None => Ok(None),
-            }
+            self.repo.authenticate_user(username, password).await
         }
         #[cfg(test)]
         {
@@ -409,7 +388,7 @@ pub trait DatabaseInterface: Send + Sync {
         mailbox: &str,
         items: &str,
     ) -> Result<String>;
-    async fn store_email(&self, username: &str, mailbox: &str, message: &str) -> Result<()>;
+    async fn store_email(&self, username: &str, mailbox: &str, email: &Email) -> Result<()>;
     async fn get_mailbox_status(&self, username: &str, mailbox: &str) -> Result<Mailbox>;
     async fn noop(&self) -> Result<()>;
     async fn close_mailbox(&self) -> Result<()>;
