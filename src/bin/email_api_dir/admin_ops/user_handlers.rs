@@ -722,7 +722,7 @@ pub(crate) async fn api_admin_user_reset_password(
     };
 
     let now = now_iso();
-    user.password_hash = Some(hash);
+    user.password_hash = Some(hash.clone());
     user.updated_at = now.clone();
     // Consommer un éventuel jeton d'invitation en cours.
     user.invite_token = None;
@@ -751,6 +751,27 @@ pub(crate) async fn api_admin_user_reset_password(
         eprintln!("reset_password: replace_one error: {}", e);
         return HttpResponse::InternalServerError()
             .json(serde_json::json!({ "message": "Failed to update password" }));
+    }
+
+    // Propager le hash à la collection `users` (utilisée par
+    // `authenticate_user` pour le login classique + IMAP/SMTP). Sans cette
+    // synchro, l'admin définit un nouveau mot de passe côté `admin_users`
+    // mais l'utilisateur reste incapable de se connecter.
+    // Le match se fait sur `username = email` (convention Misfits Mail).
+    let users_coll = mongo
+        .database(&mongo_db_name())
+        .collection::<mongodb::bson::Document>("users");
+    if let Err(e) = users_coll
+        .update_one(
+            doc! { "username": &user.email },
+            doc! { "$set": { "password": &hash } },
+        )
+        .await
+    {
+        // Non-bloquant: on log mais on renvoie succès. Le hash reste
+        // désynchronisé si `users` ne contient pas encore ce username —
+        // c'est le cas si le compte a été créé UNIQUEMENT côté admin.
+        eprintln!("reset_password: users sync warning: {}", e);
     }
 
     // Révocation des sessions optionnelle.
