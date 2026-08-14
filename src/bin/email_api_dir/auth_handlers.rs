@@ -62,7 +62,67 @@ pub(crate) struct PatchLocaleRequest {
 
 // ─── Session builder (shared) ───────────────────────────────────────────────
 
+/// Cherche l'utilisateur dans `admin_users` par email; s'il est actif,
+/// persiste une session admin et renvoie le token à utiliser côté client.
+/// Si aucun compte admin correspondant n'existe (ou en cas d'erreur),
+/// retourne `None` — dans ce cas `make_session` génère un token éphémère
+/// non persisté (comportement pré-RBAC préservé).
+async fn issue_session_if_admin(
+    mongo: &mongodb::Client,
+    email: &str,
+) -> Option<String> {
+    let db_name = std::env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
+    let coll = mongo
+        .database(&db_name)
+        .collection::<AdminUserRecord>(super::admin_ops_handlers::ADMIN_USERS_COLL);
+    let email_lc = email.trim().to_lowercase();
+    let user_opt = match coll.find_one(doc! { "email": &email_lc }).await {
+        Ok(Some(u)) => Some(u),
+        Ok(None) => match coll.find_one(doc! { "email": email }).await {
+            Ok(Some(u)) => Some(u),
+            Ok(None) => None,
+            Err(e) => {
+                eprintln!("issue_session_if_admin: find_one (raw) failed: {}", e);
+                None
+            }
+        },
+        Err(e) => {
+            eprintln!("issue_session_if_admin: find_one failed: {}", e);
+            return None;
+        }
+    };
+    let user = match user_opt {
+        Some(u) => u,
+        None => return None,
+    };
+    if user.status != "active" {
+        return None;
+    }
+    let session = super::admin_auth::issue_admin_session(
+        mongo,
+        &db_name,
+        &user.id,
+        &user.email,
+        &user.role,
+        None,
+        None,
+    )
+    .await;
+    Some(session.token)
+}
+
 pub(crate) fn make_session(email: &str, display_name: &str) -> AuthResponse {
+    make_session_with_token(email, display_name, &Uuid::new_v4().to_string())
+}
+
+/// Variante utilisée par `auth_login` quand on veut réutiliser un token
+/// persisté dans `admin_sessions` — permet au frontend d'appeler ensuite
+/// les endpoints `/api/admin/*` avec ce même token.
+pub(crate) fn make_session_with_token(
+    email: &str,
+    display_name: &str,
+    access_token: &str,
+) -> AuthResponse {
     let now = Utc::now().timestamp_millis() as u64;
     AuthResponse {
         session: SessionResponse {
@@ -76,7 +136,7 @@ pub(crate) fn make_session(email: &str, display_name: &str) -> AuthResponse {
                 created_at: Utc::now().to_rfc3339(),
                 updated_at: Utc::now().to_rfc3339(),
             },
-            access_token: Uuid::new_v4().to_string(),
+            access_token: access_token.to_string(),
             refresh_token: Uuid::new_v4().to_string(),
             expires_at: now + 3_600_000,
             refresh_expires_at: now + 604_800_000,
@@ -137,14 +197,22 @@ pub(crate) async fn auth_login(
     match logic.authenticate_user(&req.email, &req.password).await {
         Ok(Some(user)) => {
             let display = if user.mailbox.is_empty() { req.email.clone() } else { user.mailbox.clone() };
-            HttpResponse::Ok().json(make_session(&req.email, &display))
+            let response = match issue_session_if_admin(mongo.as_ref(), &req.email).await {
+                Some(token) => make_session_with_token(&req.email, &display, &token),
+                None => make_session(&req.email, &display),
+            };
+            HttpResponse::Ok().json(response)
         }
         Ok(None) => {
             let env_user = env::var("SMTP_USERNAME").unwrap_or_default();
             let env_pass = env::var("SMTP_PASSWORD").unwrap_or_default();
             if req.email == env_user || req.email == format!("{}@misfits.ai", env_user) {
                 if req.password == env_pass {
-                    return HttpResponse::Ok().json(make_session(&req.email, &env_user));
+                    let response = match issue_session_if_admin(mongo.as_ref(), &req.email).await {
+                        Some(token) => make_session_with_token(&req.email, &env_user, &token),
+                        None => make_session(&req.email, &env_user),
+                    };
+                    return HttpResponse::Ok().json(response);
                 }
             }
             let ip = req_ip_str(&req_http);
@@ -161,7 +229,11 @@ pub(crate) async fn auth_login(
             let env_pass = env::var("SMTP_PASSWORD").unwrap_or_default();
             if req.email == env_user || req.email == format!("{}@misfits.ai", env_user) {
                 if req.password == env_pass {
-                    return HttpResponse::Ok().json(make_session(&req.email, &env_user));
+                    let response = match issue_session_if_admin(mongo.as_ref(), &req.email).await {
+                        Some(token) => make_session_with_token(&req.email, &env_user, &token),
+                        None => make_session(&req.email, &env_user),
+                    };
+                    return HttpResponse::Ok().json(response);
                 }
             }
             HttpResponse::Unauthorized().json(serde_json::json!({ "message": i18n::t(&locale, "error-login-invalid", &[]) }))
