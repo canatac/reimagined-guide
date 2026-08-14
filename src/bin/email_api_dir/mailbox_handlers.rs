@@ -1,3 +1,52 @@
+
+#[derive(Deserialize)]
+struct EmailListQuery {
+    #[serde(default = "default_folder")]
+    folder: String,
+    #[serde(default = "default_page")]
+    page: u32,
+    #[serde(rename = "pageSize", default = "default_page_size")]
+    page_size: u32,
+}
+
+fn default_folder() -> String {
+    "inbox".to_string()
+}
+fn default_page() -> u32 {
+    1
+}
+fn default_page_size() -> u32 {
+    50
+}
+
+/// Canonical FE folder id → mailbox names to try in Mongo (SMTP historically used INBOX).
+fn folder_to_mailboxes(folder: &str) -> Vec<String> {
+    let f = folder.trim().to_ascii_lowercase();
+    match f.as_str() {
+        "inbox" => vec!["inbox".into(), "INBOX".into()],
+        "sent" => vec!["sent".into(), "SENT".into(), "Sent".into()],
+        "drafts" => vec!["drafts".into(), "DRAFTS".into(), "Drafts".into()],
+        "archive" => vec!["archive".into(), "ARCHIVE".into(), "Archive".into()],
+        "trash" => vec!["trash".into(), "TRASH".into(), "Trash".into()],
+        "spam" => vec!["spam".into(), "SPAM".into(), "Spam".into(), "Junk".into()],
+        other => vec![other.to_string(), other.to_ascii_uppercase()],
+    }
+}
+
+fn canonical_folder(folder: &str) -> Option<String> {
+    let f = folder.trim().to_ascii_lowercase();
+    match f.as_str() {
+        "inbox" | "sent" | "drafts" | "archive" | "trash" | "spam" => Some(f),
+        _ => None,
+    }
+}
+
+/// Resolve mailbox local-part. Convention: user_id = `admin` (not admin@misfits.ai).
+fn resolve_user_id(req: &actix_web::HttpRequest) -> String {
+    if let Some(id) = req
+        .headers()
+        .get("x-user-id")
+
 // mailbox_handlers.rs — extracted from email_api_dir/main.rs Sprint 2
 // Handlers: api_emails, api_send, api_send_undo, api_send_schedule,
 //           api_send_status, api_email_action, api_drafts_*, send_queue_worker

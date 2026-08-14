@@ -2643,7 +2643,5 @@ pub(crate) async fn calendar_delete_event(
     }
 }
 
-#[actix_web::main]
-
 // ─── Admin misc (security_posture, deliverability, observability) ──────────
 
