@@ -1,0 +1,447 @@
+openapi: "3.1.0"
+info:
+  title: misfits.ai — Mailbox API
+  version: "1.0.0"
+  description: Email list, fetch, send, drafts, actions, and tags.
+
+servers:
+  - url: https://api.misfits.ai
+
+tags:
+  - name: mailbox
+  - name: send
+  - name: drafts
+
+paths:
+  /api/emails:
+    get:
+      operationId: listEmails
+      tags: [mailbox]
+      summary: List emails in a folder with pagination
+      parameters:
+        - name: folder
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [inbox, sent, drafts, archive, trash, spam]
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+        - name: q
+          in: query
+          description: Search query
+          schema:
+            type: string
+        - name: filter
+          in: query
+          schema:
+            type: string
+            enum: [all, unread, starred, attachments]
+      security:
+        - userHeaders: []
+      responses:
+        "200":
+          description: Paginated email list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/emails/{id}:
+    get:
+      operationId: getEmail
+      tags: [mailbox]
+      summary: Get a single email by ID
+      parameters:
+        - $ref: "#/components/parameters/EmailId"
+      security:
+        - userHeaders: []
+      responses:
+        "200":
+          description: Email detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailDetail"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/emails/{id}/action:
+    post:
+      operationId: emailAction
+      tags: [mailbox]
+      summary: Perform an action on an email (read, star, move, delete, etc.)
+      parameters:
+        - $ref: "#/components/parameters/EmailId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailActionRequest"
+      security:
+        - userHeaders: []
+      responses:
+        "200":
+          description: Action applied
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/send:
+    post:
+      operationId: sendEmail
+      tags: [send]
+      summary: Compose and send an email (DKIM-signed via studious-octo-rotary-phone)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ComposeSendRequest"
+      security:
+        - userHeaders: []
+      responses:
+        "200":
+          description: Send result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SendResult"
+        "400":
+          description: Missing recipients or invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SendError"
+        "500":
+          description: DKIM signing or SMTP delivery failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SendError"
+
+  /api/send/undo/{id}:
+    post:
+      operationId: undoSend
+      tags: [send]
+      summary: Abort a scheduled send within the undo window
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - userHeaders: []
+      responses:
+        "200":
+          description: Send undone
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/drafts:
+    get:
+      operationId: listDrafts
+      tags: [drafts]
+      summary: List drafts for current user
+      security:
+        - userHeaders: []
+      responses:
+        "200":
+          description: Draft list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  drafts:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/DraftDto"
+    put:
+      operationId: upsertDraft
+      tags: [drafts]
+      summary: Create or update a draft
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DraftUpsertRequest"
+      security:
+        - userHeaders: []
+      responses:
+        "200":
+          description: Draft saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DraftDto"
+
+  /api/drafts/{id}:
+    delete:
+      operationId: deleteDraft
+      tags: [drafts]
+      summary: Delete a draft by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - userHeaders: []
+      responses:
+        "200":
+          description: Draft deleted
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+components:
+  securitySchemes:
+    userHeaders:
+      type: apiKey
+      in: header
+      name: x-user-id
+      description: User identity header set by the frontend session
+
+  parameters:
+    EmailId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+
+  responses:
+    Unauthorized:
+      description: Not authenticated
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/MessageError"
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/MessageError"
+    BadRequest:
+      description: Validation error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/MessageError"
+
+  schemas:
+    EmailAddress:
+      type: object
+      required: [address]
+      properties:
+        name:
+          type: string
+        address:
+          type: string
+          format: email
+
+    EmailDto:
+      type: object
+      properties:
+        id:
+          type: string
+        threadId:
+          type: string
+        folder:
+          type: string
+        from:
+          $ref: "#/components/schemas/EmailAddress"
+        to:
+          type: array
+          items:
+            $ref: "#/components/schemas/EmailAddress"
+        subject:
+          type: string
+        preview:
+          type: string
+        date:
+          type: string
+          format: date-time
+        isRead:
+          type: boolean
+        isStarred:
+          type: boolean
+        isImportant:
+          type: boolean
+        hasAttachments:
+          type: boolean
+        labels:
+          type: array
+          items:
+            type: string
+
+    EmailDetail:
+      allOf:
+        - $ref: "#/components/schemas/EmailDto"
+        - type: object
+          properties:
+            body:
+              type: string
+            bodyType:
+              type: string
+              enum: [html, text]
+            cc:
+              type: array
+              items:
+                $ref: "#/components/schemas/EmailAddress"
+            attachments:
+              type: array
+              items:
+                type: object
+
+    EmailListResponse:
+      type: object
+      properties:
+        emails:
+          type: array
+          items:
+            $ref: "#/components/schemas/EmailDto"
+        total:
+          type: integer
+        page:
+          type: integer
+        pageSize:
+          type: integer
+        hasMore:
+          type: boolean
+
+    EmailActionRequest:
+      type: object
+      required: [action]
+      properties:
+        action:
+          type: string
+          enum: [read, unread, star, unstar, important, unimportant, move, delete, archive, restore]
+        folder:
+          type: string
+          description: Target folder for move action
+
+    ComposeSendRequest:
+      type: object
+      required: [to, subject, body]
+      properties:
+        from:
+          type: string
+          format: email
+        to:
+          type: array
+          items:
+            type: string
+            format: email
+        cc:
+          type: array
+          items:
+            type: string
+        bcc:
+          type: array
+          items:
+            type: string
+        subject:
+          type: string
+        body:
+          type: string
+        bodyType:
+          type: string
+          enum: [html, text]
+          default: html
+        inReplyTo:
+          type: string
+        scheduledAt:
+          type: string
+          format: date-time
+          description: If set, send is delayed until this time
+
+    SendResult:
+      type: object
+      properties:
+        sent:
+          type: boolean
+        messageId:
+          type: string
+        sendId:
+          type: string
+          description: ID for undo window tracking
+
+    SendError:
+      type: object
+      properties:
+        sent:
+          type: boolean
+          example: false
+        message:
+          type: string
+
+    DraftDto:
+      type: object
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+        to:
+          type: array
+          items:
+            type: string
+        cc:
+          type: array
+          items:
+            type: string
+        subject:
+          type: string
+        body:
+          type: string
+        updatedAt:
+          type: string
+          format: date-time
+
+    DraftUpsertRequest:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Omit to create a new draft
+        to:
+          type: array
+          items:
+            type: string
+        cc:
+          type: array
+          items:
+            type: string
+        subject:
+          type: string
+        body:
+          type: string
+
+    MessageError:
+      type: object
+      properties:
+        message:
+          type: string

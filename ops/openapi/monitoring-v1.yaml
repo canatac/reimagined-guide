@@ -1,0 +1,252 @@
+openapi: "3.1.0"
+info:
+  title: misfits.ai — Monitoring API
+  version: "1.0.0"
+  description: Email delivery monitoring — summary, events, bounces, providers, alerts.
+
+servers:
+  - url: https://api.misfits.ai
+
+tags:
+  - name: monitoring
+
+paths:
+  /api/monitoring/summary:
+    get:
+      operationId: monitoringSummary
+      tags: [monitoring]
+      summary: Delivery summary stats for a time window
+      parameters:
+        - name: window
+          in: query
+          schema:
+            type: string
+            default: "1h"
+            description: e.g. 1h, 24h, 7d
+      responses:
+        "200":
+          description: Delivery metrics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MonitoringSummary"
+
+  /api/monitoring/events:
+    get:
+      operationId: monitoringEvents
+      tags: [monitoring]
+      summary: List recent mail events (paginated)
+      parameters:
+        - name: window
+          in: query
+          schema:
+            type: string
+            default: "1h"
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: Event list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/MailEvent"
+                  total:
+                    type: integer
+
+  /api/monitoring/bounces:
+    get:
+      operationId: monitoringBounces
+      tags: [monitoring]
+      summary: Recent bounce events
+      parameters:
+        - name: window
+          in: query
+          schema:
+            type: string
+            default: "24h"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: Bounce list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  bounces:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/MailEvent"
+
+  /api/monitoring/providers/top:
+    get:
+      operationId: monitoringProvidersTop
+      tags: [monitoring]
+      summary: Top recipient providers by volume
+      parameters:
+        - name: window
+          in: query
+          schema:
+            type: string
+            default: "24h"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+      responses:
+        "200":
+          description: Provider stats
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  providers:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ProviderStat"
+
+  /api/monitoring/alerts/active:
+    get:
+      operationId: monitoringAlertsActive
+      tags: [monitoring]
+      summary: Active monitoring alerts
+      responses:
+        "200":
+          description: Alert list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  alerts:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/MonitoringAlert"
+
+  /api/monitoring/live:
+    get:
+      operationId: monitoringLive
+      tags: [monitoring]
+      summary: Live delivery stats (last N minutes rolling)
+      parameters:
+        - name: minutes
+          in: query
+          schema:
+            type: integer
+            default: 60
+      responses:
+        "200":
+          description: Rolling stats
+
+components:
+  schemas:
+    MonitoringSummary:
+      type: object
+      properties:
+        window:
+          type: string
+        generatedAt:
+          type: string
+          format: date-time
+        total:
+          type: integer
+        delivered:
+          type: integer
+        bounced:
+          type: integer
+        deliveryRate:
+          type: number
+          format: float
+        bounceRate:
+          type: number
+          format: float
+        avgTotalMs:
+          type: number
+        p95TotalMs:
+          type: number
+        avgRiskScore:
+          type: number
+        byStatus:
+          type: object
+          additionalProperties:
+            type: integer
+
+    MailEvent:
+      type: object
+      properties:
+        id:
+          type: string
+        ts:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [delivered, bounced, deferred, failed, queued]
+        from:
+          type: string
+        to:
+          type: string
+        subject:
+          type: string
+        provider:
+          type: string
+        total_ms:
+          type: integer
+        risk_score:
+          type: number
+        error:
+          type: string
+
+    ProviderStat:
+      type: object
+      properties:
+        provider:
+          type: string
+        count:
+          type: integer
+        delivered:
+          type: integer
+        bounced:
+          type: integer
+        deliveryRate:
+          type: number
+
+    MonitoringAlert:
+      type: object
+      properties:
+        id:
+          type: string
+        level:
+          type: string
+          enum: [info, warning, critical]
+        message:
+          type: string
+        triggeredAt:
+          type: string
+          format: date-time
+        resolved:
+          type: boolean

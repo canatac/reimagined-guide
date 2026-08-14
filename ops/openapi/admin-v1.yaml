@@ -1,0 +1,434 @@
+openapi: "3.1.0"
+info:
+  title: misfits.ai — Admin API
+  version: "1.0.0"
+  description: |
+    Admin CRUD for users, change requests, deliverability, and AI activity.
+    All endpoints require an admin session token when ADMIN_RBAC_ENFORCE=1.
+
+servers:
+  - url: https://api.misfits.ai
+
+tags:
+  - name: admin-users
+  - name: admin-change-requests
+  - name: admin-deliverability
+
+security:
+  - adminSession: []
+
+paths:
+  /api/admin/whoami:
+    get:
+      operationId: adminWhoami
+      tags: [admin-users]
+      summary: Return the authenticated admin user and RBAC enforcement status
+      responses:
+        "200":
+          description: Current admin identity
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user_id:
+                    type: string
+                  email:
+                    type: string
+                  role:
+                    type: string
+                  enforced:
+                    type: boolean
+                    description: true when ADMIN_RBAC_ENFORCE=1
+
+  /api/admin/users:
+    get:
+      operationId: listAdminUsers
+      tags: [admin-users]
+      summary: List all admin panel users (up to 500, sorted by last activity)
+      responses:
+        "200":
+          description: User list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  generatedAt:
+                    type: string
+                    format: date-time
+                  users:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AdminUserRecord"
+    post:
+      operationId: createAdminUser
+      tags: [admin-users]
+      summary: Create a new admin panel user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAdminUserInput"
+      responses:
+        "200":
+          description: User created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserRecord"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          description: Email already exists
+
+  /api/admin/users/{id}:
+    get:
+      operationId: getAdminUser
+      tags: [admin-users]
+      parameters:
+        - $ref: "#/components/parameters/AdminUserId"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: "#/components/schemas/AdminUserRecord"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: patchAdminUser
+      tags: [admin-users]
+      summary: Update role or status of a user
+      parameters:
+        - $ref: "#/components/parameters/AdminUserId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                role:
+                  type: string
+                  enum: [user, admin, support]
+                status:
+                  type: string
+                  enum: [active, inactive, suspended]
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserRecord"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: deleteAdminUser
+      tags: [admin-users]
+      parameters:
+        - $ref: "#/components/parameters/AdminUserId"
+      responses:
+        "200":
+          description: User deleted
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/admin/users/{id}/invite:
+    post:
+      operationId: inviteAdminUser
+      tags: [admin-users]
+      summary: Send invitation email to a user
+      parameters:
+        - $ref: "#/components/parameters/AdminUserId"
+      responses:
+        "200":
+          description: Invitation sent
+
+  /api/admin/users/{id}/reset-password:
+    post:
+      operationId: resetAdminUserPassword
+      tags: [admin-users]
+      summary: Trigger password reset for a user
+      parameters:
+        - $ref: "#/components/parameters/AdminUserId"
+      responses:
+        "200":
+          description: Reset triggered
+
+  /api/admin/change-requests:
+    get:
+      operationId: listChangeRequests
+      tags: [admin-change-requests]
+      summary: List all change requests
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ChangeRequest"
+    post:
+      operationId: createChangeRequest
+      tags: [admin-change-requests]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangeRequestCreateInput"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChangeRequest"
+
+  /api/admin/change-requests/{id}:
+    get:
+      operationId: getChangeRequest
+      tags: [admin-change-requests]
+      parameters:
+        - $ref: "#/components/parameters/ChangeRequestId"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChangeRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: patchChangeRequest
+      tags: [admin-change-requests]
+      parameters:
+        - $ref: "#/components/parameters/ChangeRequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangeRequestPatchInput"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChangeRequest"
+    delete:
+      operationId: deleteChangeRequest
+      tags: [admin-change-requests]
+      parameters:
+        - $ref: "#/components/parameters/ChangeRequestId"
+      responses:
+        "200":
+          description: Deleted
+
+  /api/admin/deliverability/procedure:
+    get:
+      operationId: getDeliverabilityProcedure
+      tags: [admin-deliverability]
+      summary: Get deliverability diagnostic procedure status
+      parameters:
+        - name: window
+          in: query
+          schema:
+            type: string
+            default: "1h"
+            description: Time window (e.g. 1h, 24h, 7d)
+      responses:
+        "200":
+          description: Procedure status
+    post:
+      operationId: updateDeliverabilityProcedure
+      tags: [admin-deliverability]
+      summary: Trigger or update a deliverability procedure
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Procedure updated
+
+  /api/admin/audit-log:
+    get:
+      operationId: getAuditLog
+      tags: [admin-users]
+      summary: Fetch admin audit log entries
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: Audit log entries
+
+components:
+  securitySchemes:
+    adminSession:
+      type: http
+      scheme: bearer
+      description: Admin session token (from /api/auth/login response). Only enforced when ADMIN_RBAC_ENFORCE=1.
+
+  parameters:
+    AdminUserId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    ChangeRequestId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+
+  responses:
+    BadRequest:
+      description: Validation error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/MessageError"
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/MessageError"
+
+  schemas:
+    AdminUserRecord:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+        role:
+          type: string
+          enum: [user, admin, support]
+        status:
+          type: string
+          enum: [active, inactive, suspended]
+        displayName:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        lastActivityAt:
+          type: string
+          format: date-time
+
+    CreateAdminUserInput:
+      type: object
+      required: [email, role]
+      properties:
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          enum: [user, admin, support]
+        displayName:
+          type: string
+
+    ChangeRequest:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        problem:
+          type: string
+        desiredOutcome:
+          type: string
+        status:
+          type: string
+          enum: [draft, in_progress, review, released, rejected]
+        priority:
+          type: string
+          enum: [P0, P1, P2]
+        scope:
+          type: string
+          enum: [ux, backend, fullstack, security]
+        actor:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        changelogEntry:
+          type: object
+          properties:
+            summary:
+              type: string
+            releasedAt:
+              type: string
+              format: date-time
+
+    ChangeRequestCreateInput:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+        problem:
+          type: string
+        desiredOutcome:
+          type: string
+        priority:
+          type: string
+          enum: [P0, P1, P2]
+        scope:
+          type: string
+          enum: [ux, backend, fullstack, security]
+
+    ChangeRequestPatchInput:
+      type: object
+      properties:
+        action:
+          type: string
+        note:
+          type: string
+        actor:
+          type: string
+        title:
+          type: string
+        problem:
+          type: string
+        desiredOutcome:
+          type: string
+        status:
+          type: string
+          enum: [draft, in_progress, review, released, rejected]
+
+    MessageError:
+      type: object
+      properties:
+        message:
+          type: string
+        code:
+          type: string

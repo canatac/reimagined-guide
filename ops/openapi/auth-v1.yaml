@@ -1,0 +1,336 @@
+openapi: "3.1.0"
+info:
+  title: misfits.ai — Auth API
+  version: "1.0.0"
+  description: Authentication endpoints (login, register, logout, refresh, 2FA, password reset).
+
+servers:
+  - url: https://api.misfits.ai
+    description: Production
+
+tags:
+  - name: auth
+    description: Authentication flows
+
+paths:
+  /api/auth/login:
+    post:
+      operationId: authLogin
+      tags: [auth]
+      summary: Login with email + password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/auth/register:
+    post:
+      operationId: authRegister
+      tags: [auth]
+      summary: Register a new misfits.ai account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "200":
+          description: Registration successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Validation error (conditions not accepted, password too short, etc.)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CodeError"
+        "409":
+          description: Email already registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CodeError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/auth/logout:
+    post:
+      operationId: authLogout
+      tags: [auth]
+      summary: Invalidate current session
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+
+  /api/auth/refresh:
+    post:
+      operationId: authRefresh
+      tags: [auth]
+      summary: Refresh access token using refresh token
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: New session tokens
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/auth/2fa/verify:
+    post:
+      operationId: auth2faVerify
+      tags: [auth]
+      summary: Verify a 2FA code (TOTP or email OTP)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TwoFactorVerifyRequest"
+      responses:
+        "200":
+          description: 2FA verified, session returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: TOTP not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerifyError"
+        "401":
+          description: Invalid or expired code
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerifyError"
+
+  /api/auth/password-reset/request:
+    post:
+      operationId: passwordResetRequest
+      tags: [auth]
+      summary: Request a password reset email
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+      responses:
+        "200":
+          description: Reset email sent (always 200 to avoid enumeration)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+
+  /api/auth/password-reset/confirm:
+    post:
+      operationId: passwordResetConfirm
+      tags: [auth]
+      summary: Confirm password reset with token + new password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, password]
+              properties:
+                token:
+                  type: string
+                password:
+                  type: string
+                  minLength: 8
+      responses:
+        "200":
+          description: Password updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+        "400":
+          description: Invalid token or weak password
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CodeError"
+
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: mfa_session
+
+  responses:
+    Unauthorized:
+      description: Not authenticated
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/MessageError"
+    InternalError:
+      description: Server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CodeError"
+
+  schemas:
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+
+    RegisterRequest:
+      type: object
+      required: [email, password, first_name, last_name, condition_accepted]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+        first_name:
+          type: string
+        last_name:
+          type: string
+        alias:
+          type: string
+          nullable: true
+        condition_accepted:
+          type: boolean
+
+    TwoFactorVerifyRequest:
+      type: object
+      required: [email, code, method]
+      properties:
+        email:
+          type: string
+          format: email
+        code:
+          type: string
+        method:
+          type: string
+          enum: [totp, email]
+
+    UserResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+        display_name:
+          type: string
+        role:
+          type: string
+        two_factor_enabled:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    SessionResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        user:
+          $ref: "#/components/schemas/UserResponse"
+        access_token:
+          type: string
+        refresh_token:
+          type: string
+        expires_at:
+          type: integer
+          description: Unix ms
+        refresh_expires_at:
+          type: integer
+          description: Unix ms
+        issued_at:
+          type: integer
+          description: Unix ms
+
+    AuthResponse:
+      type: object
+      properties:
+        session:
+          $ref: "#/components/schemas/SessionResponse"
+
+    MessageError:
+      type: object
+      properties:
+        message:
+          type: string
+
+    CodeError:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+
+    VerifyError:
+      type: object
+      properties:
+        verified:
+          type: boolean
+        error:
+          type: string
