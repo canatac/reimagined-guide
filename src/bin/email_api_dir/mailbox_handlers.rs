@@ -46,11 +46,24 @@ fn resolve_user_id(req: &actix_web::HttpRequest) -> String {
     if let Some(id) = req
         .headers()
         .get("x-user-id")
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        return id.to_string();
+    }
+    if let Some(email) = req
+        .headers()
+        .get("x-user-email")
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        return email.split('@').next().unwrap_or(email).to_string();
+    }
+    env::var("SMTP_USERNAME").unwrap_or_else(|_| "admin".to_string())
+}
 
-// mailbox_handlers.rs — extracted from email_api_dir/main.rs Sprint 2
-// Handlers: api_emails, api_send, api_send_undo, api_send_schedule,
-//           api_send_status, api_email_action, api_drafts_*, send_queue_worker
-// Types: EmailAddressDto, EmailDto, ComposerRecipient, DraftDto
 
 use super::*;
 
