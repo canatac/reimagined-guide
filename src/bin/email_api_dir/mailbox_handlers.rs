@@ -66,6 +66,7 @@ pub(crate) fn resolve_user_id(req: &actix_web::HttpRequest) -> String {
 
 
 use super::*;
+use base64::Engine as _;
 
 #[derive(Serialize, Deserialize)]
 pub(crate) struct EmailAddressDto {
@@ -637,6 +638,18 @@ pub(crate) struct ComposerRecipient {
     name: Option<String>,
 }
 
+#[derive(Deserialize, Clone)]
+pub(crate) struct ComposeAttachmentInput {
+    #[serde(default)]
+    filename: String,
+    #[serde(default, rename = "contentType", alias = "content_type")]
+    content_type: String,
+    #[serde(default)]
+    size: Option<u64>,
+    #[serde(default, rename = "dataBase64", alias = "data_base64")]
+    data_base64: String,
+}
+
 #[derive(Deserialize)]
 pub(crate) struct ComposeSendRequest {
     #[serde(default)]
@@ -649,6 +662,8 @@ pub(crate) struct ComposeSendRequest {
     subject: String,
     #[serde(default)]
     body: String,
+    #[serde(default)]
+    attachments: Vec<ComposeAttachmentInput>,
     /// Some FE clients send flat strings instead of recipient objects.
     #[serde(default)]
     from: Option<String>,
@@ -702,6 +717,116 @@ pub(crate) fn canonical_message_id(raw: &str) -> Option<String> {
     } else {
         Some(format!("<{}>", normalized))
     }
+}
+
+fn sanitize_filename(name: &str, fallback_index: usize) -> String {
+    let cleaned = name
+        .trim()
+        .chars()
+        .map(|c| match c {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            _ => c,
+        })
+        .collect::<String>();
+    let cleaned = cleaned.trim_matches('.').trim();
+    if cleaned.is_empty() {
+        format!("attachment-{}", fallback_index + 1)
+    } else {
+        cleaned.to_string()
+    }
+}
+
+fn chunk_base64_lines(encoded: &str) -> String {
+    if encoded.is_empty() {
+        return String::new();
+    }
+    let mut out = String::with_capacity(encoded.len() + (encoded.len() / 76 + 2) * 2);
+    let mut i = 0;
+    while i < encoded.len() {
+        let end = (i + 76).min(encoded.len());
+        out.push_str(&encoded[i..end]);
+        out.push_str("\r\n");
+        i = end;
+    }
+    out
+}
+
+fn build_body_with_attachments(
+    body_html: &str,
+    attachments: &[ComposeAttachmentInput],
+) -> Result<(String, String), String> {
+    if attachments.is_empty() {
+        return Ok((body_html.to_string(), "text/html; charset=utf-8".to_string()));
+    }
+
+    let mut plain = strip_tags(body_html);
+    if plain.trim().is_empty() {
+        plain = body_html.to_string();
+    }
+    let plain = plain.trim();
+
+    let mixed_boundary = format!("misfits-mixed-{}", Uuid::new_v4().simple());
+    let alt_boundary = format!("misfits-alt-{}", Uuid::new_v4().simple());
+
+    let mut body = String::new();
+    body.push_str(&format!("--{}\r\n", mixed_boundary));
+    body.push_str(&format!(
+        "Content-Type: multipart/alternative; boundary=\"{}\"\r\n\r\n",
+        alt_boundary
+    ));
+
+    body.push_str(&format!("--{}\r\n", alt_boundary));
+    body.push_str("Content-Type: text/plain; charset=utf-8\r\n");
+    body.push_str("Content-Transfer-Encoding: 8bit\r\n\r\n");
+    body.push_str(&plain.replace("\r\n", "\n").replace('\r', "\n").replace('\n', "\r\n"));
+    body.push_str("\r\n");
+
+    body.push_str(&format!("--{}\r\n", alt_boundary));
+    body.push_str("Content-Type: text/html; charset=utf-8\r\n");
+    body.push_str("Content-Transfer-Encoding: 8bit\r\n\r\n");
+    body.push_str(&body_html.replace("\r\n", "\n").replace('\r', "\n").replace('\n', "\r\n"));
+    body.push_str("\r\n");
+    body.push_str(&format!("--{}--\r\n", alt_boundary));
+
+    for (idx, att) in attachments.iter().enumerate() {
+        if att.data_base64.trim().is_empty() {
+            continue;
+        }
+        let raw = att
+            .data_base64
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .collect::<String>();
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(raw)
+            .map_err(|e| format!("invalid attachment base64 for '{}': {}", att.filename, e))?;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+        let safe_name = sanitize_filename(&att.filename, idx);
+        let content_type = if att.content_type.trim().is_empty() {
+            "application/octet-stream".to_string()
+        } else {
+            att.content_type.trim().to_string()
+        };
+
+        body.push_str(&format!("--{}\r\n", mixed_boundary));
+        body.push_str(&format!(
+            "Content-Type: {}; name=\"{}\"\r\n",
+            content_type, safe_name
+        ));
+        body.push_str("Content-Transfer-Encoding: base64\r\n");
+        body.push_str(&format!(
+            "Content-Disposition: attachment; filename=\"{}\"\r\n\r\n",
+            safe_name
+        ));
+        body.push_str(&chunk_base64_lines(&encoded));
+    }
+
+    body.push_str(&format!("--{}--\r\n", mixed_boundary));
+
+    Ok((
+        body,
+        format!("multipart/mixed; boundary=\"{}\"", mixed_boundary),
+    ))
 }
 
 pub(crate) fn is_private_or_local_ip(ip: &str) -> bool {
@@ -762,6 +887,21 @@ pub(crate) async fn api_send(
     let bcc = join_recipients(&body.bcc);
     let subject = body.subject.clone();
     let mail_body = body.body.clone();
+    let attachments = body
+        .attachments
+        .iter()
+        .filter(|a| !a.filename.trim().is_empty() && !a.data_base64.trim().is_empty())
+        .cloned()
+        .collect::<Vec<_>>();
+    let (smtp_body, content_type_header) = match build_body_with_attachments(&mail_body, &attachments) {
+        Ok(v) => v,
+        Err(e) => {
+            return HttpResponse::BadRequest().json(serde_json::json!({
+                "sent": false,
+                "message": e,
+            }))
+        }
+    };
     let in_reply_to = body
         .in_reply_to
         .as_deref()
@@ -892,7 +1032,7 @@ pub(crate) async fn api_send(
         ("MIME-Version".to_string(), "1.0".to_string()),
         (
             "Content-Type".to_string(),
-            "text/html; charset=utf-8".to_string(),
+            content_type_header.clone(),
         ),
     ];
     if !cc.is_empty() {
@@ -917,7 +1057,7 @@ pub(crate) async fn api_send(
         from: from.clone(),
         to: to.clone(),
         subject: subject.clone(),
-        body: mail_body.clone(),
+        body: smtp_body.clone(),
         headers,
         flags: vec![],
         sequence_number: 0,
@@ -952,7 +1092,8 @@ pub(crate) async fn api_send(
             "cc": &cc,
             "bcc": &bcc,
             "subject": &subject,
-            "body": &mail_body,
+            "body": &smtp_body,
+            "content_type": &content_type_header,
             "dkim_signature": email.dkim_signature.as_deref().unwrap_or(""),
             "message_id": &message_id,
             "in_reply_to": in_reply_to.as_deref().unwrap_or(""),
@@ -1163,6 +1304,20 @@ pub(crate) async fn api_send_schedule(
         .iter()
         .filter_map(|r| canonical_message_id(r))
         .collect::<Vec<_>>();
+    let attachments = body
+        .attachments
+        .iter()
+        .filter(|a| !a.filename.trim().is_empty() && !a.data_base64.trim().is_empty())
+        .cloned()
+        .collect::<Vec<_>>();
+    let (smtp_body, content_type_header) = match build_body_with_attachments(&body.body, &attachments) {
+        Ok(v) => v,
+        Err(e) => {
+            return HttpResponse::BadRequest().json(serde_json::json!({
+                "error": e,
+            }))
+        }
+    };
 
     let id = Uuid::new_v4().to_string();
     let db = mongo_db_name();
@@ -1179,7 +1334,8 @@ pub(crate) async fn api_send_schedule(
             "cc": &cc,
             "bcc": &bcc,
             "subject": &body.subject,
-            "body": &body.body,
+            "body": &smtp_body,
+            "content_type": &content_type_header,
             "dkim_signature": "",
             "message_id": format!("<{}@{}>", &id, domain_from_env()),
             "in_reply_to": in_reply_to.as_deref().unwrap_or(""),
@@ -1239,6 +1395,10 @@ pub(crate) async fn send_queue_worker(mongo: Arc<mongodb::Client>) {
             let to = entry.get_str("to").unwrap_or("").to_string();
             let subject = entry.get_str("subject").unwrap_or("").to_string();
             let body_text = entry.get_str("body").unwrap_or("").to_string();
+            let content_type = entry
+                .get_str("content_type")
+                .unwrap_or("text/html; charset=utf-8")
+                .to_string();
             let cc = entry.get_str("cc").unwrap_or("").to_string();
             let bcc = entry.get_str("bcc").unwrap_or("").to_string();
             let dkim_sig = entry.get_str("dkim_signature").unwrap_or("").to_string();
@@ -1292,7 +1452,7 @@ pub(crate) async fn send_queue_worker(mongo: Arc<mongodb::Client>) {
                 ("MIME-Version".to_string(), "1.0".to_string()),
                 (
                     "Content-Type".to_string(),
-                    "text/html; charset=utf-8".to_string(),
+                    content_type,
                 ),
             ];
             if !cc.is_empty() {

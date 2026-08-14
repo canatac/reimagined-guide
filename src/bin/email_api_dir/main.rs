@@ -143,6 +143,8 @@ struct ScheduleSendBody {
     #[serde(default)]
     body: String,
     #[serde(default)]
+    attachments: Vec<ComposeAttachmentInput>,
+    #[serde(default)]
     from: Option<String>,
     #[serde(default, rename = "inReplyTo", alias = "in_reply_to")]
     in_reply_to: Option<String>,
