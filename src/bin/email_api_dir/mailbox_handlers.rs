@@ -168,6 +168,49 @@ fn walk_mime_parts(part: &mailparse::ParsedMail<'_>, html: &mut Option<String>, 
     }
 }
 
+fn decode_parts_from_parsed(parsed: &mailparse::ParsedMail<'_>) -> Option<(String, String, String)> {
+    let mut html = None;
+    let mut text = None;
+    walk_mime_parts(parsed, &mut html, &mut text);
+
+    if let Some(html_body) = html {
+        let preview = compact_preview(&strip_tags(&html_body)).chars().take(160).collect();
+        return Some((html_body, "html".to_string(), preview));
+    }
+    if let Some(text_body) = text {
+        let preview = compact_preview(&text_body).chars().take(160).collect();
+        return Some((text_body, "text".to_string(), preview));
+    }
+
+    None
+}
+
+fn looks_like_raw_multipart_dump(body: &str) -> bool {
+    let b = body.trim_start();
+    b.starts_with("--") && b.contains("Content-Type:")
+}
+
+fn decode_from_synthetic_boundary(body: &str) -> Option<(String, String, String)> {
+    let first_line = body.lines().next()?.trim();
+    if !first_line.starts_with("--") {
+        return None;
+    }
+    let boundary = first_line
+        .trim_start_matches("--")
+        .trim_end_matches("--")
+        .trim();
+    if boundary.is_empty() {
+        return None;
+    }
+
+    let synthetic = format!(
+        "Content-Type: multipart/alternative; boundary=\"{}\"\r\n\r\n{}",
+        boundary, body
+    );
+    let parsed = mailparse::parse_mail(synthetic.as_bytes()).ok()?;
+    decode_parts_from_parsed(&parsed)
+}
+
 fn decoded_mail_body_for_ui(email: &Email) -> (String, String, String) {
     let raw_mime = if email.headers.is_empty() {
         email.body.clone()
@@ -182,20 +225,17 @@ fn decoded_mail_body_for_ui(email: &Email) -> (String, String, String) {
     };
 
     if let Ok(parsed) = mailparse::parse_mail(raw_mime.as_bytes()) {
-        let mut html = None;
-        let mut text = None;
-        walk_mime_parts(&parsed, &mut html, &mut text);
-
-        if let Some(html_body) = html {
-            let preview = compact_preview(&strip_tags(&html_body)).chars().take(160).collect();
-            return (html_body, "html".to_string(), preview);
-        }
-        if let Some(text_body) = text {
-            let preview = compact_preview(&text_body).chars().take(160).collect();
-            return (text_body, "text".to_string(), preview);
+        if let Some(decoded) = decode_parts_from_parsed(&parsed) {
+            return decoded;
         }
 
         if let Ok(body) = parsed.get_body() {
+            if looks_like_raw_multipart_dump(&body) {
+                if let Some(decoded) = decode_from_synthetic_boundary(&body) {
+                    return decoded;
+                }
+            }
+
             let looks_html = body.to_ascii_lowercase().contains("<html")
                 || body.contains("</")
                 || body.contains("<p");
@@ -206,6 +246,10 @@ fn decoded_mail_body_for_ui(email: &Email) -> (String, String, String) {
             let preview = compact_preview(&body).chars().take(160).collect();
             return (body, "text".to_string(), preview);
         }
+    }
+
+    if let Some(decoded) = decode_from_synthetic_boundary(&email.body) {
+        return decoded;
     }
 
     // Fallback (legacy behavior) when MIME parse fails
