@@ -84,6 +84,12 @@ services:
       - HERMES_API_KEY=${HERMES_API_KEY}
       - HERMES_BASE_URL=${HERMES_BASE_URL:-http://172.16.12.2:8642}
       - HERMES_MODEL=${HERMES_MODEL:-hermes-agent}
+      # RBAC admin — activé via .env.deploy (source: op://hermes/scw-hermes-smtp/texte).
+      # Défaut vide → guard renvoie AuthUser::system(). "1"/"true" → RBAC réel.
+      - ADMIN_RBAC_ENFORCE=${ADMIN_RBAC_ENFORCE:-}
+      - ADMIN_INVITE_TTL_HOURS=${ADMIN_INVITE_TTL_HOURS:-}
+      - ADMIN_INVITE_BASE_URL=${ADMIN_INVITE_BASE_URL:-}
+      - ADMIN_INVITE_FROM=${ADMIN_INVITE_FROM:-}
     command: ["email_api"]
     # Image HEALTHCHECK probes :8025 (SMTP). Override for API binary.
     # wget --spider treats some 2xx oddly; use full GET + HTTP code check.
