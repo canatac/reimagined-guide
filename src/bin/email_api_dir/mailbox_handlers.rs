@@ -5,14 +5,15 @@
 
 use super::*;
 
-struct EmailAddressDto {
+#[derive(Serialize, Deserialize)]
+pub(crate) struct EmailAddressDto {
     name: String,
     address: String,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct EmailDto {
+pub(crate) struct EmailDto {
     id: String,
     thread_id: String,
     folder: String,
@@ -34,7 +35,7 @@ struct EmailDto {
     message_id: String,
 }
 
-fn parse_address(raw: &str) -> EmailAddressDto {
+pub(crate) fn parse_address(raw: &str) -> EmailAddressDto {
     let raw = raw.trim();
     // "Name <addr@x>" or bare addr. Guard against malformed inputs where
     // '>' appears before '<' (e.g. `">" <admin@misfits.ai`) — naive slicing
@@ -67,7 +68,7 @@ fn parse_address(raw: &str) -> EmailAddressDto {
     }
 }
 
-fn strip_tags(html: &str) -> String {
+pub(crate) fn strip_tags(html: &str) -> String {
     let mut out = String::with_capacity(html.len());
     let mut in_tag = false;
     for c in html.chars() {
@@ -81,7 +82,7 @@ fn strip_tags(html: &str) -> String {
     out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn email_to_dto(email: &Email, folder: &str, include_body: bool) -> EmailDto {
+pub(crate) fn email_to_dto(email: &Email, folder: &str, include_body: bool) -> EmailDto {
     let flags_l: Vec<String> = email.flags.iter().map(|f| f.to_ascii_lowercase()).collect();
     let is_read = flags_l.iter().any(|f| f == "seen" || f == "\\seen");
     let is_starred = flags_l
@@ -180,15 +181,15 @@ fn email_to_dto(email: &Email, folder: &str, include_body: bool) -> EmailDto {
     }
 }
 
-fn email_to_list_dto(email: &Email, folder: &str) -> EmailDto {
+pub(crate) fn email_to_list_dto(email: &Email, folder: &str) -> EmailDto {
     email_to_dto(email, folder, false)
 }
 
-fn email_to_detail_dto(email: &Email, folder: &str) -> EmailDto {
+pub(crate) fn email_to_detail_dto(email: &Email, folder: &str) -> EmailDto {
     email_to_dto(email, folder, true)
 }
 
-async fn api_emails(
+pub(crate) async fn api_emails(
     query: web::Query<EmailListQuery>,
     req: actix_web::HttpRequest,
     logic: web::Data<Arc<Logic>>,
@@ -255,14 +256,14 @@ async fn api_emails(
     }))
 }
 
-async fn api_tags() -> impl Responder {
+pub(crate) async fn api_tags() -> impl Responder {
     HttpResponse::Ok().json(serde_json::json!({"tags": []}))
 }
 
 // --- Send + get-by-id (Phase A3/A4, issues #168/#169) -------------------------
 
 #[derive(Deserialize)]
-struct ComposerRecipient {
+pub(crate) struct ComposerRecipient {
     #[serde(default)]
     email: String,
     #[serde(default)]
@@ -270,7 +271,7 @@ struct ComposerRecipient {
 }
 
 #[derive(Deserialize)]
-struct ComposeSendRequest {
+pub(crate) struct ComposeSendRequest {
     #[serde(default)]
     to: Vec<ComposerRecipient>,
     #[serde(default)]
@@ -286,7 +287,7 @@ struct ComposeSendRequest {
     from: Option<String>,
 }
 
-fn format_recipient(r: &ComposerRecipient) -> Option<String> {
+pub(crate) fn format_recipient(r: &ComposerRecipient) -> Option<String> {
     let email = r.email.trim();
     if email.is_empty() {
         return None;
@@ -297,18 +298,18 @@ fn format_recipient(r: &ComposerRecipient) -> Option<String> {
     }
 }
 
-fn join_recipients(list: &[ComposerRecipient]) -> String {
+pub(crate) fn join_recipients(list: &[ComposerRecipient]) -> String {
     list.iter()
         .filter_map(format_recipient)
         .collect::<Vec<_>>()
         .join(", ")
 }
 
-fn domain_from_env() -> String {
+pub(crate) fn domain_from_env() -> String {
     env::var("DOMAIN_NAME").unwrap_or_else(|_| "misfits.ai".to_string())
 }
 
-fn from_address_for_user(user_id: &str) -> String {
+pub(crate) fn from_address_for_user(user_id: &str) -> String {
     if user_id.contains('@') {
         user_id.to_string()
     } else {
@@ -316,14 +317,14 @@ fn from_address_for_user(user_id: &str) -> String {
     }
 }
 
-fn normalize_message_id(raw: &str) -> String {
+pub(crate) fn normalize_message_id(raw: &str) -> String {
     raw.trim()
         .trim_start_matches('<')
         .trim_end_matches('>')
         .to_string()
 }
 
-fn is_private_or_local_ip(ip: &str) -> bool {
+pub(crate) fn is_private_or_local_ip(ip: &str) -> bool {
     match ip.parse::<IpAddr>() {
         Ok(IpAddr::V4(v4)) => {
             v4.is_private() || v4.is_loopback() || v4.is_link_local() || v4.is_multicast()
@@ -333,7 +334,7 @@ fn is_private_or_local_ip(ip: &str) -> bool {
     }
 }
 
-fn is_internal_delivery_hop(
+pub(crate) fn is_internal_delivery_hop(
     mx_host: Option<&str>,
     remote_ip: Option<&str>,
     remote_port: Option<u16>,
@@ -355,7 +356,7 @@ fn is_internal_delivery_hop(
     host_internal || ip_internal || (company_internal && relay_port)
 }
 
-async fn api_send(
+pub(crate) async fn api_send(
     body: web::Json<ComposeSendRequest>,
     req: actix_web::HttpRequest,
     logic: web::Data<Arc<Logic>>,
@@ -683,7 +684,7 @@ async fn api_send(
 
 // --- Send undo (POST /api/send/undo) ---
 
-async fn api_send_undo(
+pub(crate) async fn api_send_undo(
     body: web::Json<UndoSendRequest>,
     req: actix_web::HttpRequest,
     mongo: web::Data<Arc<mongodb::Client>>,
@@ -722,7 +723,7 @@ async fn api_send_undo(
 
 // --- Send schedule (POST /api/send/schedule) ---
 
-async fn api_send_schedule(
+pub(crate) async fn api_send_schedule(
     body: web::Json<ScheduleSendBody>,
     req: actix_web::HttpRequest,
     mongo: web::Data<Arc<mongodb::Client>>,
@@ -792,7 +793,7 @@ async fn api_send_schedule(
 
 // --- Send queue background worker ---
 
-async fn send_queue_worker(mongo: Arc<mongodb::Client>) {
+pub(crate) async fn send_queue_worker(mongo: Arc<mongodb::Client>) {
     let db_name = std::env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
@@ -915,7 +916,7 @@ async fn send_queue_worker(mongo: Arc<mongodb::Client>) {
     }
 }
 
-async fn api_send_status(
+pub(crate) async fn api_send_status(
     path: web::Path<String>,
     req: actix_web::HttpRequest,
     logic: web::Data<Arc<Logic>>,
@@ -1060,7 +1061,7 @@ async fn api_send_status(
     }))
 }
 
-async fn api_email_by_id(
+pub(crate) async fn api_email_by_id(
     path: web::Path<String>,
     req: actix_web::HttpRequest,
     logic: web::Data<Arc<Logic>>,
@@ -1103,13 +1104,13 @@ async fn api_email_by_id(
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct EmailActionRequest {
+pub(crate) struct EmailActionRequest {
     action: String,
     #[serde(default)]
     target_folder: Option<String>,
 }
 
-async fn api_email_action(
+pub(crate) async fn api_email_action(
     path: web::Path<String>,
     body: web::Json<EmailActionRequest>,
     req: actix_web::HttpRequest,
@@ -1168,7 +1169,7 @@ async fn api_email_action(
     }
 }
 
-async fn api_drafts_list(
+pub(crate) async fn api_drafts_list(
     req: actix_web::HttpRequest,
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
@@ -1207,7 +1208,7 @@ async fn api_drafts_list(
     }
 }
 
-async fn api_drafts_upsert(
+pub(crate) async fn api_drafts_upsert(
     req: actix_web::HttpRequest,
     mongo: web::Data<Arc<mongodb::Client>>,
     body: web::Json<serde_json::Value>,
@@ -1289,7 +1290,7 @@ async fn api_drafts_upsert(
     }
 }
 
-async fn api_drafts_delete(
+pub(crate) async fn api_drafts_delete(
     path: web::Path<String>,
     req: actix_web::HttpRequest,
     mongo: web::Data<Arc<mongodb::Client>>,

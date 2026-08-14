@@ -34,7 +34,7 @@ pub(crate) struct OAuthCallbackQuery {
     pub state: Option<String>,
 }
 
-fn default_2fa_method() -> String { "email".to_string() }
+pub(crate) fn default_2fa_method() -> String { "email".to_string() }
 
 #[derive(Deserialize)]
 pub(crate) struct TwoFactorVerifyRequest {
@@ -87,7 +87,7 @@ pub(crate) fn make_session(email: &str, display_name: &str) -> AuthResponse {
 
 // ─── TOTP helpers ─────────────────────────────────────────────────────────
 
-fn compute_hotp(key: &[u8], counter: u64) -> u32 {
+pub(crate) fn compute_hotp(key: &[u8], counter: u64) -> u32 {
     type HmacSha1 = Hmac<Sha1>;
     let mut mac = HmacSha1::new_from_slice(key).expect("HMAC accepts any key size");
     mac.update(&counter.to_be_bytes());

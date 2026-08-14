@@ -34,25 +34,25 @@ pub(crate) fn since_str(window: &str) -> String {
     (Utc::now() - dur).to_rfc3339()
 }
 
-fn default_monitoring_window() -> String {
+pub(crate) fn default_monitoring_window() -> String {
     "15m".into()
 }
 
-fn default_window() -> String {
+pub(crate) fn default_window() -> String {
     "1h".into()
 }
 
-fn default_mon_page() -> u32 {
+pub(crate) fn default_mon_page() -> u32 {
     1
 }
-fn default_mon_page_size() -> u32 {
+pub(crate) fn default_mon_page_size() -> u32 {
     50
 }
 
-fn one() -> u32 {
+pub(crate) fn one() -> u32 {
     1
 }
-fn twenty() -> u32 {
+pub(crate) fn twenty() -> u32 {
     20
 }
 

@@ -6,14 +6,14 @@
 
 use super::*;
 
-const ADMIN_USERS_COLL: &str = "admin_users";
-const ADMIN_CHANGE_REQUESTS_COLL: &str = "admin_change_requests";
+pub(crate) const ADMIN_USERS_COLL: &str = "admin_users";
+pub(crate) const ADMIN_CHANGE_REQUESTS_COLL: &str = "admin_change_requests";
 
-fn now_iso() -> String {
+pub(crate) fn now_iso() -> String {
     Utc::now().to_rfc3339()
 }
 
-fn admin_workflow_order() -> Vec<&'static str> {
+pub(crate) fn admin_workflow_order() -> Vec<&'static str> {
     vec![
         "submitted",
         "triaged",
@@ -24,7 +24,7 @@ fn admin_workflow_order() -> Vec<&'static str> {
     ]
 }
 
-fn compute_priority(urgency: &str, impact: &str) -> String {
+pub(crate) fn compute_priority(urgency: &str, impact: &str) -> String {
     if urgency == "high" && impact == "high" {
         "P0".to_string()
     } else if urgency == "high" || impact == "high" {
@@ -34,7 +34,7 @@ fn compute_priority(urgency: &str, impact: &str) -> String {
     }
 }
 
-fn build_initial_stages() -> Vec<WorkflowStage> {
+pub(crate) fn build_initial_stages() -> Vec<WorkflowStage> {
     vec![
         WorkflowStage {
             key: "discovery".to_string(),
@@ -97,7 +97,7 @@ fn build_initial_stages() -> Vec<WorkflowStage> {
     ]
 }
 
-fn build_acceptance_criteria(scope: &str) -> Vec<String> {
+pub(crate) fn build_acceptance_criteria(scope: &str) -> Vec<String> {
     let mut base = vec![
         "Le flux admin expose un état lisible de la demande".to_string(),
         "Le backend retourne un état workflow déterministe".to_string(),
@@ -117,7 +117,7 @@ fn build_acceptance_criteria(scope: &str) -> Vec<String> {
     base
 }
 
-fn advance_workflow(stages: &[WorkflowStage]) -> Vec<WorkflowStage> {
+pub(crate) fn advance_workflow(stages: &[WorkflowStage]) -> Vec<WorkflowStage> {
     let now = now_iso();
     let current_idx = stages.iter().position(|s| s.status == "active");
     if current_idx.is_none() {
@@ -144,7 +144,7 @@ fn advance_workflow(stages: &[WorkflowStage]) -> Vec<WorkflowStage> {
         .collect()
 }
 
-fn status_counts(items: &[ChangeRequestItem]) -> serde_json::Value {
+pub(crate) fn status_counts(items: &[ChangeRequestItem]) -> serde_json::Value {
     let mut map = serde_json::Map::new();
     for status in [
         "submitted",
@@ -168,7 +168,7 @@ fn status_counts(items: &[ChangeRequestItem]) -> serde_json::Value {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct CreateAdminUserInput {
+pub(crate) struct CreateAdminUserInput {
     id: Option<String>,
     email: String,
     display_name: Option<String>,
@@ -179,7 +179,7 @@ struct CreateAdminUserInput {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct UpdateAdminUserInput {
+pub(crate) struct UpdateAdminUserInput {
     role: Option<String>,
     status: Option<String>,
     // PR3 — champs additionnels supportés par PATCH
@@ -191,7 +191,7 @@ struct UpdateAdminUserInput {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct CreateChangeRequestInputApi {
+pub(crate) struct CreateChangeRequestInputApi {
     title: String,
     problem: String,
     desired_outcome: String,
@@ -204,7 +204,7 @@ struct CreateChangeRequestInputApi {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct PatchChangeRequestInputApi {
+pub(crate) struct PatchChangeRequestInputApi {
     action: Option<String>,
     note: Option<String>,
     actor: Option<String>,
@@ -218,7 +218,7 @@ struct PatchChangeRequestInputApi {
 
 /// PR4 — query params optionnels : ?q=&role=&status=&page=&size=
 #[derive(Debug, Deserialize)]
-struct AdminUsersQuery {
+pub(crate) struct AdminUsersQuery {
     #[serde(default)]
     q: Option<String>,
     #[serde(default)]
@@ -231,7 +231,7 @@ struct AdminUsersQuery {
     size: Option<u64>,
 }
 
-async fn api_admin_users_list(
+pub(crate) async fn api_admin_users_list(
     req: HttpRequest,
     query: web::Query<AdminUsersQuery>,
     mongo: web::Data<Arc<mongodb::Client>>,
@@ -307,7 +307,7 @@ async fn api_admin_users_list(
     }
 }
 
-async fn api_admin_user_get(
+pub(crate) async fn api_admin_user_get(
     req: HttpRequest,
     path: web::Path<String>,
     mongo: web::Data<Arc<mongodb::Client>>,
@@ -333,7 +333,7 @@ async fn api_admin_user_get(
     }
 }
 
-async fn api_admin_user_create(
+pub(crate) async fn api_admin_user_create(
     req: HttpRequest,
     body: web::Json<CreateAdminUserInput>,
     mongo: web::Data<Arc<mongodb::Client>>,
@@ -417,7 +417,7 @@ async fn api_admin_user_create(
     }
 }
 
-async fn api_admin_user_patch(
+pub(crate) async fn api_admin_user_patch(
     req: HttpRequest,
     path: web::Path<String>,
     body: web::Json<UpdateAdminUserInput>,
@@ -550,7 +550,7 @@ async fn api_admin_user_patch(
     }
 }
 
-async fn api_admin_user_delete(
+pub(crate) async fn api_admin_user_delete(
     req: HttpRequest,
     path: web::Path<String>,
     mongo: web::Data<Arc<mongodb::Client>>,
@@ -595,7 +595,7 @@ async fn api_admin_user_delete(
 /// - RBAC OFF → répond `{ role: "admin", email: "system@...", enforced: false }`
 ///   (compat rétro : le front continue à voir un admin).
 /// - RBAC ON  → nécessite un token valide, renvoie l'identité réelle.
-async fn api_admin_whoami(
+pub(crate) async fn api_admin_whoami(
     req: HttpRequest,
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
@@ -615,11 +615,11 @@ async fn api_admin_whoami(
 // ================================================================
 
 // PR4 — audit trail admin.
-const ADMIN_AUDIT_COLL: &str = "admin_audit_log";
+pub(crate) const ADMIN_AUDIT_COLL: &str = "admin_audit_log";
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
-struct AdminAuditEntry {
+pub(crate) struct AdminAuditEntry {
     id: String,
     at: String,
     actor_id: String,
@@ -634,7 +634,7 @@ struct AdminAuditEntry {
 }
 
 /// Best-effort — n'échoue jamais, log stderr en cas de problème Mongo.
-async fn log_admin_action(
+pub(crate) async fn log_admin_action(
     mongo: &mongodb::Client,
     actor: &admin_auth::AuthUser,
     action: &str,
@@ -663,7 +663,7 @@ async fn log_admin_action(
 }
 
 #[derive(Debug, Deserialize)]
-struct AdminAuditQuery {
+pub(crate) struct AdminAuditQuery {
     #[serde(default)]
     target: Option<String>,
     #[serde(default)]
@@ -675,7 +675,7 @@ struct AdminAuditQuery {
 }
 
 /// GET /api/admin/audit-log
-async fn api_admin_audit_log(
+pub(crate) async fn api_admin_audit_log(
     req: HttpRequest,
     query: web::Query<AdminAuditQuery>,
     mongo: web::Data<Arc<mongodb::Client>>,
@@ -732,7 +732,7 @@ async fn api_admin_audit_log(
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ResetPasswordInput {
+pub(crate) struct ResetPasswordInput {
     /// Optionnel — si non fourni, un mot de passe temporaire est généré.
     new_password: Option<String>,
     /// Si true, invalide toutes les sessions existantes en plus.
@@ -746,7 +746,7 @@ struct ResetPasswordInput {
 /// sur l'AdminUserRecord, et déclenche l'envoi d'un mail via le service
 /// DKIM interne (best-effort — la réussite du POST ne dépend pas de
 /// l'envoi effectif, on trace l'erreur mais on renvoie 200).
-async fn api_admin_user_invite(
+pub(crate) async fn api_admin_user_invite(
     req: HttpRequest,
     path: web::Path<String>,
     mongo: web::Data<Arc<mongodb::Client>>,
@@ -879,7 +879,7 @@ async fn api_admin_user_invite(
 ///
 /// Définit un nouveau mot de passe (bcrypt) sur l'AdminUserRecord.
 /// Optionnellement révoque les sessions existantes.
-async fn api_admin_user_reset_password(
+pub(crate) async fn api_admin_user_reset_password(
     req: HttpRequest,
     path: web::Path<String>,
     body: web::Json<ResetPasswordInput>,
@@ -996,7 +996,7 @@ async fn api_admin_user_reset_password(
 }
 
 /// POST /api/admin/users/{id}/revoke-sessions
-async fn api_admin_user_revoke_sessions(
+pub(crate) async fn api_admin_user_revoke_sessions(
     req: HttpRequest,
     path: web::Path<String>,
     mongo: web::Data<Arc<mongodb::Client>>,
@@ -1034,7 +1034,7 @@ async fn api_admin_user_revoke_sessions(
     }
 }
 
-async fn api_admin_change_requests_list(mongo: web::Data<Arc<mongodb::Client>>) -> impl Responder {
+pub(crate) async fn api_admin_change_requests_list(mongo: web::Data<Arc<mongodb::Client>>) -> impl Responder {
     let coll = mongo
         .database(&mongo_db_name())
         .collection::<ChangeRequestItem>(ADMIN_CHANGE_REQUESTS_COLL);
@@ -1064,7 +1064,7 @@ async fn api_admin_change_requests_list(mongo: web::Data<Arc<mongodb::Client>>) 
     }
 }
 
-async fn api_admin_change_request_get(
+pub(crate) async fn api_admin_change_request_get(
     path: web::Path<String>,
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
@@ -1085,7 +1085,7 @@ async fn api_admin_change_request_get(
     }
 }
 
-async fn api_admin_change_request_create(
+pub(crate) async fn api_admin_change_request_create(
     body: web::Json<CreateChangeRequestInputApi>,
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
@@ -1166,7 +1166,7 @@ async fn api_admin_change_request_create(
     }
 }
 
-async fn api_admin_change_request_patch(
+pub(crate) async fn api_admin_change_request_patch(
     path: web::Path<String>,
     body: web::Json<PatchChangeRequestInputApi>,
     mongo: web::Data<Arc<mongodb::Client>>,
@@ -1403,7 +1403,7 @@ async fn api_admin_change_request_patch(
     }
 }
 
-async fn api_admin_change_request_delete(
+pub(crate) async fn api_admin_change_request_delete(
     path: web::Path<String>,
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
@@ -1428,10 +1428,10 @@ async fn api_admin_change_request_delete(
 
 // --- AI settings (Phase B1, issue #173) ----------------------------------------
 
-const AI_SETTINGS_ID: &str = "global";
-const DEFAULT_AI_MODEL: &str = "qwen/qwen3.7-flash";
+pub(crate) const AI_SETTINGS_ID: &str = "global";
+pub(crate) const DEFAULT_AI_MODEL: &str = "qwen/qwen3.7-flash";
 
-fn default_ai_feature_models() -> HashMap<String, String> {
+pub(crate) fn default_ai_feature_models() -> HashMap<String, String> {
     let mut m = HashMap::new();
     for key in [
         "compose",
@@ -1448,7 +1448,7 @@ fn default_ai_feature_models() -> HashMap<String, String> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct AiSettingsDoc {
+pub(crate) struct AiSettingsDoc {
     #[serde(rename = "_id")]
     id: String,
     #[serde(rename = "defaultModel", alias = "default_model")]
@@ -1489,18 +1489,18 @@ impl AiSettingsDoc {
 }
 
 #[derive(Deserialize)]
-struct AiSettingsUpdate {
+pub(crate) struct AiSettingsUpdate {
     #[serde(rename = "defaultModel", alias = "default_model", default)]
     default_model: Option<String>,
     #[serde(default)]
     features: Option<HashMap<String, String>>,
 }
 
-fn mongo_db_name() -> String {
+pub(crate) fn mongo_db_name() -> String {
     env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string())
 }
 
-async fn load_ai_settings(client: &mongodb::Client) -> AiSettingsDoc {
+pub(crate) async fn load_ai_settings(client: &mongodb::Client) -> AiSettingsDoc {
     let coll = client
         .database(&mongo_db_name())
         .collection::<AiSettingsDoc>("ai_settings");
@@ -1510,12 +1510,12 @@ async fn load_ai_settings(client: &mongodb::Client) -> AiSettingsDoc {
     }
 }
 
-async fn api_get_ai_settings(mongo: web::Data<Arc<mongodb::Client>>) -> impl Responder {
+pub(crate) async fn api_get_ai_settings(mongo: web::Data<Arc<mongodb::Client>>) -> impl Responder {
     let settings = load_ai_settings(mongo.get_ref()).await;
     HttpResponse::Ok().json(settings.to_public_json())
 }
 
-async fn api_put_ai_settings(
+pub(crate) async fn api_put_ai_settings(
     body: web::Json<AiSettingsUpdate>,
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
@@ -1557,13 +1557,13 @@ async fn api_put_ai_settings(
     }
 }
 
-async fn api_templates() -> impl Responder {
+pub(crate) async fn api_templates() -> impl Responder {
     HttpResponse::Ok().json(serde_json::json!({"templates": []}))
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct HermesChatProxyRequest {
+pub(crate) struct HermesChatProxyRequest {
     messages: Vec<serde_json::Value>,
     #[serde(default)]
     model: Option<String>,
@@ -1583,7 +1583,7 @@ struct HermesChatProxyRequest {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct HermesRunsProxyRequest {
+pub(crate) struct HermesRunsProxyRequest {
     #[serde(default)]
     input: Option<serde_json::Value>,
     #[serde(default)]
@@ -1600,12 +1600,12 @@ struct HermesRunsProxyRequest {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct HermesRunsListQuery {
+pub(crate) struct HermesRunsListQuery {
     #[serde(default)]
     limit: Option<u32>,
 }
 
-fn normalize_hermes_base_url(raw: &str) -> String {
+pub(crate) fn normalize_hermes_base_url(raw: &str) -> String {
     let trimmed = raw.trim().trim_end_matches('/');
     if let Some(without_v1) = trimmed.strip_suffix("/v1") {
         without_v1.to_string()
@@ -1614,13 +1614,13 @@ fn normalize_hermes_base_url(raw: &str) -> String {
     }
 }
 
-fn resolve_hermes_base_url() -> String {
+pub(crate) fn resolve_hermes_base_url() -> String {
     let base =
         env::var("HERMES_BASE_URL").unwrap_or_else(|_| "http://172.16.12.2:8642".to_string());
     normalize_hermes_base_url(&base)
 }
 
-async fn api_hermes_chat(
+pub(crate) async fn api_hermes_chat(
     req: HttpRequest,
     body: web::Json<HermesChatProxyRequest>,
 ) -> impl Responder {
@@ -1720,7 +1720,7 @@ async fn api_hermes_chat(
     .json(body_json)
 }
 
-async fn api_hermes_runs_list(query: web::Query<HermesRunsListQuery>) -> impl Responder {
+pub(crate) async fn api_hermes_runs_list(query: web::Query<HermesRunsListQuery>) -> impl Responder {
     let base = resolve_hermes_base_url();
     let api_key = match env::var("HERMES_API_KEY") {
         Ok(v) if !v.trim().is_empty() => v,
@@ -1762,7 +1762,7 @@ async fn api_hermes_runs_list(query: web::Query<HermesRunsListQuery>) -> impl Re
     .json(body_json)
 }
 
-async fn api_hermes_runs(
+pub(crate) async fn api_hermes_runs(
     req: HttpRequest,
     body: web::Json<HermesRunsProxyRequest>,
 ) -> impl Responder {
@@ -1859,11 +1859,11 @@ async fn api_hermes_runs(
 }
 
 #[derive(Deserialize)]
-struct HermesRunPath {
+pub(crate) struct HermesRunPath {
     run_id: String,
 }
 
-async fn api_hermes_run_status(path: web::Path<HermesRunPath>) -> impl Responder {
+pub(crate) async fn api_hermes_run_status(path: web::Path<HermesRunPath>) -> impl Responder {
     let base = resolve_hermes_base_url();
     let api_key = match env::var("HERMES_API_KEY") {
         Ok(v) if !v.trim().is_empty() => v,
@@ -1904,7 +1904,7 @@ async fn api_hermes_run_status(path: web::Path<HermesRunPath>) -> impl Responder
     .json(body_json)
 }
 
-async fn api_hermes_run_events(path: web::Path<HermesRunPath>, req: HttpRequest) -> impl Responder {
+pub(crate) async fn api_hermes_run_events(path: web::Path<HermesRunPath>, req: HttpRequest) -> impl Responder {
     let base = resolve_hermes_base_url();
     let api_key = match env::var("HERMES_API_KEY") {
         Ok(v) if !v.trim().is_empty() => v,
@@ -1978,14 +1978,14 @@ async fn api_hermes_run_events(path: web::Path<HermesRunPath>, req: HttpRequest)
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ExternalMessagesQuery {
+pub(crate) struct ExternalMessagesQuery {
     account_id: String,
     folder: Option<String>,
     page: Option<u64>,
     page_size: Option<u64>,
 }
 
-async fn api_openapi_json() -> impl Responder {
+pub(crate) async fn api_openapi_json() -> impl Responder {
     static SPEC_JSON: &str = r#"{
         "openapi": "3.0.3",
         "info": {
@@ -2074,7 +2074,7 @@ async fn api_openapi_json() -> impl Responder {
     HttpResponse::Ok().json(spec)
 }
 
-async fn api_swagger_ui() -> impl Responder {
+pub(crate) async fn api_swagger_ui() -> impl Responder {
     let html = r##"<!DOCTYPE html>
 <html>
 <head>
@@ -2095,14 +2095,14 @@ async fn api_swagger_ui() -> impl Responder {
         .body(html)
 }
 
-async fn api_external_openapi() -> impl Responder {
+pub(crate) async fn api_external_openapi() -> impl Responder {
     static OPENAPI_YAML: &str = include_str!("../../ops/openapi/external-imap-v1.yaml");
     HttpResponse::Ok()
         .content_type("application/yaml; charset=utf-8")
         .body(OPENAPI_YAML)
 }
 
-async fn api_external_accounts_list(
+pub(crate) async fn api_external_accounts_list(
     req: HttpRequest,
     svc: web::Data<Arc<ExternalImapService>>,
 ) -> impl Responder {
@@ -2114,7 +2114,7 @@ async fn api_external_accounts_list(
     }
 }
 
-async fn api_external_accounts_create(
+pub(crate) async fn api_external_accounts_create(
     req: HttpRequest,
     payload: web::Json<CreateExternalAccountInput>,
     svc: web::Data<Arc<ExternalImapService>>,
@@ -2127,7 +2127,7 @@ async fn api_external_accounts_create(
     }
 }
 
-async fn api_external_account_get(
+pub(crate) async fn api_external_account_get(
     req: HttpRequest,
     path: web::Path<String>,
     svc: web::Data<Arc<ExternalImapService>>,
@@ -2142,7 +2142,7 @@ async fn api_external_account_get(
     }
 }
 
-async fn api_external_account_patch(
+pub(crate) async fn api_external_account_patch(
     req: HttpRequest,
     path: web::Path<String>,
     payload: web::Json<UpdateExternalAccountInput>,
@@ -2161,7 +2161,7 @@ async fn api_external_account_patch(
     }
 }
 
-async fn api_external_account_delete(
+pub(crate) async fn api_external_account_delete(
     req: HttpRequest,
     path: web::Path<String>,
     svc: web::Data<Arc<ExternalImapService>>,
@@ -2176,7 +2176,7 @@ async fn api_external_account_delete(
     }
 }
 
-async fn api_external_account_test(
+pub(crate) async fn api_external_account_test(
     req: HttpRequest,
     path: web::Path<String>,
     svc: web::Data<Arc<ExternalImapService>>,
@@ -2208,7 +2208,7 @@ async fn api_external_account_test(
     }
 }
 
-async fn api_external_folders_list(
+pub(crate) async fn api_external_folders_list(
     req: HttpRequest,
     path: web::Path<String>,
     svc: web::Data<Arc<ExternalImapService>>,
@@ -2222,7 +2222,7 @@ async fn api_external_folders_list(
     }
 }
 
-async fn api_external_folders_discover(
+pub(crate) async fn api_external_folders_discover(
     req: HttpRequest,
     path: web::Path<String>,
     svc: web::Data<Arc<ExternalImapService>>,
@@ -2242,7 +2242,7 @@ async fn api_external_folders_discover(
     }
 }
 
-async fn api_external_folder_mapping_put(
+pub(crate) async fn api_external_folder_mapping_put(
     req: HttpRequest,
     path: web::Path<(String, String)>,
     payload: web::Json<ExternalFolderMappingInput>,
@@ -2261,7 +2261,7 @@ async fn api_external_folder_mapping_put(
     }
 }
 
-async fn api_external_sync_start(
+pub(crate) async fn api_external_sync_start(
     req: HttpRequest,
     path: web::Path<String>,
     payload: web::Json<StartSyncInput>,
@@ -2311,7 +2311,7 @@ async fn api_external_sync_start(
     }
 }
 
-async fn api_external_sync_run_get(
+pub(crate) async fn api_external_sync_run_get(
     req: HttpRequest,
     path: web::Path<String>,
     svc: web::Data<Arc<ExternalImapService>>,
@@ -2326,7 +2326,7 @@ async fn api_external_sync_run_get(
     }
 }
 
-async fn api_external_sync_status(
+pub(crate) async fn api_external_sync_status(
     req: HttpRequest,
     path: web::Path<String>,
     svc: web::Data<Arc<ExternalImapService>>,
@@ -2341,7 +2341,7 @@ async fn api_external_sync_status(
     }
 }
 
-async fn api_external_sync_pause(
+pub(crate) async fn api_external_sync_pause(
     req: HttpRequest,
     path: web::Path<String>,
     svc: web::Data<Arc<ExternalImapService>>,
@@ -2355,7 +2355,7 @@ async fn api_external_sync_pause(
     }
 }
 
-async fn api_external_sync_resume(
+pub(crate) async fn api_external_sync_resume(
     req: HttpRequest,
     path: web::Path<String>,
     svc: web::Data<Arc<ExternalImapService>>,
@@ -2369,7 +2369,7 @@ async fn api_external_sync_resume(
     }
 }
 
-async fn api_external_messages_list(
+pub(crate) async fn api_external_messages_list(
     req: HttpRequest,
     query: web::Query<ExternalMessagesQuery>,
     svc: web::Data<Arc<ExternalImapService>>,
@@ -2392,7 +2392,7 @@ async fn api_external_messages_list(
     }
 }
 
-async fn api_external_message_action(
+pub(crate) async fn api_external_message_action(
     req: HttpRequest,
     path: web::Path<String>,
     payload: web::Json<ExternalMessageActionInput>,
@@ -2411,7 +2411,7 @@ async fn api_external_message_action(
 }
 
 #[derive(Deserialize)]
-struct CreateCalendarEventRequest {
+pub(crate) struct CreateCalendarEventRequest {
     title: String,
     #[serde(default)]
     description: String,
@@ -2425,15 +2425,15 @@ struct CreateCalendarEventRequest {
     location: String,
 }
 
-fn default_event_type_str() -> String {
+pub(crate) fn default_event_type_str() -> String {
     "default".to_string()
 }
-fn default_color_str() -> String {
+pub(crate) fn default_color_str() -> String {
     "#3788d8".to_string()
 }
 
 #[derive(Deserialize)]
-struct UpdateCalendarEventRequest {
+pub(crate) struct UpdateCalendarEventRequest {
     #[serde(default)]
     title: Option<String>,
     #[serde(default)]
@@ -2451,20 +2451,20 @@ struct UpdateCalendarEventRequest {
 }
 
 #[derive(Deserialize)]
-struct CalendarQueryParams {
+pub(crate) struct CalendarQueryParams {
     #[serde(default)]
     start: Option<String>, // ISO 8601
     #[serde(default)]
     end: Option<String>, // ISO 8601
 }
 
-fn parse_iso_to_bson(s: &str) -> Option<bson::DateTime> {
+pub(crate) fn parse_iso_to_bson(s: &str) -> Option<bson::DateTime> {
     chrono::DateTime::parse_from_rfc3339(s)
         .ok()
         .map(|dt| bson::DateTime::from_millis(dt.timestamp_millis()))
 }
 
-fn get_user_from_headers(req: &actix_web::HttpRequest) -> String {
+pub(crate) fn get_user_from_headers(req: &actix_web::HttpRequest) -> String {
     // Try x-user-email header, fallback to query param, fallback to env SMTP_USERNAME
     if let Some(email) = req
         .headers()
@@ -2479,7 +2479,7 @@ fn get_user_from_headers(req: &actix_web::HttpRequest) -> String {
 
 // --- Calendar handlers ---
 
-async fn calendar_create_event(
+pub(crate) async fn calendar_create_event(
     req_body: web::Json<CreateCalendarEventRequest>,
     req: actix_web::HttpRequest,
     logic: web::Data<Arc<Logic>>,
@@ -2517,7 +2517,7 @@ async fn calendar_create_event(
     }
 }
 
-async fn calendar_list_events(
+pub(crate) async fn calendar_list_events(
     req: actix_web::HttpRequest,
     query: web::Query<CalendarQueryParams>,
     logic: web::Data<Arc<Logic>>,
@@ -2542,7 +2542,7 @@ async fn calendar_list_events(
     }
 }
 
-async fn calendar_get_event(
+pub(crate) async fn calendar_get_event(
     req: actix_web::HttpRequest,
     path: web::Path<String>,
     logic: web::Data<Arc<Logic>>,
@@ -2561,7 +2561,7 @@ async fn calendar_get_event(
     }
 }
 
-async fn calendar_update_event(
+pub(crate) async fn calendar_update_event(
     req_body: web::Json<UpdateCalendarEventRequest>,
     req: actix_web::HttpRequest,
     path: web::Path<String>,
@@ -2625,7 +2625,7 @@ async fn calendar_update_event(
     }
 }
 
-async fn calendar_delete_event(
+pub(crate) async fn calendar_delete_event(
     req: actix_web::HttpRequest,
     path: web::Path<String>,
     logic: web::Data<Arc<Logic>>,
