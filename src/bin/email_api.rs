@@ -4470,6 +4470,11 @@ struct CreateAdminUserInput {
 struct UpdateAdminUserInput {
     role: Option<String>,
     status: Option<String>,
+    // PR3 — champs additionnels supportés par PATCH
+    email: Option<String>,
+    display_name: Option<String>,
+    two_factor_enabled: Option<bool>,
+    notes: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -4610,6 +4615,11 @@ async fn api_admin_user_create(
         }],
         created_at: now.clone(),
         updated_at: now,
+        password_hash: None,
+        invite_token: None,
+        invite_expires_at: None,
+        invited_at: None,
+        notes: None,
     };
 
     let coll = mongo
@@ -4672,6 +4682,38 @@ async fn api_admin_user_patch(
                 .json(serde_json::json!({ "message": "status must be active|restricted" }));
         }
         updated.status = status;
+    }
+
+    if let Some(email) = &body.email {
+        let email = email.trim();
+        if email.is_empty() || !email.contains('@') {
+            return HttpResponse::BadRequest()
+                .json(serde_json::json!({ "message": "invalid email" }));
+        }
+        updated.email = email.to_string();
+    }
+    if let Some(dn) = &body.display_name {
+        let dn = dn.trim();
+        updated.display_name = if dn.is_empty() {
+            None
+        } else {
+            Some(dn.to_string())
+        };
+    }
+    if let Some(v) = body.two_factor_enabled {
+        updated.two_factor_enabled = v;
+    }
+    if let Some(notes) = &body.notes {
+        let notes = notes.trim();
+        if notes.len() > 1024 {
+            return HttpResponse::BadRequest()
+                .json(serde_json::json!({ "message": "notes too long (max 1024)" }));
+        }
+        updated.notes = if notes.is_empty() {
+            None
+        } else {
+            Some(notes.to_string())
+        };
     }
 
     updated.updated_at = now.clone();
@@ -4754,6 +4796,277 @@ async fn api_admin_whoami(
             "enforced": admin_auth::rbac_enabled(),
         })),
         Err(resp) => resp,
+    }
+}
+
+// ================================================================
+// PR3 — Comptes admin réels
+// ================================================================
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ResetPasswordInput {
+    /// Optionnel — si non fourni, un mot de passe temporaire est généré.
+    new_password: Option<String>,
+    /// Si true, invalide toutes les sessions existantes en plus.
+    #[serde(default)]
+    revoke_sessions: bool,
+}
+
+/// POST /api/admin/users/{id}/invite
+///
+/// Génère un token d'invitation (UUID v4, 72h par défaut), le persiste
+/// sur l'AdminUserRecord, et déclenche l'envoi d'un mail via le service
+/// DKIM interne (best-effort — la réussite du POST ne dépend pas de
+/// l'envoi effectif, on trace l'erreur mais on renvoie 200).
+async fn api_admin_user_invite(
+    req: HttpRequest,
+    path: web::Path<String>,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    if let Err(resp) = admin_auth::require_admin(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
+    let id = path.into_inner();
+    let coll = mongo
+        .database(&mongo_db_name())
+        .collection::<AdminUserRecord>(ADMIN_USERS_COLL);
+
+    let mut user = match coll.find_one(doc! { "id": &id }).await {
+        Ok(Some(v)) => v,
+        Ok(None) => {
+            return HttpResponse::NotFound()
+                .json(serde_json::json!({ "message": "User not found" }))
+        }
+        Err(e) => {
+            eprintln!("invite: find_one error: {}", e);
+            return HttpResponse::InternalServerError()
+                .json(serde_json::json!({ "message": "Failed to load user" }));
+        }
+    };
+
+    let token = Uuid::new_v4().to_string();
+    let now = Utc::now();
+    let ttl_hours: i64 = env::var("ADMIN_INVITE_TTL_HOURS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(72);
+    let expires = now + chrono::Duration::hours(ttl_hours);
+
+    user.invite_token = Some(token.clone());
+    user.invite_expires_at = Some(expires.to_rfc3339());
+    user.invited_at = Some(now.to_rfc3339());
+    user.updated_at = now.to_rfc3339();
+    let mut recent = user.recent_activity.clone();
+    recent.insert(
+        0,
+        AdminUserActivity {
+            at: now.to_rfc3339(),
+            label: "Invitation sent".to_string(),
+            kind: "admin_action".to_string(),
+        },
+    );
+    recent.truncate(8);
+    user.recent_activity = recent;
+
+    if let Err(e) = coll
+        .replace_one(doc! { "id": &id }, &user)
+        .upsert(false)
+        .await
+    {
+        eprintln!("invite: replace_one error: {}", e);
+        return HttpResponse::InternalServerError()
+            .json(serde_json::json!({ "message": "Failed to save invite" }));
+    }
+
+    // Envoi email best-effort via le service DKIM. On ne bloque pas la
+    // réponse HTTP en cas d'erreur de la chaîne d'envoi (le token reste
+    // valide et peut être renvoyé manuellement au besoin).
+    let dkim_url = env::var("DKIM_SERVICE_URL")
+        .unwrap_or_else(|_| "http://dkim-service:3000".to_string());
+    let invite_base = env::var("ADMIN_INVITE_BASE_URL")
+        .unwrap_or_else(|_| "https://misfits.ai/admin/accept-invite".to_string());
+    let sender = env::var("ADMIN_INVITE_FROM")
+        .unwrap_or_else(|_| "no-reply@misfits.ai".to_string());
+    let accept_url = format!("{}?token={}", invite_base, token);
+    let display = user
+        .display_name
+        .clone()
+        .unwrap_or_else(|| user.email.clone());
+    let subject = "Invitation à rejoindre la console admin Misfits";
+    let html = format!(
+        "<p>Bonjour {display},</p>\
+         <p>Vous avez été invité(e) à rejoindre la console admin de Misfits Mail.</p>\
+         <p>Le lien ci-dessous est valable {ttl_hours}h et à usage unique :</p>\
+         <p><a href=\"{accept_url}\">{accept_url}</a></p>\
+         <p>Si vous n'attendiez pas cette invitation, ignorez ce message.</p>\
+         <p>— L'équipe Misfits</p>",
+        display = display,
+        ttl_hours = ttl_hours,
+        accept_url = accept_url
+    );
+    let payload = serde_json::json!({
+        "from": sender,
+        "to": user.email,
+        "subject": subject,
+        "html": html,
+    });
+    let mongo_for_send = mongo.clone();
+    let email_for_log = user.email.clone();
+    tokio::spawn(async move {
+        let client = reqwest::Client::new();
+        let res = client
+            .post(format!("{}/generate-dkim", dkim_url.trim_end_matches('/')))
+            .json(&payload)
+            .send()
+            .await;
+        match res {
+            Ok(r) if r.status().is_success() => {}
+            Ok(r) => eprintln!("invite: dkim-service {} for {}", r.status(), email_for_log),
+            Err(e) => eprintln!("invite: dkim-service unreachable: {}", e),
+        }
+        let _ = mongo_for_send; // keep clone alive for future extension
+    });
+
+    HttpResponse::Ok().json(serde_json::json!({
+        "invited": true,
+        "user": user,
+        "acceptUrl": accept_url,
+        "expiresAt": expires.to_rfc3339(),
+    }))
+}
+
+/// POST /api/admin/users/{id}/reset-password
+///
+/// Définit un nouveau mot de passe (bcrypt) sur l'AdminUserRecord.
+/// Optionnellement révoque les sessions existantes.
+async fn api_admin_user_reset_password(
+    req: HttpRequest,
+    path: web::Path<String>,
+    body: web::Json<ResetPasswordInput>,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    if let Err(resp) = admin_auth::require_admin(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
+    let id = path.into_inner();
+    let coll = mongo
+        .database(&mongo_db_name())
+        .collection::<AdminUserRecord>(ADMIN_USERS_COLL);
+
+    let mut user = match coll.find_one(doc! { "id": &id }).await {
+        Ok(Some(v)) => v,
+        Ok(None) => {
+            return HttpResponse::NotFound()
+                .json(serde_json::json!({ "message": "User not found" }))
+        }
+        Err(e) => {
+            eprintln!("reset_password: find_one error: {}", e);
+            return HttpResponse::InternalServerError()
+                .json(serde_json::json!({ "message": "Failed to load user" }));
+        }
+    };
+
+    // Si aucun mot de passe fourni, on génère un temporaire.
+    let (new_password, generated) = match &body.new_password {
+        Some(p) if !p.trim().is_empty() => (p.trim().to_string(), false),
+        _ => {
+            let random = Uuid::new_v4().simple().to_string();
+            (random[..12].to_string(), true)
+        }
+    };
+
+    if new_password.len() < 8 {
+        return HttpResponse::BadRequest()
+            .json(serde_json::json!({ "message": "password must be at least 8 chars" }));
+    }
+
+    let hash = match web::block(move || bcrypt::hash(&new_password, 12)).await {
+        Ok(Ok(h)) => h,
+        Ok(Err(e)) => {
+            eprintln!("reset_password: bcrypt error: {}", e);
+            return HttpResponse::InternalServerError()
+                .json(serde_json::json!({ "message": "Failed to hash password" }));
+        }
+        Err(e) => {
+            eprintln!("reset_password: web::block error: {}", e);
+            return HttpResponse::InternalServerError()
+                .json(serde_json::json!({ "message": "Failed to hash password" }));
+        }
+    };
+
+    let now = now_iso();
+    user.password_hash = Some(hash);
+    user.updated_at = now.clone();
+    // Consommer un éventuel jeton d'invitation en cours.
+    user.invite_token = None;
+    user.invite_expires_at = None;
+    let mut recent = user.recent_activity.clone();
+    recent.insert(
+        0,
+        AdminUserActivity {
+            at: now,
+            label: if generated {
+                "Password reset (auto-generated)".to_string()
+            } else {
+                "Password reset".to_string()
+            },
+            kind: "admin_action".to_string(),
+        },
+    );
+    recent.truncate(8);
+    user.recent_activity = recent;
+
+    if let Err(e) = coll
+        .replace_one(doc! { "id": &id }, &user)
+        .upsert(false)
+        .await
+    {
+        eprintln!("reset_password: replace_one error: {}", e);
+        return HttpResponse::InternalServerError()
+            .json(serde_json::json!({ "message": "Failed to update password" }));
+    }
+
+    // Révocation des sessions optionnelle.
+    if body.revoke_sessions {
+        let sessions = mongo
+            .database(&mongo_db_name())
+            .collection::<admin_auth::AdminSession>(admin_auth::ADMIN_SESSIONS_COLL);
+        if let Err(e) = sessions.delete_many(doc! { "userId": &id }).await {
+            eprintln!("reset_password: revoke sessions error: {}", e);
+        }
+    }
+
+    HttpResponse::Ok().json(serde_json::json!({
+        "reset": true,
+        "user": user,
+        "generatedPassword": if generated { serde_json::Value::Bool(true) } else { serde_json::Value::Null },
+    }))
+}
+
+/// POST /api/admin/users/{id}/revoke-sessions
+async fn api_admin_user_revoke_sessions(
+    req: HttpRequest,
+    path: web::Path<String>,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    if let Err(resp) = admin_auth::require_admin(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
+    let id = path.into_inner();
+    let sessions = mongo
+        .database(&mongo_db_name())
+        .collection::<admin_auth::AdminSession>(admin_auth::ADMIN_SESSIONS_COLL);
+    match sessions.delete_many(doc! { "userId": &id }).await {
+        Ok(res) => HttpResponse::Ok().json(serde_json::json!({
+            "revoked": true,
+            "deletedCount": res.deleted_count,
+        })),
+        Err(e) => {
+            eprintln!("revoke_sessions: error: {}", e);
+            HttpResponse::InternalServerError()
+                .json(serde_json::json!({ "message": "Failed to revoke sessions" }))
+        }
     }
 }
 
@@ -6693,6 +7006,18 @@ async fn main() -> std::io::Result<()> {
                 .route("/api/admin/users", web::get().to(api_admin_users_list))
                 .route("/api/admin/users", web::post().to(api_admin_user_create))
                 .route("/api/admin/whoami", web::get().to(api_admin_whoami))
+                .route(
+                    "/api/admin/users/{id}/invite",
+                    web::post().to(api_admin_user_invite),
+                )
+                .route(
+                    "/api/admin/users/{id}/reset-password",
+                    web::post().to(api_admin_user_reset_password),
+                )
+                .route(
+                    "/api/admin/users/{id}/revoke-sessions",
+                    web::post().to(api_admin_user_revoke_sessions),
+                )
                 .route("/api/admin/users/{id}", web::get().to(api_admin_user_get))
                 .route(
                     "/api/admin/users/{id}",
