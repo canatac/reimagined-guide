@@ -167,6 +167,46 @@ fn is_local_recipient(raw_to: &str) -> bool {
     matches!(recipient_domain(raw_to).as_deref(), Some("misfits.ai") | Some("mail.misfits.ai"))
 }
 
+fn recipient_local_part(raw_to: &str) -> Option<String> {
+    let trimmed = raw_to.trim();
+    let addr = if let (Some(start), Some(end)) = (trimmed.rfind('<'), trimmed.rfind('>')) {
+        if start < end {
+            &trimmed[start + 1..end]
+        } else {
+            trimmed
+        }
+    } else {
+        trimmed.trim_matches(|c| c == '<' || c == '>')
+    };
+
+    let mut parts = addr.split('@');
+    let local = parts.next()?.trim().to_ascii_lowercase();
+    let domain = parts.next()?.trim().trim_end_matches('.').to_ascii_lowercase();
+    if local.is_empty() {
+        return None;
+    }
+    if matches!(domain.as_str(), "misfits.ai" | "mail.misfits.ai") {
+        Some(local)
+    } else {
+        None
+    }
+}
+
+fn extract_session_id_from_response(response: &str) -> Option<String> {
+    let marker = "session ID:";
+    let idx = response.find(marker)?;
+    let sid = response[idx + marker.len()..]
+        .trim()
+        .trim_end_matches('\r')
+        .trim_end_matches('\n')
+        .to_string();
+    if sid.is_empty() {
+        None
+    } else {
+        Some(sid)
+    }
+}
+
 fn parse_header_line(raw_line: &str) -> Option<(String, String)> {
     let (name, value) = raw_line.split_once(':')?;
     let name = name.trim();
@@ -287,6 +327,7 @@ async fn handle_tls_client(
 
     let mut in_data_mode: bool = false;
     let mut in_body = false; // Indicateur pour savoir si nous sommes dans le corps de l'email
+    let mut authenticated_session_id: Option<String> = None;
 
     let mut current_email = CustomEmail {
         email: Email::new("", "", "", "", ""),
@@ -339,55 +380,56 @@ async fn handle_tls_client(
 
                         if use_mongodb {
                             // Store the email in MongoDB
-                            if let Some(session_id) = session_manager.get_session_id() {
-                                let username = session_manager.get_username(&session_id);
-                                let mailbox = session_manager.get_mailbox(&session_id);
-                                if let (Some(user), Some(mbox)) = (username, mailbox) {
-                                    if let Err(e) =
-                                        logic.store_email(&user, &mbox, &email_to_store).await
-                                    {
-                                        eprintln!("Failed to store email in MongoDB: {}", e);
-                                        write_response(&mut stream, "554 Transaction failed\r\n")
-                                            .await?;
-                                    } else {
-                                        println!("Email stored successfully in MongoDB");
-                                        let _ = logic.log_mail_event(
+                            let resolved_route = if let Some(session_id) = authenticated_session_id.as_ref() {
+                                let username = session_manager.get_username(session_id);
+                                let mailbox = session_manager.get_mailbox(session_id);
+                                username.zip(mailbox)
+                            } else {
+                                recipient_local_part(&email_to_store.to)
+                                    .map(|user| (user, "inbox".to_string()))
+                            };
+
+                            if let Some((user, mbox)) = resolved_route {
+                                if let Err(e) = logic.store_email(&user, &mbox, &email_to_store).await {
+                                    eprintln!("Failed to store email in MongoDB: {}", e);
+                                    write_response(&mut stream, "554 Transaction failed\r\n")
+                                        .await?;
+                                } else {
+                                    println!("Email stored successfully in MongoDB for {user}/{mbox}");
+                                    let _ = logic
+                                        .log_mail_event(
                                             "received",
                                             &user,
                                             &email_to_store.id,
                                             &email_to_store.subject,
                                             &email_to_store.from,
                                             &email_to_store.to,
-                                        ).await;
-                                        if is_local_recipient(&email_to_store.to) {
-                                            write_response(&mut stream, "250 OK\r\n").await?;
-                                        } else {
-                                            match send_outgoing_email(&email_to_store).await {
-                                                Ok(_) => {
-                                                    write_response(&mut stream, "250 OK\r\n").await?;
-                                                }
-                                                Err(e) => {
-                                                    error!("Failed to forward authenticated email: {}", e);
-                                                    write_response(
-                                                        &mut stream,
-                                                        "451 4.4.0 Temporary forwarding failure\r\n",
-                                                    )
-                                                    .await?;
-                                                }
+                                        )
+                                        .await;
+                                    if is_local_recipient(&email_to_store.to) {
+                                        write_response(&mut stream, "250 OK\r\n").await?;
+                                    } else {
+                                        match send_outgoing_email(&email_to_store).await {
+                                            Ok(_) => {
+                                                write_response(&mut stream, "250 OK\r\n").await?;
+                                            }
+                                            Err(e) => {
+                                                error!("Failed to forward authenticated email: {}", e);
+                                                write_response(
+                                                    &mut stream,
+                                                    "451 4.4.0 Temporary forwarding failure\r\n",
+                                                )
+                                                .await?;
                                             }
                                         }
                                     }
-                                } else {
-                                    eprintln!(
-                                        "Mailbox or username not found for session ID: {}",
-                                        session_id
-                                    );
-                                    write_response(&mut stream, "554 Transaction failed\r\n")
-                                        .await?;
                                 }
                             } else {
-                                eprintln!("Session ID not found");
-                                write_response(&mut stream, "554 Transaction failed\r\n").await?;
+                                eprintln!(
+                                    "No routeable mailbox for recipient {}; refusing",
+                                    email_to_store.to
+                                );
+                                write_response(&mut stream, "550 5.1.1 User unknown\r\n").await?;
                             }
                         } else {
                             // Store locally
@@ -426,11 +468,14 @@ async fn handle_tls_client(
                     )
                     .await?;
                     println!("Response: {}", response);
+                    if line.trim().to_ascii_uppercase().starts_with("AUTH ") && response.starts_with("235") {
+                        authenticated_session_id = extract_session_id_from_response(&response);
+                    }
                     write_response(&mut stream, &response).await?;
 
-                    if line.trim() == "DATA" {
+                    if line.trim().eq_ignore_ascii_case("DATA") {
                         in_data_mode = true;
-                    } else if line.trim() == "QUIT" {
+                    } else if line.trim().eq_ignore_ascii_case("QUIT") {
                         if let Ok(content) = extract_email_content(&current_email.email.body) {
                             println!("Extracted email content: {}", content);
                         } else {
@@ -468,6 +513,7 @@ async fn handle_plain_client(
 
     let mut in_data_mode = false;
     let mut in_body = false; // Indicateur pour savoir si nous sommes dans le corps de l'email
+    let mut authenticated_session_id: Option<String> = None;
 
     let mut current_email = CustomEmail {
         email: Email::new("", "", "", "", ""),
@@ -515,65 +561,69 @@ async fn handle_plain_client(
                             == "true";
                         if use_mongodb {
                             // Store in MongoDB
-                            if let Some(session_id) = session_manager.get_session_id() {
-                                let username = session_manager.get_username(&session_id);
-                                let mailbox = session_manager.get_mailbox(&session_id);
-                                if let (Some(user), Some(mbox)) = (username, mailbox) {
-                                    let email_to_store = Email {
-                                        id: current_email.email.id.clone(),
-                                        from: current_email.email.from.clone(),
-                                        to: current_email.email.to.clone(),
-                                        subject: current_email.email.subject.clone(),
-                                        body: current_email.email.body.clone(),
-                                        headers: current_email.email.headers.clone(),
-                                        flags: current_email.email.flags.clone(),
-                                        sequence_number: current_email.email.sequence_number,
-                                        uid: current_email.email.uid,
-                                        internal_date: current_email.email.internal_date,
-                                        dkim_signature: current_email.dkim_signature.clone(),
-                                    };
-                                    if let Err(e) =
-                                        logic.store_email(&user, &mbox, &email_to_store).await
-                                    {
-                                        eprintln!("Failed to store email in MongoDB: {}", e);
-                                        write_response(&mut stream, "554 Transaction failed\r\n")
-                                            .await?;
-                                    } else {
-                                        println!("Email stored successfully in MongoDB");
-                                        let _ = logic.log_mail_event(
+                            let resolved_route = if let Some(session_id) = authenticated_session_id.as_ref() {
+                                let username = session_manager.get_username(session_id);
+                                let mailbox = session_manager.get_mailbox(session_id);
+                                username.zip(mailbox)
+                            } else {
+                                recipient_local_part(&current_email.email.to)
+                                    .map(|user| (user, "inbox".to_string()))
+                            };
+
+                            if let Some((user, mbox)) = resolved_route {
+                                let email_to_store = Email {
+                                    id: current_email.email.id.clone(),
+                                    from: current_email.email.from.clone(),
+                                    to: current_email.email.to.clone(),
+                                    subject: current_email.email.subject.clone(),
+                                    body: current_email.email.body.clone(),
+                                    headers: current_email.email.headers.clone(),
+                                    flags: current_email.email.flags.clone(),
+                                    sequence_number: current_email.email.sequence_number,
+                                    uid: current_email.email.uid,
+                                    internal_date: current_email.email.internal_date,
+                                    dkim_signature: current_email.dkim_signature.clone(),
+                                };
+                                if let Err(e) = logic.store_email(&user, &mbox, &email_to_store).await {
+                                    eprintln!("Failed to store email in MongoDB: {}", e);
+                                    write_response(&mut stream, "554 Transaction failed\r\n")
+                                        .await?;
+                                } else {
+                                    println!("Email stored successfully in MongoDB for {user}/{mbox}");
+                                    let _ = logic
+                                        .log_mail_event(
                                             "received",
                                             &user,
                                             &email_to_store.id,
                                             &email_to_store.subject,
                                             &email_to_store.from,
                                             &email_to_store.to,
-                                        ).await;
-                                        if is_local_recipient(&email_to_store.to) {
-                                            write_response(&mut stream, "250 OK\r\n").await?;
-                                        } else {
-                                            match send_outgoing_email(&email_to_store).await {
-                                                Ok(_) => {
-                                                    write_response(&mut stream, "250 OK\r\n").await?;
-                                                }
-                                                Err(e) => {
-                                                    error!("Failed to forward authenticated email: {}", e);
-                                                    write_response(
-                                                        &mut stream,
-                                                        "451 4.4.0 Temporary forwarding failure\r\n",
-                                                    )
-                                                    .await?;
-                                                }
+                                        )
+                                        .await;
+                                    if is_local_recipient(&email_to_store.to) {
+                                        write_response(&mut stream, "250 OK\r\n").await?;
+                                    } else {
+                                        match send_outgoing_email(&email_to_store).await {
+                                            Ok(_) => {
+                                                write_response(&mut stream, "250 OK\r\n").await?;
+                                            }
+                                            Err(e) => {
+                                                error!("Failed to forward authenticated email: {}", e);
+                                                write_response(
+                                                    &mut stream,
+                                                    "451 4.4.0 Temporary forwarding failure\r\n",
+                                                )
+                                                .await?;
                                             }
                                         }
                                     }
-                                } else {
-                                    eprintln!("Mailbox or username not found for session");
-                                    write_response(&mut stream, "554 Transaction failed\r\n")
-                                        .await?;
                                 }
                             } else {
-                                eprintln!("Session ID not found");
-                                write_response(&mut stream, "554 Transaction failed\r\n").await?;
+                                eprintln!(
+                                    "No routeable mailbox for recipient {}; refusing",
+                                    current_email.email.to
+                                );
+                                write_response(&mut stream, "550 5.1.1 User unknown\r\n").await?;
                             }
                         } else {
                             // Store locally + attempt forward
@@ -618,11 +668,16 @@ async fn handle_plain_client(
                     )
                     .await?;
                     println!("Response: {}", response);
+                    if buffer.trim().to_ascii_uppercase().starts_with("AUTH ")
+                        && response.starts_with("235")
+                    {
+                        authenticated_session_id = extract_session_id_from_response(&response);
+                    }
                     write_response(&mut stream, &response).await?;
 
-                    if buffer.trim() == "DATA" {
+                    if buffer.trim().eq_ignore_ascii_case("DATA") {
                         in_data_mode = true;
-                    } else if buffer.trim() == "QUIT" {
+                    } else if buffer.trim().eq_ignore_ascii_case("QUIT") {
                         write_response(&mut stream, "221 Bye\r\n").await?;
                         break;
                     }
@@ -649,15 +704,14 @@ async fn process_command(
     // Implement your SMTP command processing logic here
     // This is a basic example and should be expanded based on your needs
 
-    println!(
-        "In process_command with: {}",
-        command.trim().to_uppercase().as_str()
-    );
+    let trimmed = command.trim();
+    let upper = trimmed.to_ascii_uppercase();
+    println!("In process_command with: {}", upper.as_str());
 
     let require_starttls = env_bool("SMTP_REQUIRE_STARTTLS", true);
     let is_tls = stream.is_tls();
 
-    match command.trim().to_uppercase().as_str() {
+    match upper.as_str() {
         s if s.starts_with("HELO") || s.starts_with("EHLO") => {
             let mut caps = vec!["250-mail.misfits.ai Hello".to_string()];
             if !is_tls {
@@ -679,14 +733,14 @@ async fn process_command(
             if require_starttls && !is_tls {
                 return Ok("530 Must issue a STARTTLS command first\r\n".to_string());
             }
-            handle_auth_plain(command, session_manager.clone()).await
+            handle_auth_plain(trimmed, session_manager.clone()).await
         }
         s if s.starts_with("MAIL FROM:") => {
-            email.email.from = s.trim_start_matches("MAIL FROM:").trim().to_string();
+            email.email.from = trimmed[10..].trim().to_string();
             Ok("250 OK\r\n".to_string())
         }
         s if s.starts_with("RCPT TO:") => {
-            email.email.to = s.trim_start_matches("RCPT TO:").trim().to_string();
+            email.email.to = trimmed[8..].trim().to_string();
             Ok("250 OK\r\n".to_string())
         }
         s if s.starts_with("SUBJECT:") => {
@@ -796,7 +850,10 @@ async fn handle_auth_plain(
         let session_id = session_manager.create_session(&username_str);
         // FE + API use lowercase folder ids (issue #167)
         session_manager.set_mailbox(&session_id, "inbox");
-        Ok("235 Authentication successful\r\n".to_string())
+        Ok(format!(
+            "235 Authentication successful, session ID: {}\r\n",
+            session_id
+        ))
     } else {
         Ok("535 Authentication failed\r\n".to_string())
     }
