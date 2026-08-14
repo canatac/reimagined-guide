@@ -652,6 +652,10 @@ pub(crate) struct ComposeSendRequest {
     /// Some FE clients send flat strings instead of recipient objects.
     #[serde(default)]
     from: Option<String>,
+    #[serde(default, rename = "inReplyTo", alias = "in_reply_to")]
+    in_reply_to: Option<String>,
+    #[serde(default)]
+    references: Vec<String>,
 }
 
 pub(crate) fn format_recipient(r: &ComposerRecipient) -> Option<String> {
@@ -689,6 +693,15 @@ pub(crate) fn normalize_message_id(raw: &str) -> String {
         .trim_start_matches('<')
         .trim_end_matches('>')
         .to_string()
+}
+
+pub(crate) fn canonical_message_id(raw: &str) -> Option<String> {
+    let normalized = normalize_message_id(raw);
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(format!("<{}>", normalized))
+    }
 }
 
 pub(crate) fn is_private_or_local_ip(ip: &str) -> bool {
@@ -749,6 +762,15 @@ pub(crate) async fn api_send(
     let bcc = join_recipients(&body.bcc);
     let subject = body.subject.clone();
     let mail_body = body.body.clone();
+    let in_reply_to = body
+        .in_reply_to
+        .as_deref()
+        .and_then(canonical_message_id);
+    let references = body
+        .references
+        .iter()
+        .filter_map(|r| canonical_message_id(r))
+        .collect::<Vec<_>>();
 
     let email_req = EmailRequest {
         from: from.clone(),
@@ -883,6 +905,12 @@ pub(crate) async fn api_send(
     if !dkim_sig.is_empty() {
         headers.push(("DKIM-Signature".to_string(), dkim_sig.clone()));
     }
+    if let Some(in_reply_to) = &in_reply_to {
+        headers.push(("In-Reply-To".to_string(), in_reply_to.clone()));
+    }
+    if !references.is_empty() {
+        headers.push(("References".to_string(), references.join(" ")));
+    }
 
     let email = Email {
         id: id.clone(),
@@ -927,6 +955,8 @@ pub(crate) async fn api_send(
             "body": &mail_body,
             "dkim_signature": email.dkim_signature.as_deref().unwrap_or(""),
             "message_id": &message_id,
+            "in_reply_to": in_reply_to.as_deref().unwrap_or(""),
+            "references": &references,
             "status": "pending",
             "send_after": send_after,
             "created_at": bson::DateTime::from_millis(Utc::now().timestamp_millis()),
@@ -1124,6 +1154,15 @@ pub(crate) async fn api_send_schedule(
         .unwrap_or_else(|| from_address_for_user(&user_id));
     let cc = join_recipients(&body.cc);
     let bcc = join_recipients(&body.bcc);
+    let in_reply_to = body
+        .in_reply_to
+        .as_deref()
+        .and_then(canonical_message_id);
+    let references = body
+        .references
+        .iter()
+        .filter_map(|r| canonical_message_id(r))
+        .collect::<Vec<_>>();
 
     let id = Uuid::new_v4().to_string();
     let db = mongo_db_name();
@@ -1143,6 +1182,8 @@ pub(crate) async fn api_send_schedule(
             "body": &body.body,
             "dkim_signature": "",
             "message_id": format!("<{}@{}>", &id, domain_from_env()),
+            "in_reply_to": in_reply_to.as_deref().unwrap_or(""),
+            "references": &references,
             "status": "scheduled",
             "send_after": bson::DateTime::from_millis(send_at.timestamp_millis()),
             "created_at": bson::DateTime::from_millis(Utc::now().timestamp_millis()),
@@ -1202,6 +1243,20 @@ pub(crate) async fn send_queue_worker(mongo: Arc<mongodb::Client>) {
             let bcc = entry.get_str("bcc").unwrap_or("").to_string();
             let dkim_sig = entry.get_str("dkim_signature").unwrap_or("").to_string();
             let message_id = entry.get_str("message_id").unwrap_or("").to_string();
+            let in_reply_to = entry
+                .get_str("in_reply_to")
+                .ok()
+                .and_then(canonical_message_id);
+            let references = entry
+                .get_array("references")
+                .ok()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str())
+                        .filter_map(canonical_message_id)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
 
             // Optimistic lock: claim entry before sending
             let claim = coll
@@ -1248,6 +1303,12 @@ pub(crate) async fn send_queue_worker(mongo: Arc<mongodb::Client>) {
             }
             if !dkim_sig.is_empty() {
                 headers.push(("DKIM-Signature".to_string(), dkim_sig.clone()));
+            }
+            if let Some(in_reply_to) = &in_reply_to {
+                headers.push(("In-Reply-To".to_string(), in_reply_to.clone()));
+            }
+            if !references.is_empty() {
+                headers.push(("References".to_string(), references.join(" ")));
             }
 
             let email = Email {

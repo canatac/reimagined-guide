@@ -143,6 +143,10 @@ struct ScheduleSendBody {
     body: String,
     #[serde(default)]
     from: Option<String>,
+    #[serde(default, rename = "inReplyTo", alias = "in_reply_to")]
+    in_reply_to: Option<String>,
+    #[serde(default)]
+    references: Vec<String>,
     send_at: String,
 }
 
