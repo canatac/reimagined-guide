@@ -148,6 +148,20 @@ fn compact_preview(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+fn raw_mime_from_email(email: &Email) -> String {
+    if email.headers.is_empty() {
+        email.body.clone()
+    } else {
+        let headers = email
+            .headers
+            .iter()
+            .map(|(k, v)| format!("{}: {}", k, v))
+            .collect::<Vec<_>>()
+            .join("\r\n");
+        format!("{}\r\n\r\n{}", headers, email.body)
+    }
+}
+
 fn walk_mime_parts(part: &mailparse::ParsedMail<'_>, html: &mut Option<String>, text: &mut Option<String>) {
     if part.subparts.is_empty() {
         let mt = part.ctype.mimetype.to_ascii_lowercase();
@@ -211,18 +225,144 @@ fn decode_from_synthetic_boundary(body: &str) -> Option<(String, String, String)
     decode_parts_from_parsed(&parsed)
 }
 
-fn decoded_mail_body_for_ui(email: &Email) -> (String, String, String) {
-    let raw_mime = if email.headers.is_empty() {
-        email.body.clone()
+fn infer_attachment_kind(content_type: &str, filename: &str) -> &'static str {
+    let ct = content_type.to_ascii_lowercase();
+    let lower_name = filename.to_ascii_lowercase();
+    if ct.starts_with("image/") {
+        "image"
+    } else if ct == "application/pdf" || lower_name.ends_with(".pdf") {
+        "pdf"
+    } else if ct.contains("word")
+        || lower_name.ends_with(".doc")
+        || lower_name.ends_with(".docx")
+        || lower_name.ends_with(".odt")
+    {
+        "doc"
+    } else if ct.contains("sheet")
+        || lower_name.ends_with(".xls")
+        || lower_name.ends_with(".xlsx")
+        || lower_name.ends_with(".csv")
+    {
+        "spreadsheet"
+    } else if ct.contains("presentation")
+        || lower_name.ends_with(".ppt")
+        || lower_name.ends_with(".pptx")
+    {
+        "presentation"
+    } else if ct.starts_with("audio/") {
+        "audio"
+    } else if ct.starts_with("video/") {
+        "video"
+    } else if ct.contains("zip")
+        || ct.contains("gzip")
+        || ct.contains("tar")
+        || ct.contains("7z")
+        || lower_name.ends_with(".zip")
+        || lower_name.ends_with(".tar")
+        || lower_name.ends_with(".gz")
+        || lower_name.ends_with(".7z")
+    {
+        "archive"
     } else {
-        let headers = email
-            .headers
-            .iter()
-            .map(|(k, v)| format!("{}: {}", k, v))
-            .collect::<Vec<_>>()
-            .join("\r\n");
-        format!("{}\r\n\r\n{}", headers, email.body)
-    };
+        "other"
+    }
+}
+
+#[derive(Clone)]
+struct ExtractedAttachment {
+    id: String,
+    filename: String,
+    content_type: String,
+    size: u64,
+    kind: String,
+    data: Vec<u8>,
+}
+
+fn walk_mime_attachments(
+    part: &mailparse::ParsedMail<'_>,
+    out: &mut Vec<ExtractedAttachment>,
+    index: &mut usize,
+) {
+    if !part.subparts.is_empty() {
+        for sub in &part.subparts {
+            walk_mime_attachments(sub, out, index);
+        }
+        return;
+    }
+
+    let content_type = part.ctype.mimetype.to_ascii_lowercase();
+    let disp = part.get_content_disposition();
+    let disp_kind = format!("{:?}", disp.disposition).to_ascii_lowercase();
+    let filename = disp
+        .params
+        .get("filename")
+        .cloned()
+        .or_else(|| part.ctype.params.get("name").cloned())
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| format!("attachment-{}", *index + 1));
+
+    let is_attachment = disp_kind == "attachment"
+        || disp.params.contains_key("filename")
+        || part.ctype.params.contains_key("name")
+        || (!content_type.starts_with("text/") && content_type != "application/pgp-signature");
+
+    if !is_attachment {
+        return;
+    }
+
+    let bytes = part.get_body_raw().unwrap_or_default();
+    let kind = infer_attachment_kind(&content_type, &filename).to_string();
+    let id = format!("att-{}", *index);
+    *index += 1;
+
+    out.push(ExtractedAttachment {
+        id,
+        filename,
+        content_type,
+        size: bytes.len() as u64,
+        kind,
+        data: bytes,
+    });
+}
+
+fn extract_attachments_for_ui(email: &Email) -> Vec<ExtractedAttachment> {
+    let raw_mime = raw_mime_from_email(email);
+    if let Ok(parsed) = mailparse::parse_mail(raw_mime.as_bytes()) {
+        let mut out = Vec::new();
+        let mut idx = 0usize;
+        walk_mime_attachments(&parsed, &mut out, &mut idx);
+        return out;
+    }
+
+    if looks_like_raw_multipart_dump(&email.body) {
+        let first_line = match email.body.lines().next() {
+            Some(l) => l.trim(),
+            None => return Vec::new(),
+        };
+        let boundary = first_line
+            .trim_start_matches("--")
+            .trim_end_matches("--")
+            .trim();
+        if boundary.is_empty() {
+            return Vec::new();
+        }
+        let synthetic = format!(
+            "Content-Type: multipart/mixed; boundary=\"{}\"\r\n\r\n{}",
+            boundary, email.body
+        );
+        if let Ok(parsed) = mailparse::parse_mail(synthetic.as_bytes()) {
+            let mut out = Vec::new();
+            let mut idx = 0usize;
+            walk_mime_attachments(&parsed, &mut out, &mut idx);
+            return out;
+        }
+    }
+
+    Vec::new()
+}
+
+fn decoded_mail_body_for_ui(email: &Email) -> (String, String, String) {
+    let raw_mime = raw_mime_from_email(email);
 
     if let Ok(parsed) = mailparse::parse_mail(raw_mime.as_bytes()) {
         if let Some(decoded) = decode_parts_from_parsed(&parsed) {
@@ -328,6 +468,21 @@ pub(crate) fn email_to_dto(email: &Email, folder: &str, include_body: bool) -> E
         .filter(|s| !s.is_empty())
         .map(parse_address)
         .collect();
+    let attachments = extract_attachments_for_ui(email);
+    let attachments_json: Vec<serde_json::Value> = attachments
+        .iter()
+        .map(|att| {
+            serde_json::json!({
+                "id": att.id,
+                "filename": att.filename,
+                "contentType": att.content_type,
+                "size": att.size,
+                "type": att.kind,
+                "downloadUrl": format!("/api/emails/{}/attachments/{}", id, att.id),
+            })
+        })
+        .collect();
+
     EmailDto {
         id,
         thread_id: message_id.clone(),
@@ -348,11 +503,48 @@ pub(crate) fn email_to_dto(email: &Email, folder: &str, include_body: bool) -> E
         is_read,
         is_starred,
         is_important: false,
-        has_attachments: false,
-        attachments: vec![],
+        has_attachments: !attachments_json.is_empty(),
+        attachments: attachments_json,
         labels: vec![],
         size: email.body.len() as u64,
         message_id,
+    }
+}
+
+pub(crate) async fn api_email_attachment_download(
+    path: web::Path<(String, String)>,
+    req: actix_web::HttpRequest,
+    logic: web::Data<Arc<Logic>>,
+) -> impl Responder {
+    let user_id = resolve_user_id(&req);
+    let (email_id, attachment_id) = path.into_inner();
+
+    match logic.fetch_email(&user_id, &email_id).await {
+        Ok(Some(email)) => {
+            let attachments = extract_attachments_for_ui(&email);
+            if let Some(att) = attachments.into_iter().find(|a| a.id == attachment_id) {
+                let safe_name = att.filename.replace('"', "_");
+                return HttpResponse::Ok()
+                    .insert_header(("Content-Type", att.content_type))
+                    .insert_header((
+                        "Content-Disposition",
+                        format!("attachment; filename=\"{}\"", safe_name),
+                    ))
+                    .body(att.data);
+            }
+            HttpResponse::NotFound().json(serde_json::json!({
+                "message": "Attachment not found",
+            }))
+        }
+        Ok(None) => HttpResponse::NotFound().json(serde_json::json!({
+            "message": "Email not found",
+        })),
+        Err(e) => {
+            eprintln!("api_email_attachment_download fetch_email error: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({
+                "message": "Failed to fetch attachment",
+            }))
+        }
     }
 }
 
