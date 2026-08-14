@@ -4504,8 +4504,24 @@ struct PatchChangeRequestInputApi {
     execution_error: Option<String>,
 }
 
+/// PR4 — query params optionnels : ?q=&role=&status=&page=&size=
+#[derive(Debug, Deserialize)]
+struct AdminUsersQuery {
+    #[serde(default)]
+    q: Option<String>,
+    #[serde(default)]
+    role: Option<String>,
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    page: Option<u64>,
+    #[serde(default)]
+    size: Option<u64>,
+}
+
 async fn api_admin_users_list(
     req: HttpRequest,
+    query: web::Query<AdminUsersQuery>,
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
     if let Err(resp) = admin_auth::require_admin(&req, &mongo, &mongo_db_name()).await {
@@ -4515,10 +4531,45 @@ async fn api_admin_users_list(
         .database(&mongo_db_name())
         .collection::<AdminUserRecord>(ADMIN_USERS_COLL);
 
+    // Filtre Mongo dérivé des query params. Tous optionnels — sans param,
+    // le comportement reste identique à PR3 (find({}) + sort + limit 500).
+    let mut filter = mongodb::bson::Document::new();
+    if let Some(role) = &query.role {
+        let r = role.trim().to_ascii_lowercase();
+        if !r.is_empty() {
+            filter.insert("role", r);
+        }
+    }
+    if let Some(status) = &query.status {
+        let s = status.trim().to_ascii_lowercase();
+        if !s.is_empty() {
+            filter.insert("status", s);
+        }
+    }
+    if let Some(q) = &query.q {
+        let q = q.trim();
+        if !q.is_empty() {
+            // Recherche naïve: email OU displayName contient q (case-insensitive).
+            let re_email = doc! { "email": { "$regex": q, "$options": "i" } };
+            let re_dn = doc! { "displayName": { "$regex": q, "$options": "i" } };
+            filter.insert("$or", vec![re_email, re_dn]);
+        }
+    }
+
+    // Pagination: valeurs par défaut équivalentes à l'ancien comportement
+    // (page 1, size 500) si absents.
+    let size = query.size.unwrap_or(500).clamp(1, 500);
+    let page = query.page.unwrap_or(1).max(1);
+    let skip = (page - 1) * size;
+
+    // Total pour la pagination (calcul best-effort, 0 en cas d'erreur).
+    let total = coll.count_documents(filter.clone()).await.unwrap_or(0);
+
     match coll
-        .find(doc! {})
+        .find(filter)
         .sort(doc! { "lastActivityAt": -1 })
-        .limit(500)
+        .skip(skip)
+        .limit(size as i64)
         .await
     {
         Ok(cursor) => {
@@ -4529,6 +4580,11 @@ async fn api_admin_users_list(
             HttpResponse::Ok().json(serde_json::json!({
                 "generatedAt": now_iso(),
                 "users": users,
+                "pagination": {
+                    "page": page,
+                    "size": size,
+                    "total": total,
+                },
             }))
         }
         Err(e) => {
@@ -4570,9 +4626,10 @@ async fn api_admin_user_create(
     body: web::Json<CreateAdminUserInput>,
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
-    if let Err(resp) = admin_auth::require_admin(&req, &mongo, &mongo_db_name()).await {
-        return resp;
-    }
+    let actor = match admin_auth::require_admin(&req, &mongo, &mongo_db_name()).await {
+        Ok(u) => u,
+        Err(resp) => return resp,
+    };
     let role = body.role.trim().to_ascii_lowercase();
     if !["user", "admin", "support"].contains(&role.as_str()) {
         return HttpResponse::BadRequest()
@@ -4627,7 +4684,19 @@ async fn api_admin_user_create(
         .collection::<AdminUserRecord>(ADMIN_USERS_COLL);
 
     match coll.insert_one(&user).await {
-        Ok(_) => HttpResponse::Created().json(serde_json::json!({ "user": user })),
+        Ok(_) => {
+            log_admin_action(
+                mongo.as_ref(),
+                &actor,
+                "user.create",
+                "admin_user",
+                &user.id,
+                None,
+                Some(serde_json::json!({ "email": user.email, "role": user.role, "status": user.status })),
+            )
+            .await;
+            HttpResponse::Created().json(serde_json::json!({ "user": user }))
+        }
         Err(e) => {
             eprintln!("api_admin_user_create error: {}", e);
             HttpResponse::InternalServerError()
@@ -4642,9 +4711,10 @@ async fn api_admin_user_patch(
     body: web::Json<UpdateAdminUserInput>,
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
-    if let Err(resp) = admin_auth::require_admin(&req, &mongo, &mongo_db_name()).await {
-        return resp;
-    }
+    let actor = match admin_auth::require_admin(&req, &mongo, &mongo_db_name()).await {
+        Ok(u) => u,
+        Err(resp) => return resp,
+    };
     let id = path.into_inner();
     let coll = mongo
         .database(&mongo_db_name())
@@ -4741,7 +4811,25 @@ async fn api_admin_user_patch(
         .upsert(false)
         .await
     {
-        Ok(_) => HttpResponse::Ok().json(serde_json::json!({ "user": updated })),
+        Ok(_) => {
+            log_admin_action(
+                mongo.as_ref(),
+                &actor,
+                "user.patch",
+                "admin_user",
+                &id,
+                None,
+                Some(serde_json::json!({
+                    "role": updated.role,
+                    "status": updated.status,
+                    "email": updated.email,
+                    "displayName": updated.display_name,
+                    "twoFactorEnabled": updated.two_factor_enabled,
+                })),
+            )
+            .await;
+            HttpResponse::Ok().json(serde_json::json!({ "user": updated }))
+        }
         Err(e) => {
             eprintln!("api_admin_user_patch write error: {}", e);
             HttpResponse::InternalServerError()
@@ -4755,9 +4843,10 @@ async fn api_admin_user_delete(
     path: web::Path<String>,
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
-    if let Err(resp) = admin_auth::require_admin(&req, &mongo, &mongo_db_name()).await {
-        return resp;
-    }
+    let actor = match admin_auth::require_admin(&req, &mongo, &mongo_db_name()).await {
+        Ok(u) => u,
+        Err(resp) => return resp,
+    };
     let id = path.into_inner();
     let coll = mongo
         .database(&mongo_db_name())
@@ -4765,6 +4854,16 @@ async fn api_admin_user_delete(
 
     match coll.delete_one(doc! { "id": &id }).await {
         Ok(res) if res.deleted_count > 0 => {
+            log_admin_action(
+                mongo.as_ref(),
+                &actor,
+                "user.delete",
+                "admin_user",
+                &id,
+                None,
+                None,
+            )
+            .await;
             HttpResponse::Ok().json(serde_json::json!({ "deleted": true, "id": id }))
         }
         Ok(_) => HttpResponse::NotFound()
@@ -4803,6 +4902,122 @@ async fn api_admin_whoami(
 // PR3 — Comptes admin réels
 // ================================================================
 
+// PR4 — audit trail admin.
+const ADMIN_AUDIT_COLL: &str = "admin_audit_log";
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct AdminAuditEntry {
+    id: String,
+    at: String,
+    actor_id: String,
+    actor_email: String,
+    action: String,
+    target_kind: String,
+    target_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    note: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    diff: Option<serde_json::Value>,
+}
+
+/// Best-effort — n'échoue jamais, log stderr en cas de problème Mongo.
+async fn log_admin_action(
+    mongo: &mongodb::Client,
+    actor: &admin_auth::AuthUser,
+    action: &str,
+    target_kind: &str,
+    target_id: &str,
+    note: Option<String>,
+    diff: Option<serde_json::Value>,
+) {
+    let entry = AdminAuditEntry {
+        id: Uuid::new_v4().to_string(),
+        at: now_iso(),
+        actor_id: actor.user_id.clone(),
+        actor_email: actor.email.clone(),
+        action: action.to_string(),
+        target_kind: target_kind.to_string(),
+        target_id: target_id.to_string(),
+        note,
+        diff,
+    };
+    let coll = mongo
+        .database(&mongo_db_name())
+        .collection::<AdminAuditEntry>(ADMIN_AUDIT_COLL);
+    if let Err(e) = coll.insert_one(&entry).await {
+        eprintln!("log_admin_action: insert error: {}", e);
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct AdminAuditQuery {
+    #[serde(default)]
+    target: Option<String>,
+    #[serde(default)]
+    actor: Option<String>,
+    #[serde(default)]
+    action: Option<String>,
+    #[serde(default)]
+    limit: Option<i64>,
+}
+
+/// GET /api/admin/audit-log
+async fn api_admin_audit_log(
+    req: HttpRequest,
+    query: web::Query<AdminAuditQuery>,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    if let Err(resp) = admin_auth::require_admin(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
+    let coll = mongo
+        .database(&mongo_db_name())
+        .collection::<AdminAuditEntry>(ADMIN_AUDIT_COLL);
+    let mut filter = mongodb::bson::Document::new();
+    if let Some(t) = &query.target {
+        let t = t.trim();
+        if !t.is_empty() {
+            filter.insert("targetId", t);
+        }
+    }
+    if let Some(a) = &query.actor {
+        let a = a.trim();
+        if !a.is_empty() {
+            filter.insert("actorId", a);
+        }
+    }
+    if let Some(a) = &query.action {
+        let a = a.trim();
+        if !a.is_empty() {
+            filter.insert("action", a);
+        }
+    }
+    let limit = query.limit.unwrap_or(200).clamp(1, 1000);
+    match coll
+        .find(filter)
+        .sort(doc! { "at": -1 })
+        .limit(limit)
+        .await
+    {
+        Ok(cursor) => {
+            let entries = cursor
+                .try_collect::<Vec<AdminAuditEntry>>()
+                .await
+                .unwrap_or_default();
+            HttpResponse::Ok().json(serde_json::json!({
+                "generatedAt": now_iso(),
+                "entries": entries,
+            }))
+        }
+        Err(e) => {
+            eprintln!("audit_log query error: {}", e);
+            HttpResponse::InternalServerError()
+                .json(serde_json::json!({ "message": "Failed to load audit log" }))
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ResetPasswordInput {
@@ -4824,9 +5039,10 @@ async fn api_admin_user_invite(
     path: web::Path<String>,
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
-    if let Err(resp) = admin_auth::require_admin(&req, &mongo, &mongo_db_name()).await {
-        return resp;
-    }
+    let actor = match admin_auth::require_admin(&req, &mongo, &mongo_db_name()).await {
+        Ok(u) => u,
+        Err(resp) => return resp,
+    };
     let id = path.into_inner();
     let coll = mongo
         .database(&mongo_db_name())
@@ -4928,6 +5144,17 @@ async fn api_admin_user_invite(
         let _ = mongo_for_send; // keep clone alive for future extension
     });
 
+    log_admin_action(
+        mongo.as_ref(),
+        &actor,
+        "user.invite",
+        "admin_user",
+        &id,
+        Some(format!("token expires {}", expires.to_rfc3339())),
+        None,
+    )
+    .await;
+
     HttpResponse::Ok().json(serde_json::json!({
         "invited": true,
         "user": user,
@@ -4946,9 +5173,10 @@ async fn api_admin_user_reset_password(
     body: web::Json<ResetPasswordInput>,
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
-    if let Err(resp) = admin_auth::require_admin(&req, &mongo, &mongo_db_name()).await {
-        return resp;
-    }
+    let actor = match admin_auth::require_admin(&req, &mongo, &mongo_db_name()).await {
+        Ok(u) => u,
+        Err(resp) => return resp,
+    };
     let id = path.into_inner();
     let coll = mongo
         .database(&mongo_db_name())
@@ -5037,6 +5265,17 @@ async fn api_admin_user_reset_password(
         }
     }
 
+    log_admin_action(
+        mongo.as_ref(),
+        &actor,
+        "user.reset_password",
+        "admin_user",
+        &id,
+        Some(if generated { "auto-generated".to_string() } else { "manual".to_string() }),
+        None,
+    )
+    .await;
+
     HttpResponse::Ok().json(serde_json::json!({
         "reset": true,
         "user": user,
@@ -5050,18 +5289,31 @@ async fn api_admin_user_revoke_sessions(
     path: web::Path<String>,
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
-    if let Err(resp) = admin_auth::require_admin(&req, &mongo, &mongo_db_name()).await {
-        return resp;
-    }
+    let actor = match admin_auth::require_admin(&req, &mongo, &mongo_db_name()).await {
+        Ok(u) => u,
+        Err(resp) => return resp,
+    };
     let id = path.into_inner();
     let sessions = mongo
         .database(&mongo_db_name())
         .collection::<admin_auth::AdminSession>(admin_auth::ADMIN_SESSIONS_COLL);
     match sessions.delete_many(doc! { "userId": &id }).await {
-        Ok(res) => HttpResponse::Ok().json(serde_json::json!({
-            "revoked": true,
-            "deletedCount": res.deleted_count,
-        })),
+        Ok(res) => {
+            log_admin_action(
+                mongo.as_ref(),
+                &actor,
+                "user.revoke_sessions",
+                "admin_user",
+                &id,
+                Some(format!("deleted {} sessions", res.deleted_count)),
+                None,
+            )
+            .await;
+            HttpResponse::Ok().json(serde_json::json!({
+                "revoked": true,
+                "deletedCount": res.deleted_count,
+            }))
+        }
         Err(e) => {
             eprintln!("revoke_sessions: error: {}", e);
             HttpResponse::InternalServerError()
@@ -7006,6 +7258,7 @@ async fn main() -> std::io::Result<()> {
                 .route("/api/admin/users", web::get().to(api_admin_users_list))
                 .route("/api/admin/users", web::post().to(api_admin_user_create))
                 .route("/api/admin/whoami", web::get().to(api_admin_whoami))
+                .route("/api/admin/audit-log", web::get().to(api_admin_audit_log))
                 .route(
                     "/api/admin/users/{id}/invite",
                     web::post().to(api_admin_user_invite),
