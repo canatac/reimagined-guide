@@ -640,46 +640,114 @@ impl ExternalImapService {
         run: &ExternalSyncRun,
     ) -> Result<SyncExecutionResult> {
         let discover = self.discover_folders(owner_user_id, account).await?;
-        let folders = self.list_folders(owner_user_id, &account.id).await?;
 
-        // Minimal operational sync: ensure one synthetic metadata item per folder if empty.
-        let mut fetched = 0u64;
-        for folder in folders {
-            let count = self
-                .coll_messages()
-                .count_documents(doc! {
-                    "owner_user_id": owner_user_id,
-                    "account_id": &account.id,
-                    "folder_id": &folder.id,
-                    "deleted": false,
-                })
-                .await?;
-            if count == 0 {
-                let now = bson::DateTime::from_millis(Utc::now().timestamp_millis());
-                let msg = ExternalImapMessage {
-                    id: Uuid::new_v4().to_string(),
-                    account_id: account.id.clone(),
-                    folder_id: Some(folder.id.clone()),
-                    owner_user_id: owner_user_id.to_string(),
-                    remote_uid: None,
-                    message_id_header: None,
-                    thread_key: None,
-                    from: Some(account.email.clone()),
-                    to: Some(account.email.clone()),
-                    subject: Some(format!("IMAP sync marker ({})", folder.remote_name)),
-                    sent_at: Some(now),
-                    flags: vec!["\\Seen".to_string()],
-                    internal_date: Some(now),
-                    body_preview: Some("Metadata sync marker created by external IMAP aggregator".to_string()),
-                    raw_ref: None,
-                    dedup_hash: Some(format!("sync-marker:{}:{}", account.id, folder.remote_name)),
-                    deleted: false,
-                    created_at: now,
-                    updated_at: now,
-                };
-                self.coll_messages().insert_one(msg).await?;
-                fetched += 1;
+        // Resolve the target inbox folder (create-if-missing is handled by
+        // discover_folders → ensure_folder). We fetch into whichever local
+        // folder has role="inbox"; if none, fall back to the first folder.
+        let folders = self.list_folders(owner_user_id, &account.id).await?;
+        let inbox_folder = folders
+            .iter()
+            .find(|f| f.local_role == "inbox")
+            .or_else(|| folders.first())
+            .cloned();
+
+        // Compute the SEARCH SINCE date from run.since (default: today).
+        let since_bson = run.since.unwrap_or_else(|| {
+            bson::DateTime::from_millis(Utc::now().timestamp_millis())
+        });
+        let since_chrono = chrono::DateTime::<Utc>::from_timestamp_millis(
+            since_bson.timestamp_millis(),
+        )
+        .unwrap_or_else(Utc::now);
+        let since_imap = format_imap_date(&since_chrono);
+
+        // Fetch remote headers via a real IMAP session (blocking dialog).
+        let host = account.imap_host.clone();
+        let port = account.imap_port;
+        let tls = account.imap_tls;
+        let login_user = account.email.clone();
+        let login_secret = account.secret_value.clone().unwrap_or_default();
+        let fetch_res: std::result::Result<Vec<ImapFetchedHeader>, String> =
+            tokio::task::spawn_blocking(move || {
+                imap_fetch_headers_since(
+                    &host,
+                    port,
+                    tls,
+                    &login_user,
+                    &login_secret,
+                    "INBOX",
+                    &since_imap,
+                )
+            })
+            .await
+            .map_err(|e| mongodb::error::Error::custom(format!("imap fetch join error: {e}")))?;
+
+        let fetched_headers = match fetch_res {
+            Ok(v) => v,
+            Err(e) => {
+                // Non-fatal: record error on account, complete run as
+                // failed. discover already succeeded so folders exist.
+                let _ = self
+                    .coll_accounts()
+                    .update_one(
+                        doc! { "owner_user_id": owner_user_id, "id": &account.id },
+                        doc! { "$set": { "last_error": &e } },
+                    )
+                    .await;
+                return Err(mongodb::error::Error::custom(format!(
+                    "IMAP fetch failed: {e}"
+                )));
             }
+        };
+
+        // Persist headers: dedupe on (account_id, remote_uid) via replace_one
+        // upsert to keep the sync idempotent.
+        let now = bson::DateTime::from_millis(Utc::now().timestamp_millis());
+        let mut fetched = 0u64;
+        let folder_id = inbox_folder.as_ref().map(|f| f.id.clone());
+
+        for h in fetched_headers {
+            let msg_id_header = h.message_id.clone();
+            let dedup = format!("uid:{}:{}", account.id, h.uid);
+            let internal_dt = h
+                .internal_date
+                .map(|dt| bson::DateTime::from_millis(dt.timestamp_millis()));
+            let sent_dt = h
+                .date
+                .map(|dt| bson::DateTime::from_millis(dt.timestamp_millis()));
+
+            let doc_id = Uuid::new_v4().to_string();
+            let msg = ExternalImapMessage {
+                id: doc_id,
+                account_id: account.id.clone(),
+                folder_id: folder_id.clone(),
+                owner_user_id: owner_user_id.to_string(),
+                remote_uid: Some(h.uid),
+                message_id_header: msg_id_header,
+                thread_key: None,
+                from: h.from,
+                to: h.to,
+                subject: h.subject,
+                sent_at: sent_dt,
+                flags: h.flags,
+                internal_date: internal_dt,
+                body_preview: None,
+                raw_ref: None,
+                dedup_hash: Some(dedup.clone()),
+                deleted: false,
+                created_at: now,
+                updated_at: now,
+            };
+
+            // Upsert on (account_id, remote_uid) so re-syncs don't duplicate.
+            self.coll_messages()
+                .replace_one(
+                    doc! { "account_id": &account.id, "remote_uid": h.uid as i64 },
+                    &msg,
+                )
+                .upsert(true)
+                .await?;
+            fetched += 1;
         }
 
         self.coll_accounts()
@@ -927,4 +995,306 @@ fn parse_list_folders(lines: &[String]) -> Vec<String> {
 
 fn escape_imap(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/* ---------------------------------------------------------------- *
+ * Real IMAP header FETCH (introduced for the external-account sync)
+ *
+ * Reuses the same hand-rolled CAPABILITY/LOGIN/LIST dialog and adds:
+ *   a4 SELECT <folder>
+ *   a5 UID SEARCH SINCE <dd-Mmm-yyyy>
+ *   a6 UID FETCH <uids> (UID INTERNALDATE FLAGS
+ *                        BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)])
+ * Returns a Vec<ImapFetchedHeader> the sync layer persists via replace_one.
+ * ---------------------------------------------------------------- */
+
+#[derive(Debug, Clone)]
+pub(crate) struct ImapFetchedHeader {
+    pub uid: u64,
+    pub flags: Vec<String>,
+    pub internal_date: Option<chrono::DateTime<Utc>>,
+    pub date: Option<chrono::DateTime<Utc>>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub subject: Option<String>,
+    pub message_id: Option<String>,
+}
+
+/// Format a chrono UTC date as RFC 3501 SEARCH date: "01-Jan-2026".
+fn format_imap_date(dt: &chrono::DateTime<Utc>) -> String {
+    dt.format("%d-%b-%Y").to_string()
+}
+
+pub(crate) fn imap_fetch_headers_since(
+    host: &str,
+    port: u16,
+    use_tls: bool,
+    username: &str,
+    password: &str,
+    folder: &str,
+    since_imap: &str,
+) -> std::result::Result<Vec<ImapFetchedHeader>, String> {
+    if password.is_empty() {
+        return Err("Missing credential secretValue on external account".to_string());
+    }
+
+    let addr = (host, port)
+        .to_socket_addrs()
+        .map_err(|e| format!("resolve failed: {e}"))?
+        .next()
+        .ok_or_else(|| "resolve failed: no address".to_string())?;
+
+    let tcp = TcpStream::connect_timeout(&addr, Duration::from_secs(10))
+        .map_err(|e| format!("tcp connect failed: {e}"))?;
+    tcp.set_read_timeout(Some(Duration::from_secs(30))).ok();
+    tcp.set_write_timeout(Some(Duration::from_secs(30))).ok();
+
+    if use_tls {
+        let connector = SslConnector::builder(SslMethod::tls())
+            .map_err(|e| format!("tls builder failed: {e}"))?
+            .build();
+        let ssl = connector
+            .connect(host, tcp)
+            .map_err(|e| format!("tls connect failed: {e}"))?;
+        imap_fetch_dialog(ssl, username, password, folder, since_imap)
+    } else {
+        imap_fetch_dialog(tcp, username, password, folder, since_imap)
+    }
+}
+
+fn imap_fetch_dialog<S: std::io::Read + std::io::Write>(
+    mut stream: S,
+    username: &str,
+    password: &str,
+    folder: &str,
+    since_imap: &str,
+) -> std::result::Result<Vec<ImapFetchedHeader>, String> {
+    // Greeting
+    let _greeting = read_line_from_stream(&mut stream)?;
+
+    // LOGIN
+    let login = format!(
+        "a1 LOGIN \"{}\" \"{}\"\r\n",
+        escape_imap(username),
+        escape_imap(password)
+    );
+    stream
+        .write_all(login.as_bytes())
+        .map_err(|e| format!("write LOGIN failed: {e}"))?;
+    stream.flush().map_err(|e| format!("flush failed: {e}"))?;
+    let login_lines = read_until_tag_from_stream(&mut stream, "a1")?;
+    if !tag_status_ok(&login_lines, "a1") {
+        return Err(format!("IMAP login failed: {}", login_lines.join(" | ")));
+    }
+
+    // SELECT
+    let sel = format!("a2 SELECT \"{}\"\r\n", escape_imap(folder));
+    stream
+        .write_all(sel.as_bytes())
+        .map_err(|e| format!("write SELECT failed: {e}"))?;
+    stream.flush().map_err(|e| format!("flush failed: {e}"))?;
+    let sel_lines = read_until_tag_from_stream(&mut stream, "a2")?;
+    if !tag_status_ok(&sel_lines, "a2") {
+        return Err(format!(
+            "IMAP select {} failed: {}",
+            folder,
+            sel_lines.join(" | ")
+        ));
+    }
+
+    // UID SEARCH SINCE
+    let search = format!("a3 UID SEARCH SINCE {}\r\n", since_imap);
+    stream
+        .write_all(search.as_bytes())
+        .map_err(|e| format!("write SEARCH failed: {e}"))?;
+    stream.flush().map_err(|e| format!("flush failed: {e}"))?;
+    let search_lines = read_until_tag_from_stream(&mut stream, "a3")?;
+    if !tag_status_ok(&search_lines, "a3") {
+        return Err(format!(
+            "IMAP UID SEARCH failed: {}",
+            search_lines.join(" | ")
+        ));
+    }
+    let uids = parse_uid_search(&search_lines);
+    if uids.is_empty() {
+        // Nothing to fetch — logout cleanly, return empty.
+        let _ = stream.write_all(b"a9 LOGOUT\r\n");
+        let _ = stream.flush();
+        return Ok(vec![]);
+    }
+
+    // UID FETCH <uid-set> (…)
+    // We chunk to avoid oversized single command lines on large mailboxes.
+    let mut result: Vec<ImapFetchedHeader> = Vec::new();
+    for chunk in uids.chunks(200) {
+        let set = chunk
+            .iter()
+            .map(|u| u.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        let fetch_cmd = format!(
+            "a4 UID FETCH {} (UID INTERNALDATE FLAGS BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)])\r\n",
+            set
+        );
+        stream
+            .write_all(fetch_cmd.as_bytes())
+            .map_err(|e| format!("write FETCH failed: {e}"))?;
+        stream.flush().map_err(|e| format!("flush failed: {e}"))?;
+        let fetch_lines = read_until_tag_from_stream(&mut stream, "a4")?;
+        if !tag_status_ok(&fetch_lines, "a4") {
+            return Err(format!(
+                "IMAP UID FETCH failed: {}",
+                fetch_lines.join(" | ")
+            ));
+        }
+        let mut parsed = parse_fetch_headers(&fetch_lines);
+        result.append(&mut parsed);
+    }
+
+    let _ = stream.write_all(b"a9 LOGOUT\r\n");
+    let _ = stream.flush();
+    Ok(result)
+}
+
+fn parse_uid_search(lines: &[String]) -> Vec<u64> {
+    for l in lines {
+        if let Some(rest) = l.strip_prefix("* SEARCH") {
+            return rest
+                .split_whitespace()
+                .filter_map(|s| s.parse::<u64>().ok())
+                .collect();
+        }
+    }
+    vec![]
+}
+
+/// Best-effort parse of `* N FETCH (…)` blocks over a flat line stream.
+///
+/// The RFC 3501 grammar allows literals ({N}\r\n<N bytes>) and multi-line
+/// responses. Our reader tokenizes by CRLF, so an untagged FETCH response
+/// spans several entries in `lines`. We concatenate anything between two
+/// "* N FETCH" lines (or up to the tagged completion) into a single blob
+/// and pick out UID / INTERNALDATE / FLAGS / body headers with regex-free
+/// substring scanning.
+fn parse_fetch_headers(lines: &[String]) -> Vec<ImapFetchedHeader> {
+    let mut out = Vec::new();
+
+    // Group lines into per-message blocks.
+    let mut blocks: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    for l in lines {
+        if l.starts_with("* ") && l.contains(" FETCH ") {
+            if !cur.is_empty() {
+                blocks.push(std::mem::take(&mut cur));
+            }
+        }
+        if !cur.is_empty() {
+            cur.push('\n');
+        }
+        cur.push_str(l);
+    }
+    if !cur.is_empty() {
+        blocks.push(cur);
+    }
+
+    for b in blocks {
+        if !b.contains(" FETCH ") {
+            continue;
+        }
+        let uid = extract_uid(&b).unwrap_or(0);
+        if uid == 0 {
+            continue;
+        }
+        let internal_date = extract_internaldate(&b);
+        let flags = extract_flags(&b);
+        let (from, to, subject, date_hdr, message_id) = extract_header_fields(&b);
+        out.push(ImapFetchedHeader {
+            uid,
+            flags,
+            internal_date,
+            date: date_hdr,
+            from,
+            to,
+            subject,
+            message_id,
+        });
+    }
+    out
+}
+
+fn extract_uid(blob: &str) -> Option<u64> {
+    // Look for "UID <digits>" inside the parenthesized response.
+    let idx = blob.find("UID ")?;
+    let rest = &blob[idx + 4..];
+    let end = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
+    rest[..end].parse::<u64>().ok()
+}
+
+fn extract_internaldate(blob: &str) -> Option<chrono::DateTime<Utc>> {
+    // INTERNALDATE "01-Jan-2026 12:34:56 +0000"
+    let idx = blob.find("INTERNALDATE ")?;
+    let rest = &blob[idx + "INTERNALDATE ".len()..];
+    let start = rest.find('"')? + 1;
+    let end = start + rest[start..].find('"')?;
+    let raw = &rest[start..end];
+    // Format: "%d-%b-%Y %H:%M:%S %z"
+    chrono::DateTime::parse_from_str(raw, "%d-%b-%Y %H:%M:%S %z")
+        .ok()
+        .map(|dt| dt.with_timezone(&Utc))
+}
+
+fn extract_flags(blob: &str) -> Vec<String> {
+    let idx = match blob.find("FLAGS (") {
+        Some(i) => i,
+        None => return vec![],
+    };
+    let rest = &blob[idx + "FLAGS (".len()..];
+    let end = match rest.find(')') {
+        Some(i) => i,
+        None => return vec![],
+    };
+    rest[..end]
+        .split_whitespace()
+        .map(|s| s.to_string())
+        .collect()
+}
+
+fn extract_header_fields(
+    blob: &str,
+) -> (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<chrono::DateTime<Utc>>,
+    Option<String>,
+) {
+    // Body of BODY[HEADER.FIELDS (...)] is a raw header block. We look for
+    // the literal marker `{N}` followed by \n and then read the header lines.
+    let mut from = None;
+    let mut to = None;
+    let mut subject = None;
+    let mut date = None;
+    let mut message_id = None;
+
+    // The header block lives between the last "{N}" marker and the closing
+    // ")" of the FETCH response. Cheap heuristic: scan every line for the
+    // "Header: value" pattern.
+    for raw_line in blob.lines() {
+        let line = raw_line.trim_start();
+        if let Some(v) = line.strip_prefix("From: ") {
+            from = Some(v.trim().to_string());
+        } else if let Some(v) = line.strip_prefix("To: ") {
+            to = Some(v.trim().to_string());
+        } else if let Some(v) = line.strip_prefix("Subject: ") {
+            subject = Some(v.trim().to_string());
+        } else if let Some(v) = line.strip_prefix("Message-ID: ") {
+            message_id = Some(v.trim().trim_matches(|c| c == '<' || c == '>').to_string());
+        } else if let Some(v) = line.strip_prefix("Date: ") {
+            date = chrono::DateTime::parse_from_rfc2822(v.trim())
+                .ok()
+                .map(|dt| dt.with_timezone(&Utc));
+        }
+    }
+
+    (from, to, subject, date, message_id)
 }
