@@ -7,6 +7,9 @@ use mongodb::{bson::doc, error::Result, Client};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+#[cfg(not(test))]
+pub mod mongo_adapter;
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct User {
     #[serde(rename = "_id", skip_serializing, skip_deserializing)]
@@ -64,16 +67,26 @@ pub struct Mailbox {
 }
 
 pub struct Logic {
+    /// Client MongoDB brut — utilisé par les méthodes non-encore-migrées.
+    /// TODO(hex): à retirer une fois toutes les méthodes passent par `repo`.
     #[cfg(not(test))]
     client: Arc<Client>,
     #[cfg(test)]
     client: Box<dyn DatabaseInterface + Send + Sync>,
+    /// Port du domaine (hexagonal). En prod : MongoDatabaseAdapter.
+    /// En test : mock injecté. Utilisé par create_user, authenticate_user,
+    /// find_user, find_emails, find_email (Boucle A — port honnête).
+    #[cfg(not(test))]
+    repo: Arc<dyn DatabaseInterface + Send + Sync>,
 }
 
 impl Logic {
     #[cfg(not(test))]
     pub fn new(client: Arc<Client>) -> Self {
-        Logic { client }
+        let repo: Arc<dyn DatabaseInterface + Send + Sync> = Arc::new(
+            crate::logic::mongo_adapter::MongoDatabaseAdapter::new(client.clone()),
+        );
+        Logic { client, repo }
     }
 
     #[cfg(test)]
@@ -116,49 +129,11 @@ impl Logic {
             condition_accepted: false,
             locale: None,
         };
+        // Boucle A — port honnête : passage via le port DatabaseInterface
+        // en prod (MongoDatabaseAdapter) comme en test (mock).
         #[cfg(not(test))]
         {
-            let database_name =
-                std::env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
-            let collection_name =
-                std::env::var("MONGODB_USERS_COLLECTION").unwrap_or_else(|_| "users".to_string());
-            let collection = self
-                .client
-                .database(&database_name)
-                .collection::<User>(&collection_name);
-
-            // Insert the user
-            collection.insert_one(new_user).await?;
-
-            // Standard mailboxes to create
-            let standard_mailboxes = vec!["inbox", "sent", "drafts", "archive", "trash"];
-            let mailbox_collection = self
-                .client
-                .database(&database_name)
-                .collection::<Mailbox>("mailboxes");
-
-            for &mailbox_name in &standard_mailboxes {
-                let mailbox_filter = doc! { "name": mailbox_name, "user_id": username };
-                if mailbox_collection
-                    .find_one(mailbox_filter.clone())
-                    .await?
-                    .is_none()
-                {
-                    let mailbox = Mailbox {
-                        name: mailbox_name.to_string(),
-                        flags: vec![],
-                        exists: 0,
-                        recent: 0,
-                        unseen: 0,
-                        permanent_flags: vec![],
-                        uid_validity: 1,
-                        uid_next: 1,
-                        user_id: username.to_string(),
-                    };
-                    mailbox_collection.insert_one(mailbox).await?;
-                }
-            }
-            Ok(())
+            self.repo.insert_user(new_user).await
         }
         #[cfg(test)]
         {
