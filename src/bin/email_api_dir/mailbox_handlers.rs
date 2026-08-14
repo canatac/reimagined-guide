@@ -1,6 +1,6 @@
 
 #[derive(Deserialize)]
-struct EmailListQuery {
+pub(crate) struct EmailListQuery {
     #[serde(default = "default_folder")]
     folder: String,
     #[serde(default = "default_page")]
