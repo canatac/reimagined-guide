@@ -1,7 +1,7 @@
 // send_dispatch.rs — split from main.rs (Sprint 9)
 #![allow(unused_imports)]
 use super::*;
-use crate::{monitoring, security, admin_ops, monitoring_handlers};
+use simple_smtp_server::{monitoring, security};
 
 pub(crate) async fn send_email_handler(
     email_req: web::Json<EmailRequest>,

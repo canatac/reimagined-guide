@@ -54,12 +54,22 @@ mod mailbox;
 mod admin_ops;
 mod external_handlers;
 mod external_probe_handlers;
+mod event_handlers;
+mod oauth_utils;
+mod mailing_list_handlers;
+mod send_dispatch;
+mod web_utils;
 
 pub use auth_handlers::*;
 pub use monitoring_handlers::*;
 pub use mailbox::*;
 pub use admin_ops::*;
 pub use external_handlers::*;
+pub use event_handlers::*;
+pub use oauth_utils::*;
+pub use mailing_list_handlers::*;
+pub use send_dispatch::*;
+pub use web_utils::*;
 
 use sha1::Sha1;
 
@@ -80,6 +90,10 @@ use simple_smtp_server::external_imap::{
 use simple_smtp_server::i18n;
 use simple_smtp_server::logic::Logic;
 use simple_smtp_server::smtp_client::send_outgoing_email;
+use simple_smtp_server::monitoring;
+use simple_smtp_server::monitoring::alerts::AlertConfig;
+use simple_smtp_server::monitoring::storage;
+use simple_smtp_server::security;
 use std::collections::HashMap;
 use std::env;
 use std::fs::{create_dir_all, File};
@@ -210,20 +224,6 @@ struct AuthResponse {
 
 
 
-mod event_handlers;
-
-mod oauth_utils;
-
-mod mailing_list_handlers;
-
-mod send_dispatch;
-
-mod web_utils;
-pub use event_handlers::*;
-pub use oauth_utils::*;
-pub use mailing_list_handlers::*;
-pub use send_dispatch::*;
-pub use web_utils::*;
 
 async fn main() -> std::io::Result<()> {
     dotenv().ok();

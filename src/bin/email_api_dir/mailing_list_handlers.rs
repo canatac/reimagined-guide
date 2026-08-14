@@ -1,7 +1,8 @@
 // mailing_list_handlers.rs — split from main.rs (Sprint 9)
 #![allow(unused_imports)]
 use super::*;
-use crate::{monitoring, security, admin_ops, monitoring_handlers};
+use super::oauth_utils::*;
+use simple_smtp_server::{monitoring, security};
 
 pub(crate) async fn create_mailing_list(mailing_list: web::Json<MailingListRequest>) -> impl Responder {
     let mailing_list_dir = Path::new("mailing-lists");

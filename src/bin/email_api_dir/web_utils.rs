@@ -1,7 +1,7 @@
 // web_utils.rs — split from main.rs (Sprint 9)
 #![allow(unused_imports)]
 use super::*;
-use crate::{monitoring, security, admin_ops, monitoring_handlers};
+use simple_smtp_server::{monitoring, security};
 
 pub(crate) fn req_ip_str(req: &actix_web::HttpRequest) -> String {
     req.connection_info()

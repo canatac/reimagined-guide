@@ -1,7 +1,7 @@
 // event_handlers.rs — split from main.rs (Sprint 9)
 #![allow(unused_imports)]
 use super::*;
-use crate::{monitoring, security, admin_ops, monitoring_handlers};
+use simple_smtp_server::{monitoring, security};
 
 pub(crate) async fn persist_event(mongo: &mongodb::Client, event: &MailEvent) {
     let db = env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
@@ -101,27 +101,27 @@ use simple_smtp_server::security;
 
 
 #[derive(Deserialize)]
-struct DeliverabilityDiagnosticsQuery {
+pub(crate) struct DeliverabilityDiagnosticsQuery {
     #[serde(default = "default_window")]
     window: String,
     domain: Option<String>,
 }
 
 #[derive(Deserialize)]
-struct DeliverabilityProcedureUpdateRequest {
+pub(crate) struct DeliverabilityProcedureUpdateRequest {
     checklist: Option<Vec<DeliverabilityChecklistUpdate>>,
     reminder: Option<DeliverabilityReminderUpdate>,
 }
 
 #[derive(Deserialize)]
-struct DeliverabilityChecklistUpdate {
+pub(crate) struct DeliverabilityChecklistUpdate {
     id: String,
     checked: bool,
     note: Option<String>,
 }
 
 #[derive(Deserialize)]
-struct DeliverabilityReminderUpdate {
+pub(crate) struct DeliverabilityReminderUpdate {
     enabled: bool,
     cadence_hours: u32,
 }

@@ -1,7 +1,7 @@
 // oauth_utils.rs — split from main.rs (Sprint 9)
 #![allow(unused_imports)]
 use super::*;
-use crate::{monitoring, security, admin_ops, monitoring_handlers};
+use simple_smtp_server::{monitoring, security};
 
 pub(crate) fn normalize_segment(s: &str) -> String {
     s.chars()
@@ -49,13 +49,13 @@ pub struct EmailRequest {
 }
 
 #[derive(Deserialize)]
-struct MailingListRequest {
+pub(crate) struct MailingListRequest {
     label: String,
     emails: Vec<String>,
 }
 
 #[derive(Deserialize)]
-struct MailingListEmailRequest {
+pub(crate) struct MailingListEmailRequest {
     from: String,
     subject: String,
     body: String,
