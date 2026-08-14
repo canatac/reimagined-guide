@@ -415,8 +415,6 @@ impl Logic {
                 .sort(doc! { "internal_date": -1 })
                 .skip(skip)
                 .limit(limit.max(1).min(200))
-                // Omit very large SMTP header blobs when listing (Email.headers is #[serde(default)])
-                .projection(doc! { "headers": 0 })
                 .await?;
             cursor.try_collect().await
         }
