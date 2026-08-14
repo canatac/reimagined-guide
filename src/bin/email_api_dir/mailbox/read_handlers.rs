@@ -131,36 +131,36 @@ pub(crate) struct ComposerRecipient {
 #[derive(Deserialize, Clone)]
 pub(crate) struct ComposeAttachmentInput {
     #[serde(default)]
-    filename: String,
+    pub(crate) filename: String,
     #[serde(default, rename = "contentType", alias = "content_type")]
-    content_type: String,
+    pub(crate) content_type: String,
     #[serde(default)]
-    size: Option<u64>,
+    pub(crate) size: Option<u64>,
     #[serde(default, rename = "dataBase64", alias = "data_base64")]
-    data_base64: String,
+    pub(crate) data_base64: String,
 }
 
 #[derive(Deserialize)]
 pub(crate) struct ComposeSendRequest {
     #[serde(default)]
-    to: Vec<ComposerRecipient>,
+    pub(crate) to: Vec<ComposerRecipient>,
     #[serde(default)]
-    cc: Vec<ComposerRecipient>,
+    pub(crate) cc: Vec<ComposerRecipient>,
     #[serde(default)]
-    bcc: Vec<ComposerRecipient>,
+    pub(crate) bcc: Vec<ComposerRecipient>,
     #[serde(default)]
-    subject: String,
+    pub(crate) subject: String,
     #[serde(default)]
-    body: String,
+    pub(crate) body: String,
     #[serde(default)]
-    attachments: Vec<ComposeAttachmentInput>,
+    pub(crate) attachments: Vec<ComposeAttachmentInput>,
     /// Some FE clients send flat strings instead of recipient objects.
     #[serde(default)]
-    from: Option<String>,
+    pub(crate) from: Option<String>,
     #[serde(default, rename = "inReplyTo", alias = "in_reply_to")]
-    in_reply_to: Option<String>,
+    pub(crate) in_reply_to: Option<String>,
     #[serde(default)]
-    references: Vec<String>,
+    pub(crate) references: Vec<String>,
 }
 
 pub(crate) fn format_recipient(r: &ComposerRecipient) -> Option<String> {
@@ -241,7 +241,7 @@ fn chunk_base64_lines(encoded: &str) -> String {
     out
 }
 
-fn build_body_with_attachments(
+pub(crate) fn build_body_with_attachments(
     body_html: &str,
     attachments: &[ComposeAttachmentInput],
 ) -> Result<(String, String), String> {
