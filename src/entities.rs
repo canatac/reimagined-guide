@@ -193,6 +193,24 @@ pub struct AdminUserRecord {
     pub recent_activity: Vec<AdminUserActivity>,
     pub created_at: String,
     pub updated_at: String,
+    // PR3 — comptes admin réels. Tous optionnels + defaults pour
+    // préserver les documents existants qui n'ont pas ces champs.
+    /// bcrypt hash. `None` tant que l'utilisateur n'a pas défini de mot
+    /// de passe (invitation en attente ou compte annuaire pur).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password_hash: Option<String>,
+    /// Token d'invitation à usage unique (jeton opaque, uuid v4).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invite_token: Option<String>,
+    /// RFC3339 — expiration du jeton d'invitation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invite_expires_at: Option<String>,
+    /// RFC3339 — date d'envoi de la dernière invitation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invited_at: Option<String>,
+    /// Notes internes libres (max ~1KB, non affichées à l'utilisateur).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
