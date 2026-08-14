@@ -1985,663 +1985,617 @@ pub(crate) struct ExternalMessagesQuery {
     page_size: Option<u64>,
 }
 
-pub(crate) async fn api_openapi_json() -> impl Responder {
-    static SPEC_JSON: &str = r#"{
-        "openapi": "3.0.3",
-        "info": {
-            "title": "Email API",
-            "version": "1.0.0",
-            "description": "Backend API for the mail server"
+
+// ─── Admin misc (security_posture, deliverability, observability) ───
+
+pub(crate) async fn api_admin_security_posture(
+    query: web::Query<AdminWindowQuery>,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    use simple_smtp_server::security::audit;
+
+    let active_alerts = audit::query_active_alerts(&mongo, 300).await;
+
+    let brute_force_alerts = active_alerts
+        .iter()
+        .filter(|a| {
+            let n = a.rule_name.to_ascii_lowercase();
+            n.contains("bruteforce") || n.contains("brute") || n.contains("rate")
+        })
+        .count();
+
+    let auth_fail_alerts = active_alerts
+        .iter()
+        .filter(|a| {
+            let n = a.rule_name.to_ascii_lowercase();
+            n.contains("spf") || n.contains("dkim") || n.contains("dmarc")
+        })
+        .count();
+
+    let domain = env::var("DOMAIN_NAME")
+        .or_else(|_| env::var("MAIL_DOMAIN"))
+        .unwrap_or_else(|_| "misfits.ai".to_string());
+    let smtp_public_ip =
+        env::var("SMTP_PUBLIC_IP").unwrap_or_else(|_| "51.158.114.182".to_string());
+    let dkim_selector = env::var("KEY_SELECTOR").unwrap_or_else(|_| "default".to_string());
+
+    HttpResponse::Ok().json(serde_json::json!({
+        "window": query.window,
+        "security": {
+            "tls": {
+                "smtp_starttls_required": env_bool("SMTP_REQUIRE_STARTTLS", true),
+                "smtps_listener": env::var("SMTP_TLS_ADDR").unwrap_or_else(|_| "0.0.0.0:8465".to_string()),
+                "imaps_listener": env::var("IMAP_TLS_ADDR").unwrap_or_else(|_| "0.0.0.0:8993".to_string()),
+                "imap_starttls_required": env_bool("IMAP_REQUIRE_STARTTLS", true)
+            },
+            "authentication": {
+                "sasl_mechanisms": ["PLAIN", "LOGIN"],
+                "oauth2_enabled": env::var("GITHUB_CLIENT_ID").map(|v| !v.trim().is_empty()).unwrap_or(false),
+                "admin_mfa_required": env_bool("ADMIN_MFA_REQUIRED", true)
+            },
+            "anti_abuse": {
+                "rate_limit_enabled": env_bool("RATE_LIMIT_ENABLED", true),
+                "rate_limit_per_minute": env::var("RATE_LIMIT_PER_MINUTE").ok().and_then(|v| v.parse::<u32>().ok()).unwrap_or(120),
+                "fail2ban_enabled": env_bool("FAIL2BAN_ENABLED", true),
+                "bruteforce_signals_24h": brute_force_alerts,
+                "auth_policy_signals_24h": auth_fail_alerts
+            },
+            "mail_auth_dns": {
+                "domain": domain,
+                "spf_expected": format!("v=spf1 ip4:{} -all", smtp_public_ip),
+                "dkim_selector": dkim_selector,
+                "dmarc_expected": "v=DMARC1; p=quarantine; adkim=s; aspf=s; pct=100",
+                "ptr_rdns_note": "Configurer PTR/rDNS de l'IP publique vers un host mail stable (ex: mail.<domain>)"
+            }
+        }
+    }))
+}
+
+pub(crate) async fn api_admin_deliverability_diagnostics(
+    query: web::Query<DeliverabilityDiagnosticsQuery>,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    use simple_smtp_server::security::audit;
+
+    let since = since_str(&query.window);
+    let mut filter = doc! { "ts": { "$gte": &since } };
+
+    if let Some(domain) = query
+        .domain
+        .as_ref()
+        .map(|d| d.trim())
+        .filter(|d| !d.is_empty())
+    {
+        let safe_domain = domain.replace('.', "\\.");
+        filter.insert(
+            "to",
+            doc! { "$regex": format!("@{}$", safe_domain), "$options": "i" },
+        );
+    }
+
+    let total = storage::count_events(&mongo, filter.clone()).await;
+    let bounces = storage::query_events(
+        &mongo,
+        doc! { "ts": { "$gte": &since }, "status": "bounced" },
+        1,
+        200,
+    )
+    .await;
+
+    let mut bounce_reasons: HashMap<String, u32> = HashMap::new();
+    for evt in &bounces {
+        let key = evt
+            .bounce_reason
+            .clone()
+            .or_else(|| evt.smtp_reply.clone())
+            .unwrap_or_else(|| "unknown".to_string());
+        *bounce_reasons.entry(key).or_insert(0) += 1;
+    }
+
+    let mut top_reasons: Vec<(String, u32)> = bounce_reasons.into_iter().collect();
+    top_reasons.sort_by(|a, b| b.1.cmp(&a.1));
+
+    let active_security_alerts = audit::query_active_alerts(&mongo, 300).await;
+    let spf_failures = active_security_alerts
+        .iter()
+        .filter(|a| a.rule_name.to_ascii_lowercase().contains("spf"))
+        .count() as u64;
+    let dkim_failures = active_security_alerts
+        .iter()
+        .filter(|a| a.rule_name.to_ascii_lowercase().contains("dkim"))
+        .count() as u64;
+    let dmarc_failures = active_security_alerts
+        .iter()
+        .filter(|a| a.rule_name.to_ascii_lowercase().contains("dmarc"))
+        .count() as u64;
+
+    let auth_alerts = spf_failures + dkim_failures + dmarc_failures;
+
+    let rbl_sources = env::var("RBL_CHECK_HOSTS")
+        .unwrap_or_else(|_| "zen.spamhaus.org,bl.spamcop.net".to_string())
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>();
+
+    let rbl_listed_by = env::var("RBL_LISTED_BY")
+        .unwrap_or_default()
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>();
+
+    let risk_docs = storage::aggregate(
+        &mongo,
+        vec![
+            doc! { "$match": filter.clone() },
+            doc! { "$group": {
+                "_id": null,
+                "avg_risk": { "$avg": "$risk_score" },
+                "high_risk_events": { "$sum": { "$cond": { "if": { "$gte": ["$risk_score", 70] }, "then": 1, "else": 0 } } }
+            }},
+        ],
+    )
+    .await;
+
+    let avg_risk_score = risk_docs
+        .first()
+        .and_then(|d| d.get_f64("avg_risk").ok())
+        .unwrap_or(0.0);
+    let high_risk_events = risk_docs
+        .first()
+        .and_then(|d| d.get_i64("high_risk_events").ok())
+        .unwrap_or(0);
+
+    let denom = if total == 0 { 1.0 } else { total as f64 };
+
+    HttpResponse::Ok().json(serde_json::json!({
+        "window": query.window,
+        "since": since,
+        "scope_domain": query.domain,
+        "total_events": total,
+        "bounces_total": bounces.len(),
+        "auth_policy_alerts": auth_alerts,
+        "spf": {
+            "failures": spf_failures,
+            "failure_rate": (spf_failures as f64 / denom)
         },
-        "paths": {
-            "/api/auth/login": { "post": { "tags": ["Auth"], "summary": "Login", "responses": { "200": { "description": "OK" } } } },
-            "/api/auth/register": { "post": { "tags": ["Auth"], "summary": "Register", "responses": { "200": { "description": "OK" } } } },
-            "/api/auth/logout": { "post": { "tags": ["Auth"], "summary": "Logout", "responses": { "200": { "description": "OK" } } } },
-            "/api/auth/refresh": { "post": { "tags": ["Auth"], "summary": "Refresh token", "responses": { "200": { "description": "OK" } } } },
-            "/api/user/locale": { "patch": { "tags": ["Auth"], "summary": "Update user locale", "responses": { "200": { "description": "OK" } } } },
-            "/api/auth/oauth/{provider}": { "get": { "tags": ["Auth"], "summary": "Start OAuth flow", "parameters": [{ "name": "provider", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "302": { "description": "Redirect" } } } },
-            "/api/auth/oauth/{provider}/callback": { "get": { "tags": ["Auth"], "summary": "OAuth callback", "parameters": [{ "name": "provider", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "302": { "description": "Redirect" } } } },
-            "/api/emails": { "get": { "tags": ["Emails"], "summary": "List emails", "responses": { "200": { "description": "OK" } } } },
-            "/api/emails/{id}": {
-                "get": { "tags": ["Emails"], "summary": "Get email by ID", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" } } }
-            },
-            "/api/emails/{id}/action": {
-                "post": { "tags": ["Emails"], "summary": "Perform action on email (move, delete, read, unread, star, unstar)", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" } } }
-            },
-            "/api/tags": { "get": { "tags": ["Emails"], "summary": "List tags", "responses": { "200": { "description": "OK" } } } },
-            "/api/send": { "post": { "tags": ["Send"], "summary": "Send an email", "responses": { "200": { "description": "OK" } } } },
-            "/api/send/{id}/status": { "get": { "tags": ["Send"], "summary": "Get send status", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" } } } },
-            "/api/drafts": {
-                "get": { "tags": ["Drafts"], "summary": "List drafts", "responses": { "200": { "description": "OK" } } },
-                "post": { "tags": ["Drafts"], "summary": "Create or update draft", "responses": { "200": { "description": "OK" } } }
-            },
-            "/api/drafts/{id}": { "delete": { "tags": ["Drafts"], "summary": "Delete draft", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" } } } },
-            "/api/templates": { "get": { "tags": ["Templates"], "summary": "List templates", "responses": { "200": { "description": "OK" } } } },
-            "/api/settings/ai": {
-                "get": { "tags": ["AI"], "summary": "Get AI settings", "responses": { "200": { "description": "OK" } } },
-                "put": { "tags": ["AI"], "summary": "Update AI settings", "responses": { "200": { "description": "OK" } } }
-            },
-            "/api/hermes/chat": { "post": { "tags": ["Hermes"], "summary": "Chat completions proxy", "responses": { "200": { "description": "OK" } } } },
-            "/api/hermes/runs": { "post": { "tags": ["Hermes"], "summary": "Create run", "responses": { "200": { "description": "OK" } } } },
-            "/api/hermes/runs/{run_id}": { "get": { "tags": ["Hermes"], "summary": "Get run status", "parameters": [{ "name": "run_id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" } } } },
-            "/api/hermes/runs/{run_id}/events": { "get": { "tags": ["Hermes"], "summary": "Stream run events (SSE)", "parameters": [{ "name": "run_id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "SSE stream" } } } },
-            "/api/calendar/events": {
-                "get": { "tags": ["Calendar"], "summary": "List calendar events", "parameters": [{ "name": "start", "in": "query", "schema": { "type": "string", "format": "date-time" } }, { "name": "end", "in": "query", "schema": { "type": "string", "format": "date-time" } }], "responses": { "200": { "description": "OK" } } },
-                "post": { "tags": ["Calendar"], "summary": "Create calendar event", "responses": { "201": { "description": "Created" } } }
-            },
-            "/api/calendar/events/{id}": {
-                "get": { "tags": ["Calendar"], "summary": "Get calendar event", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" } } },
-                "put": { "tags": ["Calendar"], "summary": "Update calendar event", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" } } },
-                "delete": { "tags": ["Calendar"], "summary": "Delete calendar event", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" } } }
-            },
-            "/api/events": { "get": { "tags": ["Events"], "summary": "List events", "responses": { "200": { "description": "OK" } } } },
-            "/api/events/stream": { "get": { "tags": ["Events"], "summary": "SSE event stream", "responses": { "200": { "description": "SSE stream" } } } },
-            "/api/monitoring/summary": { "get": { "tags": ["Monitoring"], "summary": "SMTP monitoring summary", "responses": { "200": { "description": "OK" } } } },
-            "/api/monitoring/events": { "get": { "tags": ["Monitoring"], "summary": "SMTP monitoring events", "responses": { "200": { "description": "OK" } } } },
-            "/api/monitoring/messages/{message_id}/trace": { "get": { "tags": ["Monitoring"], "summary": "Message delivery trace", "parameters": [{ "name": "message_id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" } } } },
-            "/api/monitoring/bounces": { "get": { "tags": ["Monitoring"], "summary": "Bounce list", "responses": { "200": { "description": "OK" } } } },
-            "/api/monitoring/providers/top": { "get": { "tags": ["Monitoring"], "summary": "Top providers", "responses": { "200": { "description": "OK" } } } },
-            "/api/monitoring/live": { "get": { "tags": ["Monitoring"], "summary": "Live SMTP events (SSE)", "responses": { "200": { "description": "SSE stream" } } } },
-            "/api/monitoring/alerts/active": { "get": { "tags": ["Monitoring"], "summary": "Active monitoring alerts", "responses": { "200": { "description": "OK" } } } },
-            "/api/security/alerts/active": { "get": { "tags": ["Security"], "summary": "Active security alerts", "responses": { "200": { "description": "OK" } } } },
-            "/api/security/incidents": { "get": { "tags": ["Security"], "summary": "Security incidents", "responses": { "200": { "description": "OK" } } } },
-            "/api/security/live": { "get": { "tags": ["Security"], "summary": "Live security events (SSE)", "responses": { "200": { "description": "SSE stream" } } } },
-            "/api/security/tenant/{id}/status": { "get": { "tags": ["Security"], "summary": "Tenant security status", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" } } } },
-            "/api/security/remediation/{alert_id}/rollback": { "post": { "tags": ["Security"], "summary": "Rollback remediation", "parameters": [{ "name": "alert_id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" } } } },
-            "/api/external-accounts": {
-                "get": { "tags": ["External IMAP"], "summary": "List external accounts", "responses": { "200": { "description": "OK" } } },
-                "post": { "tags": ["External IMAP"], "summary": "Create external account", "responses": { "200": { "description": "OK" } } }
-            },
-            "/api/external-accounts/{id}": {
-                "get": { "tags": ["External IMAP"], "summary": "Get external account", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" } } },
-                "patch": { "tags": ["External IMAP"], "summary": "Update external account", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" } } },
-                "delete": { "tags": ["External IMAP"], "summary": "Delete external account", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" } } }
-            },
-            "/api/external-accounts/{id}/test": { "post": { "tags": ["External IMAP"], "summary": "Test IMAP connection", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" } } } },
-            "/api/external-accounts/{id}/folders": { "get": { "tags": ["External IMAP"], "summary": "List folders", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" } } } },
-            "/api/external-accounts/{id}/folders/discover": { "post": { "tags": ["External IMAP"], "summary": "Discover folders", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" } } } },
-            "/api/external-accounts/{id}/folders/{folder_id}/mapping": { "put": { "tags": ["External IMAP"], "summary": "Set folder mapping", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }, { "name": "folder_id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" } } } },
-            "/api/external-accounts/{id}/sync": { "post": { "tags": ["External IMAP"], "summary": "Start sync", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" } } } },
-            "/api/external-accounts/{id}/sync/status": { "get": { "tags": ["External IMAP"], "summary": "Get sync status", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" } } } },
-            "/api/external-accounts/{id}/sync/pause": { "post": { "tags": ["External IMAP"], "summary": "Pause sync", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" } } } },
-            "/api/external-accounts/{id}/sync/resume": { "post": { "tags": ["External IMAP"], "summary": "Resume sync", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" } } } },
-            "/api/external-sync-runs/{run_id}": { "get": { "tags": ["External IMAP"], "summary": "Get sync run", "parameters": [{ "name": "run_id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" } } } },
-            "/api/external-messages": { "get": { "tags": ["External IMAP"], "summary": "List external messages", "parameters": [{ "name": "account_id", "in": "query", "required": true, "schema": { "type": "string" } }, { "name": "folder", "in": "query", "schema": { "type": "string" } }, { "name": "page", "in": "query", "schema": { "type": "integer" } }, { "name": "page_size", "in": "query", "schema": { "type": "integer" } }], "responses": { "200": { "description": "OK" } } } },
-            "/api/external-messages/{id}/action": { "post": { "tags": ["External IMAP"], "summary": "Apply action on external message", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" } } } }
-        }
-    }"#;
-    let spec: serde_json::Value = serde_json::from_str(SPEC_JSON).unwrap_or_default();
-    HttpResponse::Ok().json(spec)
+        "dkim": {
+            "failures": dkim_failures,
+            "failure_rate": (dkim_failures as f64 / denom)
+        },
+        "dmarc": {
+            "failures": dmarc_failures,
+            "failure_rate": (dmarc_failures as f64 / denom)
+        },
+        "reputation": {
+            "avg_risk_score": (avg_risk_score * 10.0).round() / 10.0,
+            "high_risk_events": high_risk_events,
+            "ip_domain_status": if high_risk_events > 0 { "degraded" } else { "normal" }
+        },
+        "top_bounce_reasons": top_reasons.into_iter().take(10).map(|(reason, count)| serde_json::json!({"reason": reason, "count": count})).collect::<Vec<_>>(),
+        "recent_delivery_failures": bounces.into_iter().take(15).map(|e| serde_json::json!({
+            "ts": e.ts,
+            "to": e.to,
+            "mx_host": e.mx_host,
+            "smtp_code": e.smtp_code,
+            "smtp_reply": e.smtp_reply,
+            "bounce_reason": e.bounce_reason,
+            "risk_score": e.risk_score
+        })).collect::<Vec<_>>(),
+        "rbl": {
+            "sources": rbl_sources,
+            "listed_by": rbl_listed_by,
+            "status": if !env::var("RBL_LISTED_BY").unwrap_or_default().trim().is_empty() { "listed" } else { "clean_or_unknown" },
+            "note": "Renseigner RBL_LISTED_BY pour refléter les listes noires détectées par un probe DNS"
+        },
+        "diagnostics_hints": [
+            "Vérifier SPF/DKIM/DMARC alignés pour le domaine expéditeur",
+            "Comparer smtp_code/smtp_reply des bounces pour isoler policy vs reputation",
+            "Analyser la latence DNS/TLS avant DATA pour détecter throttling provider"
+        ]
+    }))
 }
 
-pub(crate) async fn api_swagger_ui() -> impl Responder {
-    let html = r##"<!DOCTYPE html>
-<html>
-<head>
-  <title>Email API — Swagger UI</title>
-  <meta charset="utf-8"/>
-  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css"/>
-</head>
-<body>
-<div id="swagger-ui"></div>
-<script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
-<script>
-  SwaggerUIBundle({ url: "/api/openapi.json", dom_id: "#swagger-ui", presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset] });
-</script>
-</body>
-</html>"##;
-    HttpResponse::Ok()
-        .content_type("text/html; charset=utf-8")
-        .body(html)
-}
-
-pub(crate) async fn api_external_openapi() -> impl Responder {
-    static OPENAPI_YAML: &str = include_str!("../../ops/openapi/external-imap-v1.yaml");
-    HttpResponse::Ok()
-        .content_type("application/yaml; charset=utf-8")
-        .body(OPENAPI_YAML)
-}
-
-pub(crate) async fn api_external_accounts_list(
-    req: HttpRequest,
-    svc: web::Data<Arc<ExternalImapService>>,
+pub(crate) async fn api_admin_deliverability_procedure(
+    query: web::Query<AdminWindowQuery>,
+    mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
-    let user_id = resolve_user_id(&req);
-    match svc.list_accounts(&user_id).await {
-        Ok(accounts) => HttpResponse::Ok().json(serde_json::json!({ "accounts": accounts })),
-        Err(e) => HttpResponse::InternalServerError()
-            .json(serde_json::json!({"error": {"code": "EXTERNAL_ACCOUNTS_LIST_FAILED", "message": e.to_string()}})),
-    }
-}
+    let domain = env::var("DOMAIN_NAME")
+        .or_else(|_| env::var("MAIL_DOMAIN"))
+        .unwrap_or_else(|_| "misfits.ai".to_string())
+        .trim()
+        .trim_end_matches('.')
+        .to_string();
+    let selector = env::var("KEY_SELECTOR").unwrap_or_else(|_| "default".to_string());
 
-pub(crate) async fn api_external_accounts_create(
-    req: HttpRequest,
-    payload: web::Json<CreateExternalAccountInput>,
-    svc: web::Data<Arc<ExternalImapService>>,
-) -> impl Responder {
-    let user_id = resolve_user_id(&req);
-    match svc.create_account(&user_id, payload.into_inner()).await {
-        Ok(account) => HttpResponse::Ok().json(account),
-        Err(e) => HttpResponse::InternalServerError()
-            .json(serde_json::json!({"error": {"code": "EXTERNAL_ACCOUNT_CREATE_FAILED", "message": e.to_string()}})),
-    }
-}
+    let spf_rows = dns_txt_lookup(&domain).await;
+    let dmarc_rows = dns_txt_lookup(&format!("_dmarc.{}", domain)).await;
+    let helo_rows = dns_txt_lookup(&format!("mail.{}", domain)).await;
+    let dkim_rows = dns_txt_lookup(&format!("{}._domainkey.{}", selector, domain)).await;
 
-pub(crate) async fn api_external_account_get(
-    req: HttpRequest,
-    path: web::Path<String>,
-    svc: web::Data<Arc<ExternalImapService>>,
-) -> impl Responder {
-    let user_id = resolve_user_id(&req);
-    let account_id = path.into_inner();
-    match svc.get_account(&user_id, &account_id).await {
-        Ok(Some(account)) => HttpResponse::Ok().json(account),
-        Ok(None) => HttpResponse::NotFound().json(serde_json::json!({"error": {"code": "EXTERNAL_ACCOUNT_NOT_FOUND", "message": "External account not found"}})),
-        Err(e) => HttpResponse::InternalServerError()
-            .json(serde_json::json!({"error": {"code": "EXTERNAL_ACCOUNT_FETCH_FAILED", "message": e.to_string()}})),
-    }
-}
+    let spf_joined = spf_rows.join(" ").to_ascii_lowercase();
+    let dmarc_joined = dmarc_rows.join(" ").to_ascii_lowercase();
+    let helo_joined = helo_rows.join(" ").to_ascii_lowercase();
 
-pub(crate) async fn api_external_account_patch(
-    req: HttpRequest,
-    path: web::Path<String>,
-    payload: web::Json<UpdateExternalAccountInput>,
-    svc: web::Data<Arc<ExternalImapService>>,
-) -> impl Responder {
-    let user_id = resolve_user_id(&req);
-    let account_id = path.into_inner();
-    match svc
-        .update_account(&user_id, &account_id, payload.into_inner())
-        .await
-    {
-        Ok(Some(account)) => HttpResponse::Ok().json(account),
-        Ok(None) => HttpResponse::NotFound().json(serde_json::json!({"error": {"code": "EXTERNAL_ACCOUNT_NOT_FOUND", "message": "External account not found"}})),
-        Err(e) => HttpResponse::InternalServerError()
-            .json(serde_json::json!({"error": {"code": "EXTERNAL_ACCOUNT_UPDATE_FAILED", "message": e.to_string()}})),
-    }
-}
-
-pub(crate) async fn api_external_account_delete(
-    req: HttpRequest,
-    path: web::Path<String>,
-    svc: web::Data<Arc<ExternalImapService>>,
-) -> impl Responder {
-    let user_id = resolve_user_id(&req);
-    let account_id = path.into_inner();
-    match svc.delete_account(&user_id, &account_id).await {
-        Ok(true) => HttpResponse::Ok().json(serde_json::json!({ "deleted": true })),
-        Ok(false) => HttpResponse::NotFound().json(serde_json::json!({"error": {"code": "EXTERNAL_ACCOUNT_NOT_FOUND", "message": "External account not found"}})),
-        Err(e) => HttpResponse::InternalServerError()
-            .json(serde_json::json!({"error": {"code": "EXTERNAL_ACCOUNT_DELETE_FAILED", "message": e.to_string()}})),
-    }
-}
-
-pub(crate) async fn api_external_account_test(
-    req: HttpRequest,
-    path: web::Path<String>,
-    svc: web::Data<Arc<ExternalImapService>>,
-) -> impl Responder {
-    let user_id = resolve_user_id(&req);
-    let account_id = path.into_inner();
-    let account = match svc.get_account_raw(&user_id, &account_id).await {
-        Ok(Some(a)) => a,
-        Ok(None) => return HttpResponse::NotFound().json(serde_json::json!({"error": {"code": "EXTERNAL_ACCOUNT_NOT_FOUND", "message": "External account not found"}})),
-        Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({"error": {"code": "EXTERNAL_ACCOUNT_FETCH_FAILED", "message": e.to_string()}})),
+    let dmarc_policy = if dmarc_joined.contains("p=reject") {
+        "reject"
+    } else if dmarc_joined.contains("p=quarantine") {
+        "quarantine"
+    } else if dmarc_joined.contains("p=none") {
+        "none"
+    } else {
+        "missing"
     };
 
-    match svc.imap_test(&account).await {
-        Ok(result) => {
-            if result.ok {
-                HttpResponse::Ok().json(result)
-            } else {
-                HttpResponse::UnprocessableEntity().json(serde_json::json!({
-                    "ok": false,
-                    "error": {"code": "IMAP_AUTH_FAILED", "message": result.message},
-                    "capabilities": result.capabilities,
-                    "greeting": result.greeting,
-                }))
-            }
-        }
-        Err(e) => HttpResponse::InternalServerError().json(
-            serde_json::json!({"error": {"code": "IMAP_TEST_FAILED", "message": e.to_string()}}),
-        ),
-    }
-}
+    let smtp_public_ip =
+        env::var("SMTP_PUBLIC_IP").unwrap_or_else(|_| "51.158.114.182".to_string());
+    let spf_apex_ok = spf_joined.contains("v=spf1") && spf_joined.contains(&smtp_public_ip);
+    let dkim_dns_ok = dkim_rows
+        .iter()
+        .any(|row| row.to_ascii_lowercase().contains("v=dkim1"));
+    let helo_spf_ok = helo_joined.contains("v=spf1");
 
-pub(crate) async fn api_external_folders_list(
-    req: HttpRequest,
-    path: web::Path<String>,
-    svc: web::Data<Arc<ExternalImapService>>,
-) -> impl Responder {
-    let user_id = resolve_user_id(&req);
-    let account_id = path.into_inner();
-    match svc.list_folders(&user_id, &account_id).await {
-        Ok(folders) => HttpResponse::Ok().json(serde_json::json!({ "folders": folders })),
-        Err(e) => HttpResponse::InternalServerError()
-            .json(serde_json::json!({"error": {"code": "EXTERNAL_FOLDERS_LIST_FAILED", "message": e.to_string()}})),
-    }
-}
+    let since = since_str(&query.window);
+    let gmail_blocks = storage::count_events(
+        &mongo,
+        doc! {
+            "ts": {"$gte": &since},
+            "to": {"$regex": "@gmail\\.com$", "$options": "i"},
+            "smtp_reply": {"$regex": "NotAuthorizedError|550-5\\.7\\.1", "$options": "i"}
+        },
+    )
+    .await;
 
-pub(crate) async fn api_external_folders_discover(
-    req: HttpRequest,
-    path: web::Path<String>,
-    svc: web::Data<Arc<ExternalImapService>>,
-) -> impl Responder {
-    let user_id = resolve_user_id(&req);
-    let account_id = path.into_inner();
-    let account = match svc.get_account_raw(&user_id, &account_id).await {
-        Ok(Some(a)) => a,
-        Ok(None) => return HttpResponse::NotFound().json(serde_json::json!({"error": {"code": "EXTERNAL_ACCOUNT_NOT_FOUND", "message": "External account not found"}})),
-        Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({"error": {"code": "EXTERNAL_ACCOUNT_FETCH_FAILED", "message": e.to_string()}})),
-    };
-
-    match svc.discover_folders(&user_id, &account).await {
-        Ok(result) => HttpResponse::Ok().json(result),
-        Err(e) => HttpResponse::InternalServerError()
-            .json(serde_json::json!({"error": {"code": "EXTERNAL_FOLDERS_DISCOVER_FAILED", "message": e.to_string()}})),
-    }
-}
-
-pub(crate) async fn api_external_folder_mapping_put(
-    req: HttpRequest,
-    path: web::Path<(String, String)>,
-    payload: web::Json<ExternalFolderMappingInput>,
-    svc: web::Data<Arc<ExternalImapService>>,
-) -> impl Responder {
-    let user_id = resolve_user_id(&req);
-    let (account_id, folder_id) = path.into_inner();
-    match svc
-        .upsert_folder_mapping(&user_id, &account_id, &folder_id, &payload.local_role)
+    let dkim_alerts = simple_smtp_server::security::audit::query_active_alerts(&mongo, 300)
         .await
-    {
-        Ok(Some(folder)) => HttpResponse::Ok().json(folder),
-        Ok(None) => HttpResponse::NotFound().json(serde_json::json!({"error": {"code": "EXTERNAL_FOLDER_NOT_FOUND", "message": "Folder not found"}})),
-        Err(e) => HttpResponse::InternalServerError()
-            .json(serde_json::json!({"error": {"code": "EXTERNAL_FOLDER_MAPPING_FAILED", "message": e.to_string()}})),
-    }
-}
+        .into_iter()
+        .filter(|a| a.rule_name.to_ascii_lowercase().contains("dkim"))
+        .count() as u64;
 
-pub(crate) async fn api_external_sync_start(
-    req: HttpRequest,
-    path: web::Path<String>,
-    payload: web::Json<StartSyncInput>,
-    svc: web::Data<Arc<ExternalImapService>>,
-) -> impl Responder {
-    let user_id = resolve_user_id(&req);
-    let account_id = path.into_inner();
-
-    let account = match svc.get_account_raw(&user_id, &account_id).await {
-        Ok(Some(a)) => a,
-        Ok(None) => return HttpResponse::NotFound().json(serde_json::json!({"error": {"code": "EXTERNAL_ACCOUNT_NOT_FOUND", "message": "External account not found"}})),
-        Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({"error": {"code": "EXTERNAL_ACCOUNT_FETCH_FAILED", "message": e.to_string()}})),
-    };
-
-    let run = match svc.start_sync_run(&user_id, &account_id, &payload).await {
-        Ok(run) => run,
-        Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({"error": {"code": "EXTERNAL_SYNC_START_FAILED", "message": e.to_string()}})),
-    };
-
-    match svc.run_sync_now(&user_id, &account, &run).await {
-        Ok(stats) => {
-            let updated = svc
-                .complete_sync_run(&user_id, &run.id, "success", stats, None)
-                .await
-                .ok()
-                .flatten();
-            HttpResponse::Ok()
-                .json(serde_json::json!({ "runId": run.id, "status": "success", "run": updated }))
-        }
-        Err(e) => {
-            let _ = svc
-                .complete_sync_run(
-                    &user_id,
-                    &run.id,
-                    "failed",
-                    simple_smtp_server::external_imap::SyncExecutionResult {
-                        fetched: 0,
-                        updated: 0,
-                        deleted: 0,
-                        discovered_folders: 0,
-                    },
-                    Some(e.to_string()),
-                )
-                .await;
-            HttpResponse::InternalServerError().json(serde_json::json!({"error": {"code": "EXTERNAL_SYNC_EXECUTION_FAILED", "message": e.to_string()}, "runId": run.id}))
-        }
-    }
-}
-
-pub(crate) async fn api_external_sync_run_get(
-    req: HttpRequest,
-    path: web::Path<String>,
-    svc: web::Data<Arc<ExternalImapService>>,
-) -> impl Responder {
-    let user_id = resolve_user_id(&req);
-    let run_id = path.into_inner();
-    match svc.get_sync_run(&user_id, &run_id).await {
-        Ok(Some(run)) => HttpResponse::Ok().json(run),
-        Ok(None) => HttpResponse::NotFound().json(serde_json::json!({"error": {"code": "EXTERNAL_SYNC_RUN_NOT_FOUND", "message": "Sync run not found"}})),
-        Err(e) => HttpResponse::InternalServerError()
-            .json(serde_json::json!({"error": {"code": "EXTERNAL_SYNC_RUN_FETCH_FAILED", "message": e.to_string()}})),
-    }
-}
-
-pub(crate) async fn api_external_sync_status(
-    req: HttpRequest,
-    path: web::Path<String>,
-    svc: web::Data<Arc<ExternalImapService>>,
-) -> impl Responder {
-    let user_id = resolve_user_id(&req);
-    let account_id = path.into_inner();
-    match svc.get_sync_status(&user_id, &account_id).await {
-        Ok(Some(run)) => HttpResponse::Ok().json(run),
-        Ok(None) => HttpResponse::Ok().json(serde_json::json!({"status": "idle"})),
-        Err(e) => HttpResponse::InternalServerError()
-            .json(serde_json::json!({"error": {"code": "EXTERNAL_SYNC_STATUS_FAILED", "message": e.to_string()}})),
-    }
-}
-
-pub(crate) async fn api_external_sync_pause(
-    req: HttpRequest,
-    path: web::Path<String>,
-    svc: web::Data<Arc<ExternalImapService>>,
-) -> impl Responder {
-    let user_id = resolve_user_id(&req);
-    let account_id = path.into_inner();
-    match svc.set_account_status(&user_id, &account_id, "paused").await {
-        Ok(Some(account)) => HttpResponse::Ok().json(account),
-        Ok(None) => HttpResponse::NotFound().json(serde_json::json!({"error": {"code": "EXTERNAL_ACCOUNT_NOT_FOUND", "message": "External account not found"}})),
-        Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({"error": {"code": "EXTERNAL_SYNC_PAUSE_FAILED", "message": e.to_string()}})),
-    }
-}
-
-pub(crate) async fn api_external_sync_resume(
-    req: HttpRequest,
-    path: web::Path<String>,
-    svc: web::Data<Arc<ExternalImapService>>,
-) -> impl Responder {
-    let user_id = resolve_user_id(&req);
-    let account_id = path.into_inner();
-    match svc.set_account_status(&user_id, &account_id, "active").await {
-        Ok(Some(account)) => HttpResponse::Ok().json(account),
-        Ok(None) => HttpResponse::NotFound().json(serde_json::json!({"error": {"code": "EXTERNAL_ACCOUNT_NOT_FOUND", "message": "External account not found"}})),
-        Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({"error": {"code": "EXTERNAL_SYNC_RESUME_FAILED", "message": e.to_string()}})),
-    }
-}
-
-pub(crate) async fn api_external_messages_list(
-    req: HttpRequest,
-    query: web::Query<ExternalMessagesQuery>,
-    svc: web::Data<Arc<ExternalImapService>>,
-) -> impl Responder {
-    let user_id = resolve_user_id(&req);
-    let page = query.page.unwrap_or(1);
-    let page_size = query.page_size.unwrap_or(50).min(200);
-    match svc
-        .list_messages(
-            &user_id,
-            &query.account_id,
-            query.folder.as_deref(),
-            page,
-            page_size,
-        )
+    let db = env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
+    let coll = mongo
+        .database(&db)
+        .collection::<bson::Document>("admin_runbooks");
+    let saved = coll
+        .find_one(doc! {"key": "deliverability_procedure"})
         .await
-    {
-        Ok(messages) => HttpResponse::Ok().json(serde_json::json!({ "messages": messages, "page": page, "pageSize": page_size })),
-        Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({"error": {"code": "EXTERNAL_MESSAGES_LIST_FAILED", "message": e.to_string()}})),
-    }
-}
-
-pub(crate) async fn api_external_message_action(
-    req: HttpRequest,
-    path: web::Path<String>,
-    payload: web::Json<ExternalMessageActionInput>,
-    svc: web::Data<Arc<ExternalImapService>>,
-) -> impl Responder {
-    let user_id = resolve_user_id(&req);
-    let message_id = path.into_inner();
-    match svc
-        .apply_message_action(&user_id, &message_id, &payload)
-        .await
-    {
-        Ok(Some(message)) => HttpResponse::Ok().json(message),
-        Ok(None) => HttpResponse::NotFound().json(serde_json::json!({"error": {"code": "EXTERNAL_MESSAGE_NOT_FOUND", "message": "Message not found"}})),
-        Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({"error": {"code": "EXTERNAL_MESSAGE_ACTION_FAILED", "message": e.to_string()}})),
-    }
-}
-
-#[derive(Deserialize)]
-pub(crate) struct CreateCalendarEventRequest {
-    title: String,
-    #[serde(default)]
-    description: String,
-    start: String, // ISO 8601
-    end: String,   // ISO 8601
-    #[serde(default = "default_event_type_str")]
-    event_type: String,
-    #[serde(default = "default_color_str")]
-    color: String,
-    #[serde(default)]
-    location: String,
-}
-
-pub(crate) fn default_event_type_str() -> String {
-    "default".to_string()
-}
-pub(crate) fn default_color_str() -> String {
-    "#3788d8".to_string()
-}
-
-#[derive(Deserialize)]
-pub(crate) struct UpdateCalendarEventRequest {
-    #[serde(default)]
-    title: Option<String>,
-    #[serde(default)]
-    description: Option<String>,
-    #[serde(default)]
-    start: Option<String>,
-    #[serde(default)]
-    end: Option<String>,
-    #[serde(default)]
-    event_type: Option<String>,
-    #[serde(default)]
-    color: Option<String>,
-    #[serde(default)]
-    location: Option<String>,
-}
-
-#[derive(Deserialize)]
-pub(crate) struct CalendarQueryParams {
-    #[serde(default)]
-    start: Option<String>, // ISO 8601
-    #[serde(default)]
-    end: Option<String>, // ISO 8601
-}
-
-pub(crate) fn parse_iso_to_bson(s: &str) -> Option<bson::DateTime> {
-    chrono::DateTime::parse_from_rfc3339(s)
         .ok()
-        .map(|dt| bson::DateTime::from_millis(dt.timestamp_millis()))
-}
+        .flatten();
 
-pub(crate) fn get_user_from_headers(req: &actix_web::HttpRequest) -> String {
-    // Try x-user-email header, fallback to query param, fallback to env SMTP_USERNAME
-    if let Some(email) = req
-        .headers()
-        .get("x-user-email")
-        .and_then(|v| v.to_str().ok())
-    {
-        return email.to_string();
-    }
-    // Fallback: use SMTP_USERNAME env var
-    env::var("SMTP_USERNAME").unwrap_or_else(|_| "admin@misfits.ai".to_string())
-}
+    let mut reminder_enabled = true;
+    let mut reminder_cadence_hours = 24u32;
+    let mut reminder_anchor = Utc::now();
+    let mut checklist_overrides = bson::Document::new();
 
-// --- Calendar handlers ---
+    if let Some(saved_doc) = saved.as_ref() {
+        if let Ok(reminder) = saved_doc.get_document("reminder") {
+            reminder_enabled = reminder.get_bool("enabled").unwrap_or(true);
+            reminder_cadence_hours = reminder
+                .get_i32("cadence_hours")
+                .ok()
+                .map(|v| v.max(1) as u32)
+                .unwrap_or(24);
 
-pub(crate) async fn calendar_create_event(
-    req_body: web::Json<CreateCalendarEventRequest>,
-    req: actix_web::HttpRequest,
-    logic: web::Data<Arc<Logic>>,
-) -> impl Responder {
-    let user = get_user_from_headers(&req);
-
-    let start = match parse_iso_to_bson(&req_body.start) {
-        Some(dt) => dt,
-        None => {
-            return HttpResponse::BadRequest()
-                .json(serde_json::json!({"error": "Invalid start date format, use ISO 8601"}))
+            if let Ok(last_ack_at) = reminder.get_str("last_ack_at") {
+                if let Ok(parsed) = DateTime::parse_from_rfc3339(last_ack_at) {
+                    reminder_anchor = parsed.with_timezone(&Utc);
+                }
+            }
         }
-    };
-    let end = match parse_iso_to_bson(&req_body.end) {
-        Some(dt) => dt,
-        None => {
-            return HttpResponse::BadRequest()
-                .json(serde_json::json!({"error": "Invalid end date format, use ISO 8601"}))
+
+        if let Ok(updated_at) = saved_doc.get_str("updated_at") {
+            if let Ok(parsed) = DateTime::parse_from_rfc3339(updated_at) {
+                reminder_anchor = parsed.with_timezone(&Utc);
+            }
         }
-    };
 
-    let mut event = CalendarEvent::new(&user, &req_body.title, start, end);
-    event.description = req_body.description.clone();
-    event.event_type = req_body.event_type.clone();
-    event.color = req_body.color.clone();
-    event.location = req_body.location.clone();
-
-    match logic.create_calendar_event(&event).await {
-        Ok(_) => HttpResponse::Created().json(&event),
-        Err(e) => {
-            eprintln!("Calendar create error: {}", e);
-            HttpResponse::InternalServerError()
-                .json(serde_json::json!({"error": "Failed to create event"}))
+        if let Ok(overrides) = saved_doc.get_document("checklist_overrides") {
+            checklist_overrides = overrides.clone();
         }
     }
+
+    let next_reminder_due_at = if reminder_enabled {
+        (reminder_anchor + chrono::Duration::hours(reminder_cadence_hours as i64)).to_rfc3339()
+    } else {
+        String::new()
+    };
+
+    let mut checklist = vec![
+        serde_json::json!({
+            "id": "dmarc-enforcement",
+            "title": "Activer DMARC enforcement progressif",
+            "status": if dmarc_policy == "reject" {"done"} else if dmarc_policy == "quarantine" {"in_progress"} else {"todo"},
+            "evidence": format!("policy actuelle: {}", dmarc_policy),
+            "cta": {
+                "label": "Mettre à jour _dmarc",
+                "kind": "dns",
+                "details": "v=DMARC1; p=quarantine; pct=25; adkim=s; aspf=s; rua=mailto:dmarc@misfits.ai"
+            }
+        }),
+        serde_json::json!({
+            "id": "spf-helo",
+            "title": "Corriger SPF_HELO_NONE",
+            "status": if helo_spf_ok {"done"} else {"todo"},
+            "evidence": if helo_spf_ok {"TXT SPF trouvé sur mail.<domain>"} else {"TXT SPF absent sur mail.<domain>"},
+            "cta": {
+                "label": "Ajouter TXT SPF HELO",
+                "kind": "dns",
+                "details": "host=mail value=v=spf1 a -all"
+            }
+        }),
+        serde_json::json!({
+            "id": "dkim-dns",
+            "title": "Vérifier la clé DKIM publique",
+            "status": if dkim_dns_ok {"done"} else {"todo"},
+            "evidence": format!("selector {}._domainkey.{}", selector, domain),
+            "cta": {
+                "label": "Valider la clé DKIM",
+                "kind": "dns",
+                "details": format!("dig +short TXT {}._domainkey.{}", selector, domain)
+            }
+        }),
+        serde_json::json!({
+            "id": "gmail-policy",
+            "title": "Traiter les rejets policy Gmail",
+            "status": if gmail_blocks == 0 {"done"} else {"blocked"},
+            "evidence": format!("NotAuthorizedError sur fenêtre {}: {}", query.window, gmail_blocks),
+            "cta": {
+                "label": "Lancer plan warmup Gmail",
+                "kind": "ops",
+                "details": "Réputation IP/domain + Postmaster + ramp-up progressif"
+            }
+        }),
+        serde_json::json!({
+            "id": "dkim-runtime",
+            "title": "Confirmer absence de régression DKIM",
+            "status": if dkim_alerts == 0 {"done"} else {"todo"},
+            "evidence": format!("alertes DKIM actives: {}", dkim_alerts),
+            "cta": {
+                "label": "Exécuter un probe externe",
+                "kind": "probe",
+                "details": "Envoyer un test mail-tester + vérifier DKIM/SPF/DMARC"
+            }
+        }),
+        serde_json::json!({
+            "id": "apex-spf",
+            "title": "Conserver SPF apex aligné IP prod",
+            "status": if spf_apex_ok {"done"} else {"todo"},
+            "evidence": format!("SPF apex contient {}: {}", smtp_public_ip, spf_apex_ok),
+            "cta": {
+                "label": "Mettre à jour SPF apex",
+                "kind": "dns",
+                "details": format!("v=spf1 ip4:{} -all", smtp_public_ip)
+            }
+        }),
+    ];
+
+    for entry in &mut checklist {
+        if let Some(id) = entry.get("id").and_then(|v| v.as_str()) {
+            if let Ok(override_doc) = checklist_overrides.get_document(id) {
+                if let Ok(checked) = override_doc.get_bool("checked") {
+                    if checked {
+                        entry["status"] = serde_json::json!("done_manual");
+                    }
+                }
+                if let Ok(note) = override_doc.get_str("note") {
+                    if !note.trim().is_empty() {
+                        entry["operator_note"] = serde_json::json!(note);
+                    }
+                }
+            }
+        }
+    }
+
+    let done_count = checklist
+        .iter()
+        .filter(|item| {
+            item.get("status")
+                .and_then(|v| v.as_str())
+                .map(|s| s == "done" || s == "done_manual")
+                .unwrap_or(false)
+        })
+        .count();
+
+    let overall_status = if gmail_blocks > 0 {
+        "blocked_gmail_policy"
+    } else if done_count == checklist.len() {
+        "ready_for_reject"
+    } else {
+        "in_progress"
+    };
+
+    HttpResponse::Ok().json(serde_json::json!({
+        "window": query.window,
+        "domain": domain,
+        "overall_status": overall_status,
+        "progress": {
+            "done": done_count,
+            "total": checklist.len()
+        },
+        "automation": {
+            "auto_checks": ["dns_txt", "smtp_events", "security_alerts"],
+            "last_computed_at": Utc::now().to_rfc3339(),
+            "next_recompute_hint": "refresh tab or call endpoint"
+        },
+        "reminder": {
+            "enabled": reminder_enabled,
+            "cadence_hours": reminder_cadence_hours,
+            "next_due_at": next_reminder_due_at
+        },
+        "checklist": checklist,
+        "cta_details": [
+            {
+                "id": "run_external_probe",
+                "label": "Lancer un test externe",
+                "description": "Envoi test + vérification mail-tester + trace monitoring"
+            },
+            {
+                "id": "publish_dmarc_stage",
+                "label": "Publier DMARC stage suivant",
+                "description": "none -> quarantine(25) -> quarantine(100) -> reject(100)"
+            },
+            {
+                "id": "ack_review",
+                "label": "Marquer revue hebdomadaire",
+                "description": "Cocher les items validés et conserver une note opérateur"
+            }
+        ]
+    }))
 }
 
-pub(crate) async fn calendar_list_events(
-    req: actix_web::HttpRequest,
-    query: web::Query<CalendarQueryParams>,
-    logic: web::Data<Arc<Logic>>,
+pub(crate) async fn api_admin_deliverability_procedure_update(
+    body: web::Json<DeliverabilityProcedureUpdateRequest>,
+    mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
-    let user = get_user_from_headers(&req);
+    let db = env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
+    let coll = mongo
+        .database(&db)
+        .collection::<bson::Document>("admin_runbooks");
 
-    let start_after = query.start.as_ref().and_then(|s| parse_iso_to_bson(s));
-    let start_before = query.end.as_ref().and_then(|s| parse_iso_to_bson(s));
+    let mut set_doc = doc! {
+        "key": "deliverability_procedure",
+        "updated_at": Utc::now().to_rfc3339(),
+    };
 
-    match logic
-        .get_calendar_events(&user, start_after, start_before)
+    if let Some(reminder) = body.reminder.as_ref() {
+        set_doc.insert(
+            "reminder",
+            doc! {
+                "enabled": reminder.enabled,
+                "cadence_hours": (reminder.cadence_hours.max(1) as i32),
+                "updated_at": Utc::now().to_rfc3339(),
+            },
+        );
+    }
+
+    if let Some(items) = body.checklist.as_ref() {
+        let mut overrides = bson::Document::new();
+        for item in items {
+            overrides.insert(
+                item.id.clone(),
+                bson::Bson::Document(doc! {
+                    "checked": item.checked,
+                    "note": item.note.clone().unwrap_or_default(),
+                    "updated_at": Utc::now().to_rfc3339(),
+                }),
+            );
+        }
+        set_doc.insert("checklist_overrides", overrides);
+    }
+
+    match coll
+        .update_one(
+            doc! {"key": "deliverability_procedure"},
+            doc! {"$set": set_doc},
+        )
+        .upsert(true)
         .await
     {
-        Ok(events) => {
-            HttpResponse::Ok().json(serde_json::json!({"events": events, "total": events.len()}))
-        }
-        Err(e) => {
-            eprintln!("Calendar list error: {}", e);
-            HttpResponse::InternalServerError()
-                .json(serde_json::json!({"error": "Failed to list events"}))
-        }
+        Ok(_) => HttpResponse::Ok().json(serde_json::json!({"ok": true})),
+        Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({
+            "ok": false,
+            "error": format!("deliverability_procedure_update_failed: {}", e)
+        })),
     }
 }
 
-pub(crate) async fn calendar_get_event(
-    req: actix_web::HttpRequest,
-    path: web::Path<String>,
-    logic: web::Data<Arc<Logic>>,
+pub(crate) async fn api_admin_observability_overview(
+    query: web::Query<AdminWindowQuery>,
+    mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
-    let user = get_user_from_headers(&req);
-    let event_id = path.into_inner();
+    use simple_smtp_server::security::audit;
 
-    match logic.get_calendar_event(&user, &event_id).await {
-        Ok(Some(event)) => HttpResponse::Ok().json(&event),
-        Ok(None) => HttpResponse::NotFound().json(serde_json::json!({"error": "Event not found"})),
-        Err(e) => {
-            eprintln!("Calendar get error: {}", e);
-            HttpResponse::InternalServerError()
-                .json(serde_json::json!({"error": "Failed to get event"}))
+    let since = since_str(&query.window);
+    let window_minutes = parse_window(&query.window).num_minutes().max(1) as f64;
+    let base_filter = doc! { "ts": { "$gte": &since } };
+
+    let total = storage::count_events(&mongo, base_filter.clone()).await;
+    let by_status_docs = storage::aggregate(
+        &mongo,
+        vec![
+            doc! { "$match": base_filter.clone() },
+            doc! { "$group": { "_id": "$status", "count": { "$sum": 1 }, "avg_ms": { "$avg": "$total_ms" } } },
+        ],
+    )
+    .await;
+
+    let mut by_status = serde_json::Map::new();
+    let mut delivered = 0u64;
+    let mut bounced = 0u64;
+    let mut failed = 0u64;
+    let mut deferred = 0u64;
+
+    for doc in &by_status_docs {
+        let status = doc.get_str("_id").unwrap_or("unknown").to_string();
+        let count = doc.get_i64("count").unwrap_or(0) as u64;
+        match status.as_str() {
+            "delivered" => delivered = count,
+            "bounced" => bounced = count,
+            "failed" => failed = count,
+            "deferred" => deferred = count,
+            _ => {}
         }
-    }
-}
-
-pub(crate) async fn calendar_update_event(
-    req_body: web::Json<UpdateCalendarEventRequest>,
-    req: actix_web::HttpRequest,
-    path: web::Path<String>,
-    logic: web::Data<Arc<Logic>>,
-) -> impl Responder {
-    let user = get_user_from_headers(&req);
-    let event_id = path.into_inner();
-
-    let mut update = bson::Document::new();
-    if let Some(title) = &req_body.title {
-        update.insert("title", title.clone());
-    }
-    if let Some(desc) = &req_body.description {
-        update.insert("description", desc.clone());
-    }
-    if let Some(start) = &req_body.start {
-        match parse_iso_to_bson(start) {
-            Some(dt) => {
-                update.insert("start", dt);
-            }
-            None => {
-                return HttpResponse::BadRequest()
-                    .json(serde_json::json!({"error": "Invalid start date format"}))
-            }
-        }
-    }
-    if let Some(end) = &req_body.end {
-        match parse_iso_to_bson(end) {
-            Some(dt) => {
-                update.insert("end", dt);
-            }
-            None => {
-                return HttpResponse::BadRequest()
-                    .json(serde_json::json!({"error": "Invalid end date format"}))
-            }
-        }
-    }
-    if let Some(et) = &req_body.event_type {
-        update.insert("event_type", et.clone());
-    }
-    if let Some(color) = &req_body.color {
-        update.insert("color", color.clone());
-    }
-    if let Some(loc) = &req_body.location {
-        update.insert("location", loc.clone());
+        by_status.insert(status, serde_json::json!(count));
     }
 
-    if update.is_empty() {
-        return HttpResponse::BadRequest()
-            .json(serde_json::json!({"error": "No fields to update"}));
-    }
+    let p95 = storage::p95_total_ms(&mongo, base_filter.clone(), 1000).await;
 
-    match logic.update_calendar_event(&user, &event_id, update).await {
-        Ok(Some(event)) => HttpResponse::Ok().json(&event),
-        Ok(None) => HttpResponse::NotFound().json(serde_json::json!({"error": "Event not found"})),
-        Err(e) => {
-            eprintln!("Calendar update error: {}", e);
-            HttpResponse::InternalServerError()
-                .json(serde_json::json!({"error": "Failed to update event"}))
-        }
-    }
-}
+    let outcome_total = delivered + bounced + failed + deferred;
+    let success_rate = if outcome_total == 0 {
+        0.0
+    } else {
+        delivered as f64 / outcome_total as f64
+    };
 
-pub(crate) async fn calendar_delete_event(
-    req: actix_web::HttpRequest,
-    path: web::Path<String>,
-    logic: web::Data<Arc<Logic>>,
-) -> impl Responder {
-    let user = get_user_from_headers(&req);
-    let event_id = path.into_inner();
+    // SMTP queue depth + oldest age
+    let db = env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
+    let queue_coll = mongo
+        .database(&db)
+        .collection::<bson::Document>(SEND_QUEUE_COLL);
+    let pending_queue_filter = doc! { "status": { "$in": ["pending", "scheduled", "sending"] } };
+    let queue_depth = queue_coll
+        .count_documents(pending_queue_filter.clone())
+        .await
+        .unwrap_or(0);
 
-    match logic.delete_calendar_event(&user, &event_id).await {
-        Ok(_) => HttpResponse::Ok().json(serde_json::json!({"deleted": true})),
-        Err(e) => {
-            eprintln!("Calendar delete error: {}", e);
-            HttpResponse::InternalServerError()
-                .json(serde_json::json!({"error": "Failed to delete event"}))
-        }
-    }
-}
+    let oldest_pending = queue_coll
+        .find_one(pending_queue_filter.clone())
+        .sort(doc! { "created_at": 1 })
+        .await
+        .ok()
+        .flatten();
+    let queue_oldest_age_seconds = oldest_pending
+        .as_ref()
+        .and_then(|d| d.get_datetime("created_at").ok())
+        .map(|dt| (Utc::now().timestamp_millis() - dt.timestamp_millis()).max(0) as u64 / 1000);
 
-// ─── Admin misc (security_posture, deliverability, observability) ──────────
+    // Throughput and SMTP response classes
+    let incoming_events = storage::count_events(
+        &mongo,
+        doc! { "ts": { "$gte": &since }, "event_type": { "$in": ["accepted", "received"] } },
+    )
+    .await;
+    let outgoing_events = storage::count_events(
+        &mongo,
+        doc! { "ts": { "$gte": &since }, "status": { "$in": ["delivered", "bounced", "failed", "deferred"] } },
+    )
+    .await;
 
+    let smtp_4xx = storage::count_events(
+        &mongo,
+        doc! { "ts": { "$gte": &since }, "smtp_code": { "$gte": 400, "$lt": 500 } },
+    )
+    .await;
+    let smtp_5xx = storage::count_events(
+        &mongo,
+        doc! { "ts": { "$gte": &since }, "smtp_code": { "$gte": 500, "$lt": 600 } },
+    )
+    .await;
+
+    let monitoring_alerts = monitoring::alerts::evaluate_alerts(
+        &mongo,
+        parse_window(&query.window).num_minutes(),
+        &AlertConfig::default(),
+    )
+    .await;
