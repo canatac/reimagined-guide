@@ -1,8 +1,9 @@
 // web_utils.rs — split from main.rs (Sprint 9)
 #![allow(unused_imports)]
 use super::*;
+use crate::{monitoring, security, admin_ops, monitoring_handlers};
 
-fn req_ip_str(req: &actix_web::HttpRequest) -> String {
+pub(crate) fn req_ip_str(req: &actix_web::HttpRequest) -> String {
     req.connection_info()
         .realip_remote_addr()
         .unwrap_or("unknown")
@@ -12,7 +13,7 @@ fn req_ip_str(req: &actix_web::HttpRequest) -> String {
         .to_string()
 }
 
-fn get_accept_language(req: &actix_web::HttpRequest) -> String {
+pub(crate) fn get_accept_language(req: &actix_web::HttpRequest) -> String {
     req.headers()
         .get("accept-language")
         .and_then(|v| v.to_str().ok())
@@ -20,7 +21,7 @@ fn get_accept_language(req: &actix_web::HttpRequest) -> String {
         .to_string()
 }
 
-fn welcome_email_html(
+pub(crate) fn welcome_email_html(
     locale: &str,
     display_name: &str,
     primary_email: &str,

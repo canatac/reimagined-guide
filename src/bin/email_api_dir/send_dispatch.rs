@@ -1,8 +1,9 @@
 // send_dispatch.rs — split from main.rs (Sprint 9)
 #![allow(unused_imports)]
 use super::*;
+use crate::{monitoring, security, admin_ops, monitoring_handlers};
 
-async fn send_email_handler(
+pub(crate) async fn send_email_handler(
     email_req: web::Json<EmailRequest>,
     dkim_service: web::Data<Box<dyn DkimService>>,
 ) -> impl Responder {

@@ -1,8 +1,9 @@
 // event_handlers.rs — split from main.rs (Sprint 9)
 #![allow(unused_imports)]
 use super::*;
+use crate::{monitoring, security, admin_ops, monitoring_handlers};
 
-async fn persist_event(mongo: &mongodb::Client, event: &MailEvent) {
+pub(crate) async fn persist_event(mongo: &mongodb::Client, event: &MailEvent) {
     let db = env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
     let coll = mongo
         .database(&db)
@@ -14,12 +15,12 @@ async fn persist_event(mongo: &mongodb::Client, event: &MailEvent) {
     }
 }
 
-async fn emit_event(bus: &EventBus, mongo: &mongodb::Client, event: MailEvent) {
+pub(crate) async fn emit_event(bus: &EventBus, mongo: &mongodb::Client, event: MailEvent) {
     persist_event(mongo, &event).await;
     let _ = bus.send(event);
 }
 
-async fn api_events(
+pub(crate) async fn api_events(
     req: actix_web::HttpRequest,
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
@@ -53,7 +54,7 @@ async fn api_events(
     }
 }
 
-async fn api_events_stream(bus: web::Data<EventBus>, req: actix_web::HttpRequest) -> HttpResponse {
+pub(crate) async fn api_events_stream(bus: web::Data<EventBus>, req: actix_web::HttpRequest) -> HttpResponse {
     let user_id = resolve_user_id(&req);
     let rx = bus.subscribe();
     let event_stream = stream::unfold((rx, user_id), |(mut rx, uid)| async move {

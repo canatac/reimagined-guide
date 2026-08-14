@@ -1,8 +1,9 @@
 // mailing_list_handlers.rs — split from main.rs (Sprint 9)
 #![allow(unused_imports)]
 use super::*;
+use crate::{monitoring, security, admin_ops, monitoring_handlers};
 
-async fn create_mailing_list(mailing_list: web::Json<MailingListRequest>) -> impl Responder {
+pub(crate) async fn create_mailing_list(mailing_list: web::Json<MailingListRequest>) -> impl Responder {
     let mailing_list_dir = Path::new("mailing-lists");
     if !mailing_list_dir.exists() {
         if let Err(e) = create_dir_all(mailing_list_dir) {
@@ -39,7 +40,7 @@ async fn create_mailing_list(mailing_list: web::Json<MailingListRequest>) -> imp
     }))
 }
 
-async fn send_to_mailing_list(email_req: web::Json<MailingListEmailRequest>) -> impl Responder {
+pub(crate) async fn send_to_mailing_list(email_req: web::Json<MailingListEmailRequest>) -> impl Responder {
     let mailing_list_path =
         Path::new("mailing-lists").join(format!("{}.csv", email_req.mailing_list));
 
