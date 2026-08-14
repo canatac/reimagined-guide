@@ -20,12 +20,12 @@ pub(crate) fn default_ai_feature_models() -> HashMap<String, String> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct AiSettingsDoc {
     #[serde(rename = "_id")]
-    id: String,
+    pub id: String,
     #[serde(rename = "defaultModel", alias = "default_model")]
-    default_model: String,
-    features: HashMap<String, String>,
+    pub default_model: String,
+    pub features: HashMap<String, String>,
     #[serde(rename = "updatedAt", alias = "updated_at", default)]
-    updated_at: Option<String>,
+    pub updated_at: Option<String>,
 }
 
 impl AiSettingsDoc {
@@ -61,9 +61,9 @@ impl AiSettingsDoc {
 #[derive(Deserialize)]
 pub(crate) struct AiSettingsUpdate {
     #[serde(rename = "defaultModel", alias = "default_model", default)]
-    default_model: Option<String>,
+    pub default_model: Option<String>,
     #[serde(default)]
-    features: Option<HashMap<String, String>>,
+    pub features: Option<HashMap<String, String>>,
 }
 
 pub(crate) fn mongo_db_name() -> String {
@@ -134,45 +134,45 @@ pub(crate) async fn api_templates() -> impl Responder {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct HermesChatProxyRequest {
-    messages: Vec<serde_json::Value>,
+    pub messages: Vec<serde_json::Value>,
     #[serde(default)]
-    model: Option<String>,
+    pub model: Option<String>,
     #[serde(default)]
-    thread_id: Option<String>,
+    pub thread_id: Option<String>,
     #[serde(default)]
-    user_id: Option<String>,
+    pub user_id: Option<String>,
     #[serde(default)]
-    session_id: Option<String>,
+    pub session_id: Option<String>,
     #[serde(default)]
-    session_key: Option<String>,
+    pub session_key: Option<String>,
     #[serde(default)]
-    temperature: Option<f32>,
+    pub temperature: Option<f32>,
     #[serde(default)]
-    max_tokens: Option<u32>,
+    pub max_tokens: Option<u32>,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct HermesRunsProxyRequest {
     #[serde(default)]
-    input: Option<serde_json::Value>,
+    pub input: Option<serde_json::Value>,
     #[serde(default)]
-    model: Option<String>,
+    pub model: Option<String>,
     #[serde(default)]
-    thread_id: Option<String>,
+    pub thread_id: Option<String>,
     #[serde(default)]
-    user_id: Option<String>,
+    pub user_id: Option<String>,
     #[serde(default)]
-    session_id: Option<String>,
+    pub session_id: Option<String>,
     #[serde(default)]
-    session_key: Option<String>,
+    pub session_key: Option<String>,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct HermesRunsListQuery {
     #[serde(default)]
-    limit: Option<u32>,
+    pub limit: Option<u32>,
 }
 
 pub(crate) fn normalize_hermes_base_url(raw: &str) -> String {
