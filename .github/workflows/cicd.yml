@@ -32,6 +32,9 @@ jobs:
       - name: Cargo check (lib + bins)
         run: cargo check --lib --bins --verbose
 
+      - name: Architecture guard (hexagonal port discipline)
+        run: bash scripts/arch_guard.sh
+
   # ============================================================
   # JOB 2 : Build & Push SMTP image via Docker Buildx to SCW Registry
   #          SKIPPED on repository_dispatch (DKIM-only change)
