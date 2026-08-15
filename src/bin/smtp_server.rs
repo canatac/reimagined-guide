@@ -137,6 +137,16 @@ impl StreamType {
     }
 }
 
+#[path = "smtp_server_dir/recipient.rs"]
+mod recipient_helpers;
+#[path = "smtp_server_dir/tls.rs"]
+mod tls_helpers;
+#[path = "smtp_server_dir/auth.rs"]
+mod auth_helpers;
+use recipient_helpers::{recipient_domain, is_local_recipient, recipient_local_part};
+use tls_helpers::{load_certs, load_key};
+use auth_helpers::check_credentials;
+
 fn env_bool(key: &str, default: bool) -> bool {
     match env::var(key) {
         Ok(raw) => {
@@ -148,51 +158,6 @@ fn env_bool(key: &str, default: bool) -> bool {
     }
 }
 
-fn recipient_domain(raw_to: &str) -> Option<String> {
-    let trimmed = raw_to.trim();
-    let addr = if let (Some(start), Some(end)) = (trimmed.rfind('<'), trimmed.rfind('>')) {
-        if start < end {
-            &trimmed[start + 1..end]
-        } else {
-            trimmed
-        }
-    } else {
-        trimmed.trim_matches(|c| c == '<' || c == '>')
-    };
-
-    addr.split('@').nth(1).map(|d| d.trim().trim_end_matches('.').to_ascii_lowercase())
-}
-
-fn is_local_recipient(raw_to: &str) -> bool {
-    matches!(recipient_domain(raw_to).as_deref(), Some("misfits.ai") | Some("mail.misfits.ai"))
-}
-
-fn recipient_local_part(raw_to: &str) -> Option<String> {
-    let trimmed = raw_to.trim();
-    let addr = if let (Some(start), Some(end)) = (trimmed.rfind('<'), trimmed.rfind('>')) {
-        if start < end {
-            &trimmed[start + 1..end]
-        } else {
-            trimmed
-        }
-    } else {
-        trimmed.trim_matches(|c| c == '<' || c == '>')
-    };
-
-    let mut parts = addr.split('@');
-    let local = parts.next()?.trim().to_ascii_lowercase();
-    let domain = parts.next()?.trim().trim_end_matches('.').to_ascii_lowercase();
-    if local.is_empty() {
-        return None;
-    }
-    if matches!(domain.as_str(), "misfits.ai" | "mail.misfits.ai") {
-        Some(local)
-    } else {
-        None
-    }
-}
-
-fn extract_session_id_from_response(response: &str) -> Option<String> {
     let marker = "session ID:";
     let idx = response.find(marker)?;
     let sid = response[idx + marker.len()..]
@@ -884,40 +849,6 @@ async fn write_response(stream: &mut StreamType, response: &str) -> std::io::Res
 }
 
 // Load SSL certificates
-fn load_certs(path: &Path) -> std::io::Result<Vec<CertificateDer<'static>>> {
-    certs(&mut BufReader::new(File::open(path)?)).collect()
-}
-
-// Load SSL private key
-fn load_key(path: &Path) -> std::io::Result<PrivateKeyDer<'static>> {
-    Ok(private_key(&mut BufReader::new(File::open(path)?))
-        .unwrap()
-        .ok_or(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "no private key found".to_string(),
-        ))?)
-}
-
-// Check user credentials
-fn check_credentials(username: &[u8], password: &[u8]) -> bool {
-    // Implement your authentication logic here
-    // For example:
-    let expected_username = env::var("SMTP_USERNAME").expect("SMTP_USERNAME must be set");
-    let expected_password = env::var("SMTP_PASSWORD").expect("SMTP_PASSWORD must be set");
-
-    let username_match = constant_time_eq(username, expected_username.as_bytes());
-    let password_match = constant_time_eq(password, expected_password.as_bytes());
-
-    debug!("Username match: {}", username_match);
-    debug!("Password match: {}", password_match);
-
-    username_match && password_match
-}
-
-// Main function
-#[tokio::main]
-async fn main() -> Result<(), MainError> {
-    // Load environment variables from .env file
     dotenv().ok();
 
     // rustls 0.23 requires an explicit process-level CryptoProvider
