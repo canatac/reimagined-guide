@@ -1,3 +1,6 @@
+[workspace]
+members = [".", "crates/domain"]
+
 [package]
 name = "simple-smtp-server"
 version = "0.2.0"
@@ -26,6 +29,7 @@ name = "simple_smtp_server"
 path = "src/lib.rs"
 
 [dependencies]
+simple-smtp-domain = { path = "crates/domain" }
 actix-web = { version = "4.11.0", features = ["openssl"] }
 openssl = "0.10.66"
 serde = { version = "1.0.229", features = ["derive"] }
