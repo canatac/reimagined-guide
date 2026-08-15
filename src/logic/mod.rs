@@ -444,6 +444,27 @@ pub trait DatabaseInterface: Send + Sync {
 
     // Boucle 8 — sélection mailbox user-scopée.
     async fn select_mailbox_for_user(&self, username: &str, mailbox: &str) -> Result<Mailbox>;
+
+    // Boucle 9 — calendar via port.
+    async fn create_calendar_event(&self, event: &CalendarEvent) -> Result<()>;
+    async fn get_calendar_events(
+        &self,
+        username: &str,
+        start_after: Option<bson::DateTime>,
+        start_before: Option<bson::DateTime>,
+    ) -> Result<Vec<CalendarEvent>>;
+    async fn get_calendar_event(
+        &self,
+        username: &str,
+        event_id: &str,
+    ) -> Result<Option<CalendarEvent>>;
+    async fn update_calendar_event(
+        &self,
+        username: &str,
+        event_id: &str,
+        update_doc: bson::Document,
+    ) -> Result<Option<CalendarEvent>>;
+    async fn delete_calendar_event(&self, username: &str, event_id: &str) -> Result<()>;
 }
 
 #[async_trait::async_trait]
