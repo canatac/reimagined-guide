@@ -811,6 +811,81 @@ impl DatabaseInterface for MongoDatabaseAdapter {
         let mailboxes: Vec<String> = cursor.map_ok(|doc| doc.name).try_collect().await?;
         Ok(mailboxes)
     }
+
+    // Boucle 12 — OAuth.
+    async fn find_or_create_oauth_user(
+        &self,
+        provider: &str,
+        provider_user_id: &str,
+        email: &str,
+        display_name: Option<&str>,
+    ) -> Result<User> {
+        let db_name = Self::database_name();
+        let collection_name = std::env::var("MONGODB_USERS_COLLECTION")
+            .unwrap_or_else(|_| "users".to_string());
+        let collection = self
+            .client
+            .database(&db_name)
+            .collection::<mongodb::bson::Document>(&collection_name);
+
+        let oauth_filter = doc! {
+            "oauth.provider": provider,
+            "oauth.subject": provider_user_id
+        };
+        if let Some(doc) = collection.find_one(oauth_filter).await? {
+            return Ok(crate::logic::user_from_document(&doc, email));
+        }
+
+        let username_filter = doc! { "username": email };
+        let oauth_set = doc! {
+            "oauth": {
+                "provider": provider,
+                "subject": provider_user_id
+            },
+            "updated_at": bson::DateTime::from_millis(chrono::Utc::now().timestamp_millis())
+        };
+        if collection
+            .find_one(username_filter.clone())
+            .await?
+            .is_some()
+        {
+            collection
+                .update_one(username_filter.clone(), doc! { "$set": oauth_set })
+                .await?;
+        } else {
+            collection
+                .insert_one(doc! {
+                    "username": email,
+                    "password": "",
+                    "mailbox": crate::logic::default_mailbox(),
+                    "display_name": display_name.unwrap_or(email),
+                    "oauth": {
+                        "provider": provider,
+                        "subject": provider_user_id
+                    },
+                    "created_at": bson::DateTime::from_millis(chrono::Utc::now().timestamp_millis()),
+                    "updated_at": bson::DateTime::from_millis(chrono::Utc::now().timestamp_millis())
+                })
+                .await?;
+        }
+
+        let final_filter = doc! {
+            "oauth.provider": provider,
+            "oauth.subject": provider_user_id
+        };
+        if let Some(doc) = collection.find_one(final_filter).await? {
+            Ok(crate::logic::user_from_document(&doc, email))
+        } else {
+            Ok(User {
+                id: None,
+                username: email.to_string(),
+                password: String::new(),
+                mailbox: crate::logic::default_mailbox(),
+                condition_accepted: false,
+                locale: None,
+            })
+        }
+    }
 }
 
 // Silencer l'import inutilisé de bson::Document si non exploité (le use ci-dessus
