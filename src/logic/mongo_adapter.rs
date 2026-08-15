@@ -495,6 +495,24 @@ impl DatabaseInterface for MongoDatabaseAdapter {
         collection.update_one(filter, update).upsert(true).await?;
         Ok(())
     }
+
+    // Boucle 8 — select_mailbox user-scopé.
+    async fn select_mailbox_for_user(&self, username: &str, mailbox: &str) -> Result<Mailbox> {
+        let db_name = Self::database_name();
+        let collection = self
+            .client
+            .database(&db_name)
+            .collection::<Mailbox>("mailboxes");
+        let filter = doc! { "user_id": username, "name": mailbox };
+        if let Some(mb) = collection.find_one(filter).await? {
+            Ok(mb)
+        } else {
+            Err(mongodb::error::Error::from(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Mailbox not found",
+            )))
+        }
+    }
 }
 
 // Silencer l'import inutilisé de bson::Document si non exploité (le use ci-dessus

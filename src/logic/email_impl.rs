@@ -27,16 +27,8 @@ impl Logic {
     }
 
     pub async fn store_email_flag(&self, username: &str, email_id: &str, flag: &str) -> Result<()> {
-        // Boucle 4 — port hexagonal : délègue au repo.
         let _ = username;
-        #[cfg(not(test))]
-        {
-            self.repo.update_email_flag(email_id, flag).await
-        }
-        #[cfg(test)]
-        {
-            self.client.update_email_flag(email_id, flag).await
-        }
+        self.repo.update_email_flag(email_id, flag).await
     }
 
     pub async fn move_email_to_mailbox(
@@ -73,28 +65,12 @@ impl Logic {
     }
 
     pub async fn delete_email(&self, username: &str, email_id: &str) -> Result<()> {
-        // Boucle 4 — port hexagonal : délègue au repo.
         let _ = username;
-        #[cfg(not(test))]
-        {
-            self.repo.delete_email(email_id).await
-        }
-        #[cfg(test)]
-        {
-            self.client.delete_email(email_id).await
-        }
+        self.repo.delete_email(email_id).await
     }
 
     pub async fn archive_email(&self, username: &str, email_id: &str) -> Result<()> {
-        // Boucle 4 — port hexagonal : délègue au repo.
         let _ = username;
-        #[cfg(not(test))]
-        {
-            self.repo.archive_email(email_id).await
-        }
-        #[cfg(test)]
-        {
-            self.client.archive_email(email_id).await
-        }
+        self.repo.archive_email(email_id).await
     }
 }

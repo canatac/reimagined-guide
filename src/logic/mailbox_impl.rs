@@ -6,39 +6,7 @@ use super::*;
 impl Logic {
 
     pub async fn select_mailbox(&self, username: &str, mailbox: &str) -> Result<Mailbox> {
-        #[cfg(not(test))]
-        {
-            let database_name =
-                std::env::var("MONGODB_DATABASE").expect("MONGODB_DATABASE must be set");
-            let collection = self
-                .client
-                .database(&database_name)
-                .collection::<Mailbox>("mailboxes");
-
-            let filter = doc! { "user_id": username, "name": mailbox };
-            if let Some(mailbox) = collection.find_one(filter).await? {
-                Ok(mailbox)
-            } else {
-                Err(Error::from(std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    "Mailbox not found",
-                )))
-            }
-        }
-        #[cfg(test)]
-        {
-            Ok(Mailbox {
-                name: mailbox.to_string(),
-                flags: vec![],
-                exists: 10,
-                recent: 2,
-                unseen: 5,
-                permanent_flags: vec![],
-                uid_validity: 1,
-                uid_next: 11,
-                user_id: username.to_string(),
-            })
-        }
+        self.repo.select_mailbox_for_user(username, mailbox).await
     }
 
     pub async fn search_messages(&self, username: &str, criteria: &str) -> Result<Vec<u32>> {
@@ -269,15 +237,7 @@ impl Logic {
     }
 
     pub async fn store_email(&self, username: &str, mailbox: &str, email: &Email) -> Result<()> {
-        // Boucle 4 — port hexagonal : délègue au repo.
-        #[cfg(not(test))]
-        {
-            self.repo.store_email(username, mailbox, email).await
-        }
-        #[cfg(test)]
-        {
-            self.client.store_email(username, mailbox, email).await
-        }
+        self.repo.store_email(username, mailbox, email).await
     }
 
     pub async fn list_mailboxes(
