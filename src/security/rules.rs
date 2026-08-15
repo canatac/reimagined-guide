@@ -34,7 +34,9 @@ pub use identity::{
 };
 
 use super::SecurityAlert;
-use helpers::RuleContext;
+// RuleContext est ré-exporté par `pub use helpers::RuleContext;` ci-dessus,
+// et donc accessible directement au sein de ce module.
+
 
 pub async fn evaluate_all(ctx: &RuleContext<'_>) -> Vec<SecurityAlert> {
     // Run rules concurrently where possible
