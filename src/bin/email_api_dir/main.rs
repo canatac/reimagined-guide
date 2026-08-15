@@ -338,6 +338,9 @@ struct DeliverabilityReminderUpdate {
 // monitoring + security handlers → monitoring_handlers module
 
 
+async fn create_mailing_list(mailing_list: web::Json<MailingListRequest>) -> impl Responder {
+    let mailing_list_dir = Path::new("mailing-lists");
+    if !mailing_list_dir.exists() {
         if let Err(e) = create_dir_all(mailing_list_dir) {
             return HttpResponse::InternalServerError().json(serde_json::json!({
                 "status": "error",
@@ -524,6 +527,10 @@ async fn send_email_handler(
 }
 
 // --- Auth handlers ---
+
+#[actix_web::main]
+async fn main() -> std::io::Result<()> {
+    dotenv().ok();
 
     // rustls 0.23 requires an explicit process-level CryptoProvider.
     rustls::crypto::aws_lc_rs::default_provider()
