@@ -362,6 +362,33 @@ pub trait DatabaseInterface: Send + Sync {
         from: &str,
         to: &str,
     ) -> Result<()>;
+
+    // Boucle 11 — IMAP: search/expunge/copy/store_flags/list_subscribed/status_items/list.
+    async fn search_messages_for_user(&self, username: &str, criteria: &str) -> Result<Vec<u32>>;
+    async fn expunge_mailbox_for_user(&self, username: &str) -> Result<Vec<u32>>;
+    async fn copy_messages_for_user(
+        &self,
+        username: &str,
+        sequence_set: &str,
+        target_mailbox: &str,
+    ) -> Result<()>;
+    async fn store_flags_for_user(
+        &self,
+        username: &str,
+        sequence_set: &str,
+        flags: Vec<String>,
+        mode: &str,
+    ) -> Result<()>;
+    async fn list_subscribed_mailboxes_for_user(
+        &self,
+        username: &str,
+    ) -> Result<Vec<String>>;
+    async fn list_mailboxes_for_user(
+        &self,
+        username: &str,
+        reference: &str,
+        mailbox: &str,
+    ) -> Result<Vec<String>>;
 }
 
 #[async_trait::async_trait]

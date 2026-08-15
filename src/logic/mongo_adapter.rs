@@ -689,6 +689,128 @@ impl DatabaseInterface for MongoDatabaseAdapter {
             .await?;
         Ok(())
     }
+
+    // Boucle 11 — IMAP.
+    async fn search_messages_for_user(&self, username: &str, criteria: &str) -> Result<Vec<u32>> {
+        let db_name = Self::database_name();
+        let collection = self
+            .client
+            .database(&db_name)
+            .collection::<Email>("emails");
+        let filter = match criteria {
+            "ALL" => doc! { "user_id": username },
+            "UNSEEN" => doc! { "user_id": username, "flags": { "$nin": ["\\Seen"] } },
+            "SEEN" => doc! { "user_id": username, "flags": "\\Seen" },
+            _ => doc! { "user_id": username },
+        };
+        let mut cursor = collection.find(filter).await?;
+        let mut sequence_numbers = Vec::new();
+        while let Some(email) = cursor.try_next().await? {
+            sequence_numbers.push(email.sequence_number);
+        }
+        Ok(sequence_numbers)
+    }
+
+    async fn expunge_mailbox_for_user(&self, username: &str) -> Result<Vec<u32>> {
+        let db_name = Self::database_name();
+        let collection = self
+            .client
+            .database(&db_name)
+            .collection::<Email>("emails");
+        let filter = doc! { "user_id": username, "flags": "\\Deleted" };
+        let mut cursor = collection.find(filter.clone()).await?;
+        let mut deleted_sequence_numbers = Vec::new();
+        while let Some(email) = cursor.try_next().await? {
+            deleted_sequence_numbers.push(email.sequence_number);
+        }
+        collection.delete_many(filter).await?;
+        Ok(deleted_sequence_numbers)
+    }
+
+    async fn copy_messages_for_user(
+        &self,
+        username: &str,
+        sequence_set: &str,
+        _target_mailbox: &str,
+    ) -> Result<()> {
+        let db_name = Self::database_name();
+        let collection = self
+            .client
+            .database(&db_name)
+            .collection::<Email>("emails");
+        let filter = doc! {
+            "user_id": username,
+            "sequence_number": sequence_set.parse::<u32>().unwrap_or(0)
+        };
+        if let Some(mut email) = collection.find_one(filter).await? {
+            email.id = format!("{}_{}", email.id, chrono::Utc::now().timestamp());
+            collection.insert_one(email).await?;
+        }
+        Ok(())
+    }
+
+    async fn store_flags_for_user(
+        &self,
+        username: &str,
+        sequence_set: &str,
+        flags: Vec<String>,
+        mode: &str,
+    ) -> Result<()> {
+        let db_name = Self::database_name();
+        let collection = self
+            .client
+            .database(&db_name)
+            .collection::<Email>("emails");
+        let filter = doc! {
+            "user_id": username,
+            "sequence_number": sequence_set.parse::<u32>().unwrap_or(0)
+        };
+        let update = match mode {
+            "+" => doc! { "$addToSet": { "flags": { "$each": flags } } },
+            "-" => doc! { "$pullAll": { "flags": flags } },
+            _ => doc! { "$set": { "flags": flags } },
+        };
+        collection.update_one(filter, update).await?;
+        Ok(())
+    }
+
+    async fn list_subscribed_mailboxes_for_user(
+        &self,
+        username: &str,
+    ) -> Result<Vec<String>> {
+        let db_name = Self::database_name();
+        let collection = self
+            .client
+            .database(&db_name)
+            .collection::<User>("subscriptions");
+        let filter = doc! { "user_id": username, "subscribed": true };
+        let mut cursor = collection.find(filter).await?;
+        let mut mailboxes = Vec::new();
+        while let Some(subscription) = cursor.try_next().await? {
+            mailboxes.push(subscription.mailbox);
+        }
+        Ok(mailboxes)
+    }
+
+    async fn list_mailboxes_for_user(
+        &self,
+        username: &str,
+        reference: &str,
+        mailbox: &str,
+    ) -> Result<Vec<String>> {
+        let db_name = Self::database_name();
+        let collection = self
+            .client
+            .database(&db_name)
+            .collection::<Mailbox>("mailboxes");
+        let filter = doc! {
+            "user_id": username,
+            "name": { "$regex": format!("^{}.*{}", reference, mailbox) }
+        };
+        let cursor = collection.find(filter).await?;
+        let mailboxes: Vec<String> = cursor.map_ok(|doc| doc.name).try_collect().await?;
+        Ok(mailboxes)
+    }
 }
 
 // Silencer l'import inutilisé de bson::Document si non exploité (le use ci-dessus
