@@ -9,13 +9,14 @@ use tokio::time::timeout;
 
 use super::{SMTP_PORTS, CONNECTION_TIMEOUT};
 
+pub(crate) async fn test_smtp_port(host: &str, port: u16) -> bool {
     match timeout(CONNECTION_TIMEOUT, TcpStream::connect((host, port))).await {
         Ok(Ok(_)) => true,
         _ => false,
     }
 }
 
-async fn find_smtp_port(host: &str) -> Option<u16> {
+pub(crate) async fn find_smtp_port(host: &str) -> Option<u16> {
     for &port in &SMTP_PORTS {
         if test_smtp_port(host, port).await {
             return Some(port);
@@ -24,7 +25,7 @@ async fn find_smtp_port(host: &str) -> Option<u16> {
     None
 }
 
-async fn expect_code<T: AsyncReadExt + Unpin>(
+pub(crate) async fn expect_code<T: AsyncReadExt + Unpin>(
     stream: &mut T,
     expected: &str,
 ) -> std::io::Result<()> {
@@ -73,7 +74,7 @@ async fn expect_code<T: AsyncReadExt + Unpin>(
         format!("Timed out waiting for SMTP {} response: {}", expected, acc),
     ))
 }
-fn ehlo_hostname() -> String {
+pub(crate) fn ehlo_hostname() -> String {
     if let Ok(value) = env::var("SMTP_HOSTNAME") {
         let v = value.trim().trim_end_matches('.');
         if !v.is_empty() {

@@ -3,13 +3,14 @@
 
 use crate::entities::Email;
 
+pub(crate) fn normalize_crlf(input: &str) -> String {
     input
         .replace("\r\n", "\n")
         .replace('\r', "\n")
         .replace('\n', "\r\n")
 }
 
-fn strip_tags_simple(html: &str) -> String {
+pub(crate) fn strip_tags_simple(html: &str) -> String {
     let mut out = String::with_capacity(html.len());
     let mut in_tag = false;
     for c in html.chars() {
@@ -23,7 +24,7 @@ fn strip_tags_simple(html: &str) -> String {
     out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn body_looks_like_html(body: &str) -> bool {
+pub(crate) fn body_looks_like_html(body: &str) -> bool {
     let lower = body.to_ascii_lowercase();
     lower.contains("<html")
         || lower.contains("<body")
@@ -35,7 +36,7 @@ fn body_looks_like_html(body: &str) -> bool {
         || lower.contains("</")
 }
 
-fn ensure_html_document(raw: &str) -> String {
+pub(crate) fn ensure_html_document(raw: &str) -> String {
     let trimmed = raw.trim();
     let lower = trimmed.to_ascii_lowercase();
     if lower.contains("<html") {
@@ -44,7 +45,7 @@ fn ensure_html_document(raw: &str) -> String {
     format!("<!DOCTYPE html><html><body>{}</body></html>", trimmed)
 }
 
-fn upsert_content_type(headers: &mut Vec<(String, String)>, value: String) {
+pub(crate) fn upsert_content_type(headers: &mut Vec<(String, String)>, value: String) {
     if let Some((_, existing)) = headers
         .iter_mut()
         .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
@@ -55,7 +56,7 @@ fn upsert_content_type(headers: &mut Vec<(String, String)>, value: String) {
     }
 }
 
-fn compose_smtp_payload(email: &Email) -> String {
+pub(crate) fn compose_smtp_payload(email: &Email) -> String {
     let mut headers = email.headers.clone();
 
     if !headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("date")) {
@@ -151,4 +152,3 @@ fn compose_smtp_payload(email: &Email) -> String {
     email_content
 }
 
-async fn test_smtp_port(host: &str, port: u16) -> bool {
