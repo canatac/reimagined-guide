@@ -158,6 +158,7 @@ fn env_bool(key: &str, default: bool) -> bool {
     }
 }
 
+fn extract_session_id_from_response(response: &str) -> Option<String> {
     let marker = "session ID:";
     let idx = response.find(marker)?;
     let sid = response[idx + marker.len()..]
@@ -849,6 +850,12 @@ async fn write_response(stream: &mut StreamType, response: &str) -> std::io::Res
 }
 
 // Load SSL certificates
+// (moved to tls_helpers.rs)
+
+// Main function
+#[tokio::main]
+async fn main() -> Result<(), MainError> {
+    // Load environment variables from .env file
     dotenv().ok();
 
     // rustls 0.23 requires an explicit process-level CryptoProvider
