@@ -326,6 +326,98 @@ impl DatabaseInterface for MongoDatabaseAdapter {
     ) -> Result<Vec<String>> {
         Ok(vec![])
     }
+
+    // Boucle 6 — 5 méthodes migrées vers impls Mongo réelles (portées depuis Logic).
+    async fn get_emails_page(
+        &self,
+        username: &str,
+        mailbox: &str,
+        limit: i64,
+        skip: u64,
+    ) -> Result<Vec<Email>> {
+        let db_name = Self::database_name();
+        let collection = self
+            .client
+            .database(&db_name)
+            .collection::<Email>("emails");
+        let filter = doc! { "user_id": username, "mailbox": mailbox };
+        let cursor = collection
+            .find(filter)
+            .sort(doc! { "internal_date": -1 })
+            .skip(skip)
+            .limit(limit.max(1).min(200))
+            .await?;
+        cursor.try_collect().await
+    }
+
+    async fn fetch_email(&self, username: &str, email_id: &str) -> Result<Option<Email>> {
+        let db_name = Self::database_name();
+        let collection = self
+            .client
+            .database(&db_name)
+            .collection::<Email>("emails");
+        let filter = doc! { "user_id": username, "id": email_id };
+        collection.find_one(filter).await
+    }
+
+    async fn set_email_read(
+        &self,
+        username: &str,
+        email_id: &str,
+        read: bool,
+    ) -> Result<()> {
+        let db_name = Self::database_name();
+        let collection = self
+            .client
+            .database(&db_name)
+            .collection::<Email>("emails");
+        let filter = doc! { "user_id": username, "id": email_id };
+        let update = if read {
+            doc! { "$addToSet": { "flags": "\\Seen" } }
+        } else {
+            doc! { "$pull": { "flags": "\\Seen" } }
+        };
+        let res = collection.update_one(filter, update).await?;
+        Ok(res.matched_count > 0)
+    }
+
+    async fn set_email_starred(
+        &self,
+        username: &str,
+        email_id: &str,
+        starred: bool,
+    ) -> Result<()> {
+        let db_name = Self::database_name();
+        let collection = self
+            .client
+            .database(&db_name)
+            .collection::<Email>("emails");
+        let filter = doc! { "user_id": username, "id": email_id };
+        let update = if starred {
+            doc! { "$addToSet": { "flags": "\\Flagged" } }
+        } else {
+            doc! { "$pull": { "flags": "\\Flagged" } }
+        };
+        let res = collection.update_one(filter, update).await?;
+        Ok(res.matched_count > 0)
+    }
+
+    async fn move_email_to_mailbox(
+        &self,
+        username: &str,
+        email_id: &str,
+        target_mailbox: &str,
+    ) -> Result<()> {
+        let db_name = Self::database_name();
+        let collection = self
+            .client
+            .database(&db_name)
+            .collection::<Email>("emails");
+        let filter = doc! { "user_id": username, "id": email_id };
+        let update = doc! { "$set": { "mailbox": target_mailbox } };
+        let res = collection.update_one(filter, update).await?;
+        Ok(res.matched_count > 0)
+    }
 }
 
 // Silencer l'import inutilisé de bson::Document si non exploité (le use ci-dessus

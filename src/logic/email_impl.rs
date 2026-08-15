@@ -17,61 +17,13 @@ impl Logic {
         limit: i64,
         skip: u64,
     ) -> Result<Vec<Email>> {
-        #[cfg(not(test))]
-        {
-            let database_name =
-                std::env::var("MONGODB_DATABASE").expect("MONGODB_DATABASE must be set");
-            let collection = self
-                .client
-                .database(&database_name)
-                .collection::<Email>("emails");
-            let filter = doc! { "user_id": username, "mailbox": mailbox };
-            let cursor = collection
-                .find(filter)
-                .sort(doc! { "internal_date": -1 })
-                .skip(skip)
-                .limit(limit.max(1).min(200))
-                .await?;
-            cursor.try_collect().await
-        }
-        #[cfg(test)]
-        {
-            let _ = (limit, skip);
-            let emails = vec![Email::new(
-                "testemail",
-                "from@test.com",
-                "to@test.com",
-                "Test Subject",
-                "Test Body",
-            )];
-            Ok(emails)
-        }
+        self.repo
+            .get_emails_page(username, mailbox, limit, skip)
+            .await
     }
 
     pub async fn fetch_email(&self, username: &str, email_id: &str) -> Result<Option<Email>> {
-        #[cfg(not(test))]
-        {
-            let database_name =
-                std::env::var("MONGODB_DATABASE").expect("MONGODB_DATABASE must be set");
-            let collection = self
-                .client
-                .database(&database_name)
-                .collection::<Email>("emails");
-            let filter = doc! { "user_id": username, "id": email_id };
-            collection.find_one(filter).await
-        }
-        #[cfg(test)]
-        {
-            //For test, we need to return an email
-            let email = Email::new(
-                "testemail",
-                "from@test.com",
-                "to@test.com",
-                "Test Subject",
-                "Test Body",
-            );
-            Ok(Some(email))
-        }
+        self.repo.fetch_email(username, email_id).await
     }
 
     pub async fn store_email_flag(&self, username: &str, email_id: &str, flag: &str) -> Result<()> {
@@ -93,23 +45,9 @@ impl Logic {
         email_id: &str,
         mailbox: &str,
     ) -> Result<bool> {
-        #[cfg(not(test))]
-        {
-            let database_name =
-                std::env::var("MONGODB_DATABASE").expect("MONGODB_DATABASE must be set");
-            let collection = self
-                .client
-                .database(&database_name)
-                .collection::<Email>("emails");
-            let filter = doc! { "user_id": username, "id": email_id };
-            let update = doc! { "$set": { "mailbox": mailbox.to_ascii_lowercase() } };
-            let res = collection.update_one(filter, update).await?;
-            Ok(res.matched_count > 0)
-        }
-        #[cfg(test)]
-        {
-            Ok(true)
-        }
+        self.repo
+            .move_email_to_mailbox(username, email_id, &mailbox.to_ascii_lowercase())
+            .await
     }
 
     pub async fn set_email_read(
@@ -118,27 +56,9 @@ impl Logic {
         email_id: &str,
         is_read: bool,
     ) -> Result<bool> {
-        #[cfg(not(test))]
-        {
-            let database_name =
-                std::env::var("MONGODB_DATABASE").expect("MONGODB_DATABASE must be set");
-            let collection = self
-                .client
-                .database(&database_name)
-                .collection::<Email>("emails");
-            let filter = doc! { "user_id": username, "id": email_id };
-            let update = if is_read {
-                doc! { "$addToSet": { "flags": "\\Seen" } }
-            } else {
-                doc! { "$pull": { "flags": { "$in": ["\\Seen", "Seen", "seen"] } } }
-            };
-            let res = collection.update_one(filter, update).await?;
-            Ok(res.matched_count > 0)
-        }
-        #[cfg(test)]
-        {
-            Ok(true)
-        }
+        self.repo
+            .set_email_read(username, email_id, is_read)
+            .await
     }
 
     pub async fn set_email_starred(
@@ -147,27 +67,9 @@ impl Logic {
         email_id: &str,
         is_starred: bool,
     ) -> Result<bool> {
-        #[cfg(not(test))]
-        {
-            let database_name =
-                std::env::var("MONGODB_DATABASE").expect("MONGODB_DATABASE must be set");
-            let collection = self
-                .client
-                .database(&database_name)
-                .collection::<Email>("emails");
-            let filter = doc! { "user_id": username, "id": email_id };
-            let update = if is_starred {
-                doc! { "$addToSet": { "flags": "\\Flagged" } }
-            } else {
-                doc! { "$pull": { "flags": { "$in": ["\\Flagged", "Flagged", "flagged", "starred"] } } }
-            };
-            let res = collection.update_one(filter, update).await?;
-            Ok(res.matched_count > 0)
-        }
-        #[cfg(test)]
-        {
-            Ok(true)
-        }
+        self.repo
+            .set_email_starred(username, email_id, is_starred)
+            .await
     }
 
     pub async fn delete_email(&self, username: &str, email_id: &str) -> Result<()> {

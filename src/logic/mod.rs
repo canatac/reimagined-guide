@@ -401,6 +401,34 @@ pub trait DatabaseInterface: Send + Sync {
         reference: &str,
         mailbox: &str,
     ) -> Result<Vec<String>>;
+
+    // Boucle 6 — extensions du port pour lecture/écriture email par user.
+    async fn get_emails_page(
+        &self,
+        username: &str,
+        mailbox: &str,
+        limit: i64,
+        skip: u64,
+    ) -> Result<Vec<Email>>;
+    async fn fetch_email(&self, username: &str, email_id: &str) -> Result<Option<Email>>;
+    async fn set_email_read(
+        &self,
+        username: &str,
+        email_id: &str,
+        read: bool,
+    ) -> Result<bool>;
+    async fn set_email_starred(
+        &self,
+        username: &str,
+        email_id: &str,
+        starred: bool,
+    ) -> Result<bool>;
+    async fn move_email_to_mailbox(
+        &self,
+        username: &str,
+        email_id: &str,
+        target_mailbox: &str,
+    ) -> Result<bool>;
 }
 
 #[async_trait::async_trait]
