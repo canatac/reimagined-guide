@@ -20,6 +20,9 @@ USER default_user
 # This layer is cached unless Cargo.toml changes, so subsequent builds
 # only recompile the application crate (seconds), not 445 dependencies (minutes).
 COPY --chown=default_user:default_user Cargo.toml Cargo.lock* ./
+# Workspace members must be readable even in the dummy layer, otherwise
+# `cargo build` fails with "failed to load manifest for dependency simple-smtp-domain".
+COPY --chown=default_user:default_user crates/ ./crates/
 
 # Create dummy src so cargo can resolve the crate
 RUN mkdir -p src/bin && \
