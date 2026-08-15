@@ -180,64 +180,11 @@ impl Logic {
     }
 
     pub async fn create_mailbox(&self, username: &str, mailbox: &str) -> Result<()> {
-        #[cfg(not(test))]
-        {
-            let database_name =
-                std::env::var("MONGODB_DATABASE").expect("MONGODB_DATABASE must be set");
-            let collection = self
-                .client
-                .database(&database_name)
-                .collection::<Mailbox>("mailboxes");
-
-            // Vérifiez si la boîte aux lettres existe déjà
-            let mailbox_filter = doc! { "name": mailbox, "user_id": username };
-            if collection.find_one(mailbox_filter.clone()).await?.is_none() {
-                println!("Creating mailbox: {}", mailbox);
-                let new_mailbox = Mailbox {
-                    name: mailbox.to_string(),
-                    flags: vec![],
-                    exists: 0,
-                    recent: 0,
-                    unseen: 0,
-                    permanent_flags: vec![String::from("\\*")],
-                    uid_validity: 1,
-                    uid_next: 1,
-                    user_id: username.to_string(),
-                };
-                collection.insert_one(new_mailbox).await?;
-                println!("Mailbox created: {}", mailbox);
-            } else {
-                println!("Mailbox already exists: {}", mailbox);
-            }
-            Ok(())
-        }
-        #[cfg(test)]
-        {
-            // Pour les tests, nous devons retourner un résultat vide
-            Ok(())
-        }
+        self.repo.create_mailbox_for_user(username, mailbox).await
     }
 
     pub async fn delete_mailbox(&self, username: &str, mailbox: &str) -> Result<()> {
-        #[cfg(not(test))]
-        {
-            let database_name =
-                std::env::var("MONGODB_DATABASE").expect("MONGODB_DATABASE must be set");
-            let collection = self
-                .client
-                .database(&database_name)
-                .collection::<Mailbox>("mailboxes");
-
-            let filter = doc! { "user_id": username, "name": mailbox };
-            collection.delete_one(filter).await?;
-
-            Ok(())
-        }
-        #[cfg(test)]
-        {
-            //For test, we need to return an empty result
-            Ok(())
-        }
+        self.repo.delete_mailbox_for_user(username, mailbox).await
     }
 
     pub async fn rename_mailbox(
@@ -246,69 +193,15 @@ impl Logic {
         old_name: &str,
         new_name: &str,
     ) -> Result<()> {
-        #[cfg(not(test))]
-        {
-            let database_name =
-                std::env::var("MONGODB_DATABASE").expect("MONGODB_DATABASE must be set");
-            let collection = self
-                .client
-                .database(&database_name)
-                .collection::<Mailbox>("mailboxes");
-
-            let filter = doc! { "user_id": username, "name": old_name };
-            let update = doc! { "$set": { "name": new_name } };
-            collection.update_one(filter, update).await?;
-            Ok(())
-        }
-        #[cfg(test)]
-        {
-            //For test, we need to return an empty result
-            Ok(())
-        }
+        self.repo.rename_mailbox_for_user(username, old_name, new_name).await
     }
 
     pub async fn subscribe_mailbox(&self, username: &str, mailbox: &str) -> Result<()> {
-        #[cfg(not(test))]
-        {
-            let database_name =
-                std::env::var("MONGODB_DATABASE").expect("MONGODB_DATABASE must be set");
-            let collection = self
-                .client
-                .database(&database_name)
-                .collection::<User>("subscriptions");
-
-            let filter = doc! { "user_id": username, "mailbox": mailbox };
-            let update = doc! { "$set": { "subscribed": true } };
-            collection.update_one(filter, update).await?;
-            Ok(())
-        }
-        #[cfg(test)]
-        {
-            //For test, we need to return an empty result
-            Ok(())
-        }
+        self.repo.subscribe_mailbox_for_user(username, mailbox).await
     }
 
     pub async fn unsubscribe_mailbox(&self, username: &str, mailbox: &str) -> Result<()> {
-        #[cfg(not(test))]
-        {
-            let database_name =
-                std::env::var("MONGODB_DATABASE").expect("MONGODB_DATABASE must be set");
-            let collection = self
-                .client
-                .database(&database_name)
-                .collection::<User>("subscriptions");
-
-            let filter = doc! { "user_id": username, "mailbox": mailbox };
-            let update = doc! { "$set": { "subscribed": false } };
-            collection.update_one(filter, update).await?;
-            Ok(())
-        }
-        #[cfg(test)]
-        {
-            //For test, we need to return an empty result
-            Ok(())
-        }
+        self.repo.unsubscribe_mailbox_for_user(username, mailbox).await
     }
 
     pub async fn list_subscribed_mailboxes(
