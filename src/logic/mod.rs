@@ -429,6 +429,18 @@ pub trait DatabaseInterface: Send + Sync {
         email_id: &str,
         target_mailbox: &str,
     ) -> Result<bool>;
+
+    // Boucle 7 — extensions user-scopées pour l'administration des mailboxes.
+    async fn create_mailbox_for_user(&self, username: &str, mailbox: &str) -> Result<()>;
+    async fn delete_mailbox_for_user(&self, username: &str, mailbox: &str) -> Result<()>;
+    async fn rename_mailbox_for_user(
+        &self,
+        username: &str,
+        old_name: &str,
+        new_name: &str,
+    ) -> Result<()>;
+    async fn subscribe_mailbox_for_user(&self, username: &str, mailbox: &str) -> Result<()>;
+    async fn unsubscribe_mailbox_for_user(&self, username: &str, mailbox: &str) -> Result<()>;
 }
 
 #[async_trait::async_trait]

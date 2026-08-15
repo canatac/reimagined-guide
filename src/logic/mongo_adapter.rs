@@ -418,6 +418,83 @@ impl DatabaseInterface for MongoDatabaseAdapter {
         let res = collection.update_one(filter, update).await?;
         Ok(res.matched_count > 0)
     }
+
+    // Boucle 7 — 5 méthodes admin mailbox migrées (user-scopées).
+    async fn create_mailbox_for_user(&self, username: &str, mailbox: &str) -> Result<()> {
+        let db_name = Self::database_name();
+        let collection = self
+            .client
+            .database(&db_name)
+            .collection::<Mailbox>("mailboxes");
+        let filter = doc! { "name": mailbox, "user_id": username };
+        if collection.find_one(filter.clone()).await?.is_none() {
+            let new_mailbox = Mailbox {
+                name: mailbox.to_string(),
+                flags: vec![],
+                exists: 0,
+                recent: 0,
+                unseen: 0,
+                permanent_flags: vec![String::from("\\*")],
+                uid_validity: 1,
+                uid_next: 1,
+                user_id: username.to_string(),
+            };
+            collection.insert_one(new_mailbox).await?;
+        }
+        Ok(())
+    }
+
+    async fn delete_mailbox_for_user(&self, username: &str, mailbox: &str) -> Result<()> {
+        let db_name = Self::database_name();
+        let collection = self
+            .client
+            .database(&db_name)
+            .collection::<Mailbox>("mailboxes");
+        let filter = doc! { "user_id": username, "name": mailbox };
+        collection.delete_one(filter).await?;
+        Ok(())
+    }
+
+    async fn rename_mailbox_for_user(
+        &self,
+        username: &str,
+        old_name: &str,
+        new_name: &str,
+    ) -> Result<()> {
+        let db_name = Self::database_name();
+        let collection = self
+            .client
+            .database(&db_name)
+            .collection::<Mailbox>("mailboxes");
+        let filter = doc! { "user_id": username, "name": old_name };
+        let update = doc! { "$set": { "name": new_name } };
+        collection.update_one(filter, update).await?;
+        Ok(())
+    }
+
+    async fn subscribe_mailbox_for_user(&self, username: &str, mailbox: &str) -> Result<()> {
+        let db_name = Self::database_name();
+        let collection = self
+            .client
+            .database(&db_name)
+            .collection::<mongodb::bson::Document>("subscriptions");
+        let filter = doc! { "user_id": username, "mailbox": mailbox };
+        let update = doc! { "$set": { "subscribed": true } };
+        collection.update_one(filter, update).upsert(true).await?;
+        Ok(())
+    }
+
+    async fn unsubscribe_mailbox_for_user(&self, username: &str, mailbox: &str) -> Result<()> {
+        let db_name = Self::database_name();
+        let collection = self
+            .client
+            .database(&db_name)
+            .collection::<mongodb::bson::Document>("subscriptions");
+        let filter = doc! { "user_id": username, "mailbox": mailbox };
+        let update = doc! { "$set": { "subscribed": false } };
+        collection.update_one(filter, update).upsert(true).await?;
+        Ok(())
+    }
 }
 
 // Silencer l'import inutilisé de bson::Document si non exploité (le use ci-dessus
