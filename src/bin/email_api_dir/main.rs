@@ -338,6 +338,28 @@ struct DeliverabilityReminderUpdate {
 // monitoring + security handlers → monitoring_handlers module
 
 
+#[derive(Deserialize, Serialize, Debug, PartialEq)]
+pub struct EmailRequest {
+    from: String,
+    to: String,
+    subject: String,
+    body: String,
+}
+
+#[derive(Deserialize)]
+struct MailingListRequest {
+    label: String,
+    emails: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct MailingListEmailRequest {
+    from: String,
+    subject: String,
+    body: String,
+    mailing_list: String,
+}
+
 async fn create_mailing_list(mailing_list: web::Json<MailingListRequest>) -> impl Responder {
     let mailing_list_dir = Path::new("mailing-lists");
     if !mailing_list_dir.exists() {
