@@ -1,6 +1,9 @@
 //! Utilitaires purs de composition du body/headers d'un email SMTP.
 //! Extraits de mod.rs (refactor architecte) pour clean code / testabilité.
 
+use chrono::Utc;
+use uuid::Uuid;
+
 use crate::entities::Email;
 
 pub(crate) fn normalize_crlf(input: &str) -> String {
