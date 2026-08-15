@@ -441,6 +441,9 @@ pub trait DatabaseInterface: Send + Sync {
     ) -> Result<()>;
     async fn subscribe_mailbox_for_user(&self, username: &str, mailbox: &str) -> Result<()>;
     async fn unsubscribe_mailbox_for_user(&self, username: &str, mailbox: &str) -> Result<()>;
+
+    // Boucle 8 — sélection mailbox user-scopée.
+    async fn select_mailbox_for_user(&self, username: &str, mailbox: &str) -> Result<Mailbox>;
 }
 
 #[async_trait::async_trait]
