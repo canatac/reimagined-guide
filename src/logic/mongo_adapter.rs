@@ -13,7 +13,7 @@
 // avec un commentaire `TODO(hex)` — migrations progressives dans les sprints
 // suivants.
 
-use crate::entities::Email;
+use crate::entities::{CalendarEvent, Email};
 use crate::logic::{DatabaseInterface, Mailbox, User};
 use async_trait::async_trait;
 use futures_util::TryStreamExt;
