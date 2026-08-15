@@ -19,7 +19,3 @@ pub(crate) fn check_credentials(username: &[u8], password: &[u8]) -> bool {
 
     username_match && password_match
 }
-
-// Main function
-#[tokio::main]
-async fn main() -> Result<(), MainError> {

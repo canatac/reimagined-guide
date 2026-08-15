@@ -44,5 +44,3 @@ pub(crate) fn recipient_local_part(raw_to: &str) -> Option<String> {
         None
     }
 }
-
-pub(crate) fn extract_session_id_from_response(response: &str) -> Option<String> {

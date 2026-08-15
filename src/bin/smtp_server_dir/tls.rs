@@ -20,6 +20,3 @@ pub(crate) fn load_key(path: &Path) -> std::io::Result<PrivateKeyDer<'static>> {
             "no private key found".to_string(),
         ))?)
 }
-
-// Check user credentials
-pub(crate) fn check_credentials(username: &[u8], password: &[u8]) -> bool {
