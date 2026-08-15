@@ -95,29 +95,7 @@ impl Logic {
     }
 
     pub async fn update_user_locale(&self, username: &str, locale: &str) -> Result<()> {
-        #[cfg(not(test))]
-        {
-            let database_name =
-                std::env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
-            let collection_name =
-                std::env::var("MONGODB_USERS_COLLECTION").unwrap_or_else(|_| "users".to_string());
-            let collection = self
-                .client
-                .database(&database_name)
-                .collection::<bson::Document>(&collection_name);
-            collection
-                .update_one(
-                    doc! { "username": username },
-                    doc! { "$set": { "locale": locale } },
-                )
-                .await?;
-            Ok(())
-        }
-        #[cfg(test)]
-        {
-            let _ = (username, locale);
-            Ok(())
-        }
+        self.repo.update_user_locale(username, locale).await
     }
 
     pub async fn create_user(&self, username: &str, password: &str, mailbox: &str) -> Result<()> {
@@ -129,78 +107,17 @@ impl Logic {
             condition_accepted: false,
             locale: None,
         };
-        // Boucle A — port honnête : passage via le port DatabaseInterface
-        // en prod (MongoDatabaseAdapter) comme en test (mock).
-        #[cfg(not(test))]
-        {
-            self.repo.insert_user(new_user).await
-        }
-        #[cfg(test)]
-        {
-            self.client.insert_user(new_user).await
-        }
+        self.repo.insert_user(new_user).await
     }
 
     /// Enregistre alias → target dans la collection `aliases`.
     pub async fn create_alias(&self, alias: &str, target: &str) -> Result<()> {
-        #[cfg(not(test))]
-        {
-            let database_name =
-                std::env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
-            let collection = self
-                .client
-                .database(&database_name)
-                .collection::<bson::Document>("aliases");
-            let now = bson::DateTime::from_millis(chrono::Utc::now().timestamp_millis());
-            collection
-                .insert_one(doc! {
-                    "alias": alias,
-                    "target": target,
-                    "created_at": now,
-                })
-                .await?;
-            Ok(())
-        }
-        #[cfg(test)]
-        {
-            let _ = (alias, target);
-            Ok(())
-        }
+        self.repo.create_alias(alias, target).await
     }
 
     /// Dépose un email directement dans l'inbox MongoDB d'un utilisateur (sans SMTP).
     pub async fn deliver_to_inbox(&self, username: &str, email: &crate::entities::Email) -> Result<()> {
-        #[cfg(not(test))]
-        {
-            let database_name =
-                std::env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
-            let collection = self
-                .client
-                .database(&database_name)
-                .collection::<bson::Document>("emails");
-            let now = bson::DateTime::from_millis(chrono::Utc::now().timestamp_millis());
-            collection
-                .insert_one(doc! {
-                    "id": &email.id,
-                    "user_id": username,
-                    "mailbox": "inbox",
-                    "from": &email.from,
-                    "to": &email.to,
-                    "subject": &email.subject,
-                    "body": &email.body,
-                    "flags": bson::Array::new(),
-                    "internal_date": now,
-                    "sequence_number": 1i64,
-                    "uid": 1i64,
-                })
-                .await?;
-            Ok(())
-        }
-        #[cfg(test)]
-        {
-            let _ = (username, email);
-            Ok(())
-        }
+        self.repo.deliver_to_inbox(username, email).await
     }
 
     pub async fn log_mail_event(
@@ -212,45 +129,11 @@ impl Logic {
         from: &str,
         to: &str,
     ) -> Result<()> {
-        #[cfg(not(test))]
-        {
-            let database_name =
-                std::env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
-            let collection = self
-                .client
-                .database(&database_name)
-                .collection::<bson::Document>("mail_events");
-            let now = bson::DateTime::from_millis(chrono::Utc::now().timestamp_millis());
-            collection
-                .insert_one(doc! {
-                    "kind": kind,
-                    "user_id": user_id,
-                    "email_id": email_id,
-                    "subject": subject,
-                    "from": from,
-                    "to": to,
-                    "timestamp": now,
-                })
-                .await?;
-            Ok(())
-        }
-        #[cfg(test)]
-        {
-            let _ = (kind, user_id, email_id, subject, from, to);
-            Ok(())
-        }
+        self.repo.log_mail_event(kind, user_id, email_id, subject, from, to).await
     }
 
     pub async fn authenticate_user(&self, username: &str, password: &str) -> Result<Option<User>> {
-        // Boucle 4 — port hexagonal : délègue au repo (MongoDatabaseAdapter en prod).
-        #[cfg(not(test))]
-        {
-            self.repo.authenticate_user(username, password).await
-        }
-        #[cfg(test)]
-        {
-            self.client.find_user(username, password).await
-        }
+        self.repo.authenticate_user(username, password).await
     }
 
     pub async fn find_or_create_oauth_user(
@@ -465,6 +348,20 @@ pub trait DatabaseInterface: Send + Sync {
         update_doc: bson::Document,
     ) -> Result<Option<CalendarEvent>>;
     async fn delete_calendar_event(&self, username: &str, event_id: &str) -> Result<()>;
+
+    // Boucle 10 — user admin + delivery + logging.
+    async fn update_user_locale(&self, username: &str, locale: &str) -> Result<()>;
+    async fn create_alias(&self, alias: &str, target: &str) -> Result<()>;
+    async fn deliver_to_inbox(&self, username: &str, email: &Email) -> Result<()>;
+    async fn log_mail_event(
+        &self,
+        kind: &str,
+        user_id: &str,
+        email_id: &str,
+        subject: &str,
+        from: &str,
+        to: &str,
+    ) -> Result<()>;
 }
 
 #[async_trait::async_trait]
