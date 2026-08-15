@@ -600,6 +600,95 @@ impl DatabaseInterface for MongoDatabaseAdapter {
         collection.delete_one(filter).await?;
         Ok(())
     }
+
+    // Boucle 10 — user admin + delivery + logging.
+    async fn update_user_locale(&self, username: &str, locale: &str) -> Result<()> {
+        let db_name = Self::database_name();
+        let collection_name = std::env::var("MONGODB_USERS_COLLECTION")
+            .unwrap_or_else(|_| "users".to_string());
+        let collection = self
+            .client
+            .database(&db_name)
+            .collection::<mongodb::bson::Document>(&collection_name);
+        collection
+            .update_one(
+                doc! { "username": username },
+                doc! { "$set": { "locale": locale } },
+            )
+            .await?;
+        Ok(())
+    }
+
+    async fn create_alias(&self, alias: &str, target: &str) -> Result<()> {
+        let db_name = Self::database_name();
+        let collection = self
+            .client
+            .database(&db_name)
+            .collection::<mongodb::bson::Document>("aliases");
+        let now = bson::DateTime::from_millis(chrono::Utc::now().timestamp_millis());
+        collection
+            .insert_one(doc! {
+                "alias": alias,
+                "target": target,
+                "created_at": now,
+            })
+            .await?;
+        Ok(())
+    }
+
+    async fn deliver_to_inbox(&self, username: &str, email: &Email) -> Result<()> {
+        let db_name = Self::database_name();
+        let collection = self
+            .client
+            .database(&db_name)
+            .collection::<mongodb::bson::Document>("emails");
+        let now = bson::DateTime::from_millis(chrono::Utc::now().timestamp_millis());
+        collection
+            .insert_one(doc! {
+                "id": &email.id,
+                "user_id": username,
+                "mailbox": "inbox",
+                "from": &email.from,
+                "to": &email.to,
+                "subject": &email.subject,
+                "body": &email.body,
+                "flags": bson::Array::new(),
+                "internal_date": now,
+                "sequence_number": 1i64,
+                "uid": 1i64,
+            })
+            .await?;
+        Ok(())
+    }
+
+    async fn log_mail_event(
+        &self,
+        kind: &str,
+        user_id: &str,
+        email_id: &str,
+        subject: &str,
+        from: &str,
+        to: &str,
+    ) -> Result<()> {
+        let db_name = Self::database_name();
+        let collection = self
+            .client
+            .database(&db_name)
+            .collection::<mongodb::bson::Document>("mail_events");
+        let now = bson::DateTime::from_millis(chrono::Utc::now().timestamp_millis());
+        collection
+            .insert_one(doc! {
+                "kind": kind,
+                "user_id": user_id,
+                "email_id": email_id,
+                "subject": subject,
+                "from": from,
+                "to": to,
+                "timestamp": now,
+            })
+            .await?;
+        Ok(())
+    }
 }
 
 // Silencer l'import inutilisé de bson::Document si non exploité (le use ci-dessus
