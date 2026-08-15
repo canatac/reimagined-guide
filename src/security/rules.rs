@@ -16,6 +16,8 @@ mod geo;
 mod auth;
 mod identity;
 
+pub use helpers::RuleContext;
+
 pub use traffic::{
     rule_abuse_volume_spike, rule_bounce_rate_surge,
     rule_smtp_code_spike_temp, rule_smtp_code_spike_perm,
@@ -31,7 +33,8 @@ pub use identity::{
     rule_cross_tenant_payload_correlation, rule_rate_limit_circumvention,
 };
 
-use super::{RuleContext, SecurityAlert};
+use super::SecurityAlert;
+use helpers::RuleContext;
 
 pub async fn evaluate_all(ctx: &RuleContext<'_>) -> Vec<SecurityAlert> {
     // Run rules concurrently where possible
@@ -69,7 +72,7 @@ pub async fn evaluate_all(ctx: &RuleContext<'_>) -> Vec<SecurityAlert> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::helpers::{env_u64, since};
 
     #[test]
     fn test_env_u64_default() {
