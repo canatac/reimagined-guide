@@ -365,7 +365,7 @@ impl DatabaseInterface for MongoDatabaseAdapter {
         username: &str,
         email_id: &str,
         read: bool,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let db_name = Self::database_name();
         let collection = self
             .client
@@ -386,7 +386,7 @@ impl DatabaseInterface for MongoDatabaseAdapter {
         username: &str,
         email_id: &str,
         starred: bool,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let db_name = Self::database_name();
         let collection = self
             .client
@@ -407,7 +407,7 @@ impl DatabaseInterface for MongoDatabaseAdapter {
         username: &str,
         email_id: &str,
         target_mailbox: &str,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let db_name = Self::database_name();
         let collection = self
             .client
