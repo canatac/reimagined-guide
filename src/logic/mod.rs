@@ -24,11 +24,11 @@ pub struct User {
     pub locale: Option<String>,
 }
 
-fn default_mailbox() -> String {
+pub(crate) fn default_mailbox() -> String {
     "inbox".to_string()
 }
 
-fn user_from_document(doc: &bson::Document, fallback_username: &str) -> User {
+pub(crate) fn user_from_document(doc: &bson::Document, fallback_username: &str) -> User {
     let id = doc.get_object_id("_id").ok();
     let username = doc
         .get_str("username")
@@ -143,87 +143,7 @@ impl Logic {
         email: &str,
         display_name: Option<&str>,
     ) -> Result<User> {
-        #[cfg(not(test))]
-        {
-            let database_name =
-                std::env::var("MONGODB_DATABASE").expect("MONGODB_DATABASE must be set");
-            let collection_name =
-                std::env::var("MONGODB_USERS_COLLECTION").unwrap_or_else(|_| "users".to_string());
-            let collection = self
-                .client
-                .database(&database_name)
-                .collection::<bson::Document>(&collection_name);
-
-            let oauth_filter = doc! {
-                "oauth.provider": provider,
-                "oauth.subject": provider_user_id
-            };
-            if let Some(doc) = collection.find_one(oauth_filter).await? {
-                return Ok(user_from_document(&doc, email));
-            }
-
-            let username_filter = doc! { "username": email };
-            let oauth_set = doc! {
-                "oauth": {
-                    "provider": provider,
-                    "subject": provider_user_id
-                },
-                "updated_at": bson::DateTime::from_millis(chrono::Utc::now().timestamp_millis())
-            };
-            if collection
-                .find_one(username_filter.clone())
-                .await?
-                .is_some()
-            {
-                collection
-                    .update_one(username_filter.clone(), doc! { "$set": oauth_set })
-                    .await?;
-            } else {
-                collection
-                    .insert_one(doc! {
-                        "username": email,
-                        "password": "",
-                        "mailbox": default_mailbox(),
-                        "display_name": display_name.unwrap_or(email),
-                        "oauth": {
-                            "provider": provider,
-                            "subject": provider_user_id
-                        },
-                        "created_at": bson::DateTime::from_millis(chrono::Utc::now().timestamp_millis()),
-                        "updated_at": bson::DateTime::from_millis(chrono::Utc::now().timestamp_millis())
-                    })
-                    .await?;
-            }
-
-            let final_filter = doc! {
-                "oauth.provider": provider,
-                "oauth.subject": provider_user_id
-            };
-            if let Some(doc) = collection.find_one(final_filter).await? {
-                Ok(user_from_document(&doc, email))
-            } else {
-                Ok(User {
-                    id: None,
-                    username: email.to_string(),
-                    password: String::new(),
-                    mailbox: default_mailbox(),
-                    condition_accepted: false,
-                    locale: None,
-                })
-            }
-        }
-        #[cfg(test)]
-        {
-            let _ = (provider, provider_user_id, display_name);
-            Ok(User {
-                id: None,
-                username: email.to_string(),
-                password: String::new(),
-                mailbox: default_mailbox(),
-                condition_accepted: false,
-                locale: None,
-            })
-        }
+        self.repo.find_or_create_oauth_user(provider, provider_user_id, email, display_name).await
     }
 }
 
@@ -389,6 +309,15 @@ pub trait DatabaseInterface: Send + Sync {
         reference: &str,
         mailbox: &str,
     ) -> Result<Vec<String>>;
+
+    // Boucle 12 — OAuth (find or create).
+    async fn find_or_create_oauth_user(
+        &self,
+        provider: &str,
+        provider_user_id: &str,
+        email: &str,
+        display_name: Option<&str>,
+    ) -> Result<User>;
 }
 
 #[async_trait::async_trait]
