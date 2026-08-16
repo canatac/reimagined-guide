@@ -9,23 +9,32 @@ use mongodb::error::Result;
 #[allow(dead_code)]
 impl MongoDatabaseAdapter {
     pub async fn insert_user_impl(&self, user: User) -> Result<()> {
+        let username = user.username.clone();
+        let users = self.users_collection();
+        users.insert_one(user).await?;
+        self.ensure_default_mailboxes(&username).await?;
+        Ok(())
+    }
+
+    /// Retourne la collection MongoDB `users` (nom depuis env).
+    fn users_collection(&self) -> mongodb::Collection<User> {
         let db_name = Self::database_name();
         let coll_name = Self::users_collection_name();
-        let username = user.username.clone();
-
-        let users = self
-            .client
+        self.client
             .database(&db_name)
-            .collection::<User>(&coll_name);
-        users.insert_one(user).await?;
+            .collection::<User>(&coll_name)
+    }
 
-        // Créer les mailboxes standard (comportement historique de create_user).
+    /// Crée les mailboxes standard (inbox/sent/drafts/archive/trash) pour un user
+    /// si elles n'existent pas déjà — comportement historique de `create_user`.
+    async fn ensure_default_mailboxes(&self, username: &str) -> Result<()> {
+        let db_name = Self::database_name();
         let mailboxes = self
             .client
             .database(&db_name)
             .collection::<Mailbox>("mailboxes");
         for &name in &["inbox", "sent", "drafts", "archive", "trash"] {
-            let filter = doc! { "name": name, "user_id": &username };
+            let filter = doc! { "name": name, "user_id": username };
             if mailboxes.find_one(filter).await?.is_none() {
                 let mailbox = Mailbox {
                     name: name.to_string(),
@@ -36,7 +45,7 @@ impl MongoDatabaseAdapter {
                     permanent_flags: vec![],
                     uid_validity: 1,
                     uid_next: 1,
-                    user_id: username.clone(),
+                    user_id: username.to_string(),
                 };
                 mailboxes.insert_one(mailbox).await?;
             }
