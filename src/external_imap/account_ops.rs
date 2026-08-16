@@ -1,6 +1,7 @@
 // account_ops.rs.rs — split from external_imap/mod.rs (Sprint 14)
 #![allow(unused_imports)]
 use super::*;
+use chrono::Utc;
 
 impl ExternalImapService {
 
