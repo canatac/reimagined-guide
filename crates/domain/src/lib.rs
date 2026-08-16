@@ -1,6 +1,11 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+pub mod errors;
+pub mod ports;
+
+pub use errors::{DomainError, DomainResult};
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ExternalImapAccount {

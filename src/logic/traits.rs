@@ -180,3 +180,8 @@ impl LogicTrait for Logic {
         self.create_user(username, password, mailbox).await
     }
 }
+
+// Cycle 22 hexagonal — ré-export du port migré vers `crates/domain`.
+// Les nouveaux use-cases doivent dépendre de `simple_smtp_domain::ports::LogicPort`
+// (exprimé en `DomainResult`) plutôt que du `LogicTrait` historique lié à mongodb.
+pub use simple_smtp_domain::ports::LogicPort;
