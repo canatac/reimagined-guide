@@ -242,4 +242,5 @@ pub use user_handlers::*;
 pub use cr_handlers::*;
 pub use ai_handlers::*;
 pub use hermes_handlers::*;
+pub use hermes_runs::*;
 pub use diag_handlers::*;
