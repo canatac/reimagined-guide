@@ -1,12 +1,12 @@
 #![allow(unused_imports, dead_code)]
 use super::super::super::*;
 
-struct DnsFindings {
-    dmarc_policy: &'static str,
-    spf_apex_ok: bool,
-    dkim_dns_ok: bool,
-    helo_spf_ok: bool,
-    smtp_public_ip: String,
+pub(crate) struct DnsFindings {
+    pub(crate) dmarc_policy: &'static str,
+    pub(crate) spf_apex_ok: bool,
+    pub(crate) dkim_dns_ok: bool,
+    pub(crate) helo_spf_ok: bool,
+    pub(crate) smtp_public_ip: String,
 }
 
 pub(crate) async fn collect_dns_findings(domain: &str, selector: &str) -> DnsFindings {
@@ -40,11 +40,11 @@ pub(crate) async fn collect_dns_findings(domain: &str, selector: &str) -> DnsFin
     DnsFindings { dmarc_policy, spf_apex_ok, dkim_dns_ok, helo_spf_ok, smtp_public_ip }
 }
 
-struct ProcedureState {
-    reminder_enabled: bool,
-    reminder_cadence_hours: u32,
-    reminder_anchor: DateTime<Utc>,
-    checklist_overrides: bson::Document,
+pub(crate) struct ProcedureState {
+    pub(crate) reminder_enabled: bool,
+    pub(crate) reminder_cadence_hours: u32,
+    pub(crate) reminder_anchor: DateTime<Utc>,
+    pub(crate) checklist_overrides: bson::Document,
 }
 
 pub(crate) async fn load_procedure_state(mongo: &Arc<mongodb::Client>) -> ProcedureState {
