@@ -143,6 +143,8 @@ mod recipient_helpers;
 mod tls_helpers;
 #[path = "smtp_server_dir/auth.rs"]
 mod auth_helpers;
+#[path = "smtp_server_dir/session_helpers.rs"]
+mod session_helpers;
 #[path = "smtp_server_dir/session.rs"]
 mod session_handlers;
 #[path = "smtp_server_dir/headers.rs"]
