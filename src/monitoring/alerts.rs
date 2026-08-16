@@ -40,112 +40,131 @@ pub struct ActiveAlert {
     pub ts: String,
 }
 
-pub async fn evaluate_alerts(
-    client: &Client,
+/// Contexte partagé pour chaque règle : accès mongo + fenêtre.
+struct AlertCtx<'a> {
+    client: &'a Client,
+    db: String,
+    since_str: String,
     window_minutes: i64,
-    config: &AlertConfig,
-) -> Vec<ActiveAlert> {
-    let since_str = (Utc::now() - ChronoDuration::minutes(window_minutes)).to_rfc3339();
-    let db = std::env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
-    let coll = client
-        .database(&db)
-        .collection::<mongodb::bson::Document>("smtp_events");
+    config: &'a AlertConfig,
+}
 
-    let mut alerts = Vec::new();
+impl<'a> AlertCtx<'a> {
+    fn events_coll(&self) -> mongodb::Collection<mongodb::bson::Document> {
+        self.client
+            .database(&self.db)
+            .collection::<mongodb::bson::Document>("smtp_events")
+    }
+}
 
-    // --- Bounce rate ---
+async fn check_bounce_rate(ctx: &AlertCtx<'_>) -> Option<ActiveAlert> {
+    let coll = ctx.events_coll();
     let total = coll
-        .count_documents(doc! { "ts": { "$gte": &since_str } })
+        .count_documents(doc! { "ts": { "$gte": &ctx.since_str } })
         .await
         .unwrap_or(0);
-    if total > 0 {
-        let bounced = coll
-            .count_documents(doc! { "ts": { "$gte": &since_str }, "status": "bounced" })
-            .await
-            .unwrap_or(0);
-        let rate = bounced as f32 / total as f32;
-        if rate > config.bounce_rate_threshold {
-            alerts.push(ActiveAlert {
-                kind: "bounce_rate".into(),
-                severity: "high".into(),
-                message: format!(
-                    "Bounce rate {:.1}% exceeds threshold {:.1}%",
-                    rate * 100.0,
-                    config.bounce_rate_threshold * 100.0
-                ),
-                value: serde_json::json!(rate),
-                threshold: serde_json::json!(config.bounce_rate_threshold),
-                ts: Utc::now().to_rfc3339(),
-            });
-        }
+    if total == 0 {
+        return None;
     }
+    let bounced = coll
+        .count_documents(doc! { "ts": { "$gte": &ctx.since_str }, "status": "bounced" })
+        .await
+        .unwrap_or(0);
+    let rate = bounced as f32 / total as f32;
+    if rate <= ctx.config.bounce_rate_threshold {
+        return None;
+    }
+    Some(ActiveAlert {
+        kind: "bounce_rate".into(),
+        severity: "high".into(),
+        message: format!(
+            "Bounce rate {:.1}% exceeds threshold {:.1}%",
+            rate * 100.0,
+            ctx.config.bounce_rate_threshold * 100.0
+        ),
+        value: serde_json::json!(rate),
+        threshold: serde_json::json!(ctx.config.bounce_rate_threshold),
+        ts: Utc::now().to_rfc3339(),
+    })
+}
 
-    // --- SMTP error code spikes (421, 450, 550, 554) ---
+async fn check_smtp_spikes(ctx: &AlertCtx<'_>) -> Vec<ActiveAlert> {
+    let coll = ctx.events_coll();
+    let mut out = Vec::new();
     for &code in &[421u32, 450, 550, 554] {
         let count = coll
             .count_documents(doc! {
-                "ts": { "$gte": &since_str },
+                "ts": { "$gte": &ctx.since_str },
                 "smtp_code": code as i32,
             })
             .await
             .unwrap_or(0);
-        if count >= config.smtp_spike_threshold {
+        if count >= ctx.config.smtp_spike_threshold {
             let severity = if code >= 550 { "critical" } else { "warning" };
-            alerts.push(ActiveAlert {
+            out.push(ActiveAlert {
                 kind: format!("smtp_spike_{}", code),
                 severity: severity.into(),
                 message: format!(
                     "SMTP {} errors: {} occurrences in {}m window (threshold: {})",
-                    code, count, window_minutes, config.smtp_spike_threshold
+                    code, count, ctx.window_minutes, ctx.config.smtp_spike_threshold
                 ),
                 value: serde_json::json!(count),
-                threshold: serde_json::json!(config.smtp_spike_threshold),
+                threshold: serde_json::json!(ctx.config.smtp_spike_threshold),
                 ts: Utc::now().to_rfc3339(),
             });
         }
     }
+    out
+}
 
-    // --- Forbidden countries ---
-    if !config.forbidden_countries.is_empty() {
-        let countries_bson: Vec<_> = config
-            .forbidden_countries
-            .iter()
-            .map(|c| mongodb::bson::Bson::String(c.clone()))
-            .collect();
-        let count = coll
-            .count_documents(doc! {
-                "ts": { "$gte": &since_str },
-                "country": { "$in": countries_bson },
-            })
-            .await
-            .unwrap_or(0);
-        if count > 0 {
-            alerts.push(ActiveAlert {
-                kind: "forbidden_country".into(),
-                severity: "critical".into(),
-                message: format!(
-                    "{} email(s) routed via forbidden countries {:?}",
-                    count, config.forbidden_countries
-                ),
-                value: serde_json::json!(count),
-                threshold: serde_json::json!(0),
-                ts: Utc::now().to_rfc3339(),
-            });
-        }
+async fn check_forbidden_countries(ctx: &AlertCtx<'_>) -> Option<ActiveAlert> {
+    if ctx.config.forbidden_countries.is_empty() {
+        return None;
     }
+    let countries_bson: Vec<_> = ctx
+        .config
+        .forbidden_countries
+        .iter()
+        .map(|c| mongodb::bson::Bson::String(c.clone()))
+        .collect();
+    let count = ctx
+        .events_coll()
+        .count_documents(doc! {
+            "ts": { "$gte": &ctx.since_str },
+            "country": { "$in": countries_bson },
+        })
+        .await
+        .unwrap_or(0);
+    if count == 0 {
+        return None;
+    }
+    Some(ActiveAlert {
+        kind: "forbidden_country".into(),
+        severity: "critical".into(),
+        message: format!(
+            "{} email(s) routed via forbidden countries {:?}",
+            count, ctx.config.forbidden_countries
+        ),
+        value: serde_json::json!(count),
+        threshold: serde_json::json!(0),
+        ts: Utc::now().to_rfc3339(),
+    })
+}
 
-    // --- Forbidden companies / infrastructure ---
-    for company in &config.forbidden_companies {
+async fn check_forbidden_companies(ctx: &AlertCtx<'_>) -> Vec<ActiveAlert> {
+    let coll = ctx.events_coll();
+    let mut out = Vec::new();
+    for company in &ctx.config.forbidden_companies {
         let count = coll
             .count_documents(doc! {
-                "ts": { "$gte": &since_str },
+                "ts": { "$gte": &ctx.since_str },
                 "company": { "$regex": company.as_str(), "$options": "i" },
             })
             .await
             .unwrap_or(0);
         if count > 0 {
-            alerts.push(ActiveAlert {
-                kind: format!("forbidden_company"),
+            out.push(ActiveAlert {
+                kind: "forbidden_company".to_string(),
                 severity: "critical".into(),
                 message: format!(
                     "{} email(s) routed via forbidden company '{}'",
@@ -157,62 +176,96 @@ pub async fn evaluate_alerts(
             });
         }
     }
+    out
+}
 
-    // --- Silent delivery failures: mail_events.sent with no smtp delivery ---
-    // Catches emails the API recorded as "sent" but that never reached send_outgoing_email.
-    let mail_coll = client
-        .database(&db)
+async fn check_silent_delivery_failures(ctx: &AlertCtx<'_>) -> Option<ActiveAlert> {
+    let mail_coll = ctx
+        .client
+        .database(&ctx.db)
         .collection::<mongodb::bson::Document>("mail_events");
     let api_sent = mail_coll
-        .count_documents(doc! { "timestamp": { "$gte": &since_str }, "kind": "sent" })
+        .count_documents(doc! { "timestamp": { "$gte": &ctx.since_str }, "kind": "sent" })
         .await
         .unwrap_or(0);
-    if api_sent > 0 {
-        let smtp_delivered = coll
-            .count_documents(doc! { "ts": { "$gte": &since_str }, "event_type": "delivered" })
-            .await
-            .unwrap_or(0);
-        let undelivered = api_sent.saturating_sub(smtp_delivered);
-        let ratio = undelivered as f32 / api_sent as f32;
-        if ratio > config.undelivered_ratio_threshold {
-            alerts.push(ActiveAlert {
-                kind: "silent_delivery_failure".into(),
-                severity: "critical".into(),
-                message: format!(
-                    "{} email(s) recorded as sent by API but no SMTP delivery event ({:.1}% undelivered)",
-                    undelivered,
-                    ratio * 100.0
-                ),
-                value: serde_json::json!(undelivered),
-                threshold: serde_json::json!(config.undelivered_ratio_threshold),
-                ts: Utc::now().to_rfc3339(),
-            });
-        }
+    if api_sent == 0 {
+        return None;
     }
+    let smtp_delivered = ctx
+        .events_coll()
+        .count_documents(doc! { "ts": { "$gte": &ctx.since_str }, "event_type": "delivered" })
+        .await
+        .unwrap_or(0);
+    let undelivered = api_sent.saturating_sub(smtp_delivered);
+    let ratio = undelivered as f32 / api_sent as f32;
+    if ratio <= ctx.config.undelivered_ratio_threshold {
+        return None;
+    }
+    Some(ActiveAlert {
+        kind: "silent_delivery_failure".into(),
+        severity: "critical".into(),
+        message: format!(
+            "{} email(s) recorded as sent by API but no SMTP delivery event ({:.1}% undelivered)",
+            undelivered,
+            ratio * 100.0
+        ),
+        value: serde_json::json!(undelivered),
+        threshold: serde_json::json!(ctx.config.undelivered_ratio_threshold),
+        ts: Utc::now().to_rfc3339(),
+    })
+}
 
-    // --- P95 latency ---
+async fn check_p95_latency(ctx: &AlertCtx<'_>) -> Option<ActiveAlert> {
     let p95 = super::storage::p95_total_ms(
-        client,
-        doc! { "ts": { "$gte": &since_str } },
+        ctx.client,
+        doc! { "ts": { "$gte": &ctx.since_str } },
         1000,
     )
-    .await;
-    if let Some(p95_ms) = p95 {
-        if p95_ms > config.p95_total_ms_threshold {
-            alerts.push(ActiveAlert {
-                kind: "p95_latency".into(),
-                severity: "warning".into(),
-                message: format!(
-                    "P95 total_ms {}ms exceeds threshold {}ms",
-                    p95_ms, config.p95_total_ms_threshold
-                ),
-                value: serde_json::json!(p95_ms),
-                threshold: serde_json::json!(config.p95_total_ms_threshold),
-                ts: Utc::now().to_rfc3339(),
-            });
-        }
+    .await?;
+    if p95 <= ctx.config.p95_total_ms_threshold {
+        return None;
     }
+    Some(ActiveAlert {
+        kind: "p95_latency".into(),
+        severity: "warning".into(),
+        message: format!(
+            "P95 total_ms {}ms exceeds threshold {}ms",
+            p95, ctx.config.p95_total_ms_threshold
+        ),
+        value: serde_json::json!(p95),
+        threshold: serde_json::json!(ctx.config.p95_total_ms_threshold),
+        ts: Utc::now().to_rfc3339(),
+    })
+}
 
+pub async fn evaluate_alerts(
+    client: &Client,
+    window_minutes: i64,
+    config: &AlertConfig,
+) -> Vec<ActiveAlert> {
+    let ctx = AlertCtx {
+        client,
+        db: std::env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string()),
+        since_str: (Utc::now() - ChronoDuration::minutes(window_minutes)).to_rfc3339(),
+        window_minutes,
+        config,
+    };
+
+    let mut alerts = Vec::new();
+    if let Some(a) = check_bounce_rate(&ctx).await {
+        alerts.push(a);
+    }
+    alerts.extend(check_smtp_spikes(&ctx).await);
+    if let Some(a) = check_forbidden_countries(&ctx).await {
+        alerts.push(a);
+    }
+    alerts.extend(check_forbidden_companies(&ctx).await);
+    if let Some(a) = check_silent_delivery_failures(&ctx).await {
+        alerts.push(a);
+    }
+    if let Some(a) = check_p95_latency(&ctx).await {
+        alerts.push(a);
+    }
     alerts
 }
 
