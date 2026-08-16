@@ -264,8 +264,10 @@ pub(crate) async fn calendar_list_events(
 ) -> impl Responder {
     let user = get_user_from_headers(&req);
 
-    let start_after = query.start.as_ref().and_then(|s| parse_iso_to_bson(s));
-    let start_before = query.end.as_ref().and_then(|s| parse_iso_to_bson(s));
+    let start_after = query.start.as_ref().and_then(|s| parse_iso_to_bson(s))
+        .map(|dt| bson::DateTime::from_millis(dt.timestamp_millis()));
+    let start_before = query.end.as_ref().and_then(|s| parse_iso_to_bson(s))
+        .map(|dt| bson::DateTime::from_millis(dt.timestamp_millis()));
 
     match logic
         .get_calendar_events(&user, start_after, start_before)
