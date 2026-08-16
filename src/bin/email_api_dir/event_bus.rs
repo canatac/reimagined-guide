@@ -12,14 +12,14 @@ pub(super) enum MailEventKind {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct MailEvent {
-    id: String,
-    kind: MailEventKind,
-    user_id: String,
-    email_id: String,
-    subject: String,
-    from: String,
-    to: String,
-    timestamp: String,
+    pub id: String,
+    pub kind: MailEventKind,
+    pub user_id: String,
+    pub email_id: String,
+    pub subject: String,
+    pub from: String,
+    pub to: String,
+    pub timestamp: String,
 }
 
 pub(super) type EventBus = broadcast::Sender<MailEvent>;
@@ -36,81 +36,81 @@ pub(super) const SEND_QUEUE_COLL: &str = "send_queue";
 
 #[derive(Deserialize)]
 pub(super) struct UndoSendRequest {
-    id: String,
+    pub id: String,
 }
 
 #[derive(Deserialize)]
 pub(super) struct ScheduleSendBody {
     #[serde(default)]
-    to: Vec<ComposerRecipient>,
+    pub to: Vec<ComposerRecipient>,
     #[serde(default)]
-    cc: Vec<ComposerRecipient>,
+    pub cc: Vec<ComposerRecipient>,
     #[serde(default)]
-    bcc: Vec<ComposerRecipient>,
+    pub bcc: Vec<ComposerRecipient>,
     #[serde(default)]
-    subject: String,
+    pub subject: String,
     #[serde(default)]
-    body: String,
+    pub body: String,
     #[serde(default)]
-    attachments: Vec<ComposeAttachmentInput>,
+    pub attachments: Vec<ComposeAttachmentInput>,
     #[serde(default)]
-    from: Option<String>,
+    pub from: Option<String>,
     #[serde(default, rename = "inReplyTo", alias = "in_reply_to")]
-    in_reply_to: Option<String>,
+    pub in_reply_to: Option<String>,
     #[serde(default)]
-    references: Vec<String>,
-    send_at: String,
+    pub references: Vec<String>,
+    pub send_at: String,
 }
 
 // --- OAuth provider response types ---
 
 #[derive(Deserialize)]
 pub(super) struct GithubTokenResponse {
-    access_token: Option<String>,
-    error: Option<String>,
-    error_description: Option<String>,
+    pub access_token: Option<String>,
+    pub error: Option<String>,
+    pub error_description: Option<String>,
 }
 
 #[derive(Deserialize)]
 pub(super) struct GithubUser {
-    id: u64,
-    login: String,
-    name: Option<String>,
-    email: Option<String>,
+    pub id: u64,
+    pub login: String,
+    pub name: Option<String>,
+    pub email: Option<String>,
 }
 
 #[derive(Deserialize)]
 pub(super) struct GithubEmail {
-    email: String,
-    primary: bool,
-    verified: bool,
+    pub email: String,
+    pub primary: bool,
+    pub verified: bool,
 }
 
 #[derive(Serialize)]
 pub(super) struct UserResponse {
-    id: String,
-    email: String,
-    display_name: String,
-    role: String,
-    two_factor_enabled: bool,
-    created_at: String,
-    updated_at: String,
+    pub id: String,
+    pub email: String,
+    pub display_name: String,
+    pub role: String,
+    pub two_factor_enabled: bool,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Serialize)]
 pub(super) struct SessionResponse {
-    id: String,
-    user: UserResponse,
-    access_token: String,
-    refresh_token: String,
-    expires_at: u64,
-    refresh_expires_at: u64,
-    issued_at: u64,
+    pub id: String,
+    pub user: UserResponse,
+    pub access_token: String,
+    pub refresh_token: String,
+    pub expires_at: u64,
+    pub refresh_expires_at: u64,
+    pub issued_at: u64,
 }
 
 #[derive(Serialize)]
 pub(super) struct AuthResponse {
-    session: SessionResponse,
+    pub session: SessionResponse,
 }
 
 // make_session, verify_totp, generate_totp_secret, generate_otp_code

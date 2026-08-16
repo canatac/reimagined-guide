@@ -3,25 +3,25 @@ use super::*;
 #[derive(Deserialize)]
 pub(super) struct DeliverabilityDiagnosticsQuery {
     #[serde(default = "default_window")]
-    window: String,
-    domain: Option<String>,
+    pub window: String,
+    pub domain: Option<String>,
 }
 
 #[derive(Deserialize)]
 pub(super) struct DeliverabilityProcedureUpdateRequest {
-    checklist: Option<Vec<DeliverabilityChecklistUpdate>>,
-    reminder: Option<DeliverabilityReminderUpdate>,
+    pub checklist: Option<Vec<DeliverabilityChecklistUpdate>>,
+    pub reminder: Option<DeliverabilityReminderUpdate>,
 }
 
 #[derive(Deserialize)]
 pub(super) struct DeliverabilityChecklistUpdate {
-    id: String,
-    checked: bool,
-    note: Option<String>,
+    pub id: String,
+    pub checked: bool,
+    pub note: Option<String>,
 }
 
 #[derive(Deserialize)]
 pub(super) struct DeliverabilityReminderUpdate {
-    enabled: bool,
-    cadence_hours: u32,
+    pub enabled: bool,
+    pub cadence_hours: u32,
 }
