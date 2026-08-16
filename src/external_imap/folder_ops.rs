@@ -35,7 +35,7 @@ impl ExternalImapService {
                 doc! {
                     "$set": {
                         "localRole": local_role,
-                        "updatedAt": bson::DateTime::from_millis(Utc::now().timestamp_millis()),
+                        "updatedAt": Utc::now(),
                     }
                 },
             )
@@ -59,7 +59,7 @@ impl ExternalImapService {
         remote_name: &str,
         local_role: &str,
     ) -> Result<ExternalImapFolder> {
-        let now = bson::DateTime::from_millis(Utc::now().timestamp_millis());
+        let now = Utc::now();
         let existing = self
             .coll_folders()
             .find_one(doc! {

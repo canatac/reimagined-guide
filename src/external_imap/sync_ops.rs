@@ -11,7 +11,7 @@ impl ExternalImapService {
         account_id: &str,
         input: &StartSyncInput,
     ) -> Result<ExternalSyncRun> {
-        let now = bson::DateTime::from_millis(Utc::now().timestamp_millis());
+        let now = Utc::now();
         let since_dt = input.since.as_ref().and_then(parse_rfc3339_as_bson);
 
         let run = ExternalSyncRun {

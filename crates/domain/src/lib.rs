@@ -1,4 +1,4 @@
-use mongodb::bson;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -19,10 +19,10 @@ pub struct ExternalImapAccount {
     pub smtp_port: Option<u16>,
     pub smtp_tls: Option<bool>,
     pub status: String,
-    pub last_sync_at: Option<bson::DateTime>,
+    pub last_sync_at: Option<DateTime<Utc>>,
     pub last_error: Option<String>,
-    pub created_at: bson::DateTime,
-    pub updated_at: bson::DateTime,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -36,8 +36,8 @@ pub struct ExternalImapFolder {
     pub uid_validity: Option<u64>,
     pub highest_uid: Option<u64>,
     pub highest_modseq: Option<u64>,
-    pub created_at: bson::DateTime,
-    pub updated_at: bson::DateTime,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -53,16 +53,16 @@ pub struct ExternalImapMessage {
     pub from: Option<String>,
     pub to: Option<String>,
     pub subject: Option<String>,
-    pub sent_at: Option<bson::DateTime>,
+    pub sent_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub flags: Vec<String>,
-    pub internal_date: Option<bson::DateTime>,
+    pub internal_date: Option<DateTime<Utc>>,
     pub body_preview: Option<String>,
     pub raw_ref: Option<String>,
     pub dedup_hash: Option<String>,
     pub deleted: bool,
-    pub created_at: bson::DateTime,
-    pub updated_at: bson::DateTime,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -74,13 +74,13 @@ pub struct ExternalSyncRun {
     pub mode: String,
     #[serde(default)]
     pub folders: Vec<String>,
-    pub since: Option<bson::DateTime>,
+    pub since: Option<DateTime<Utc>>,
     pub status: String,
     pub stats_fetched: u64,
     pub stats_updated: u64,
     pub stats_deleted: u64,
-    pub started_at: bson::DateTime,
-    pub ended_at: Option<bson::DateTime>,
+    pub started_at: DateTime<Utc>,
+    pub ended_at: Option<DateTime<Utc>>,
     pub error: Option<String>,
 }
 
@@ -91,16 +91,16 @@ pub struct CalendarEvent {
     pub title: String,
     #[serde(default)]
     pub description: String,
-    pub start: bson::DateTime,
-    pub end: bson::DateTime,
+    pub start: DateTime<Utc>,
+    pub end: DateTime<Utc>,
     #[serde(default = "default_event_type")]
     pub event_type: String,
     #[serde(default = "default_color")]
     pub color: String,
     #[serde(default)]
     pub location: String,
-    pub created_at: bson::DateTime,
-    pub updated_at: bson::DateTime,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 fn default_event_type() -> String {
@@ -112,8 +112,8 @@ fn default_color() -> String {
 }
 
 impl CalendarEvent {
-    pub fn new(user_id: &str, title: &str, start: bson::DateTime, end: bson::DateTime) -> Self {
-        let now = bson::DateTime::from_millis(chrono::Utc::now().timestamp_millis());
+    pub fn new(user_id: &str, title: &str, start: DateTime<Utc>, end: DateTime<Utc>) -> Self {
+        let now = chrono::Utc::now();
         CalendarEvent {
             id: uuid::Uuid::new_v4().to_string(),
             user_id: user_id.to_string(),
@@ -145,7 +145,7 @@ pub struct Email {
     pub sequence_number: u32,
     #[serde(default)]
     pub uid: u32,
-    pub internal_date: bson::DateTime,
+    pub internal_date: DateTime<Utc>,
     #[serde(default)]
     pub dkim_signature: Option<String>,
 }
@@ -162,7 +162,7 @@ impl Email {
             flags: Vec::new(),
             sequence_number: 0,
             uid: 0,
-            internal_date: bson::DateTime::from_millis(chrono::Utc::now().timestamp_millis()),
+            internal_date: chrono::Utc::now(),
             dkim_signature: None,
         }
     }

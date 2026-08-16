@@ -10,7 +10,7 @@ impl ExternalImapService {
         owner_user_id: &str,
         input: CreateExternalAccountInput,
     ) -> Result<ExternalImapAccount> {
-        let now = bson::DateTime::from_millis(Utc::now().timestamp_millis());
+        let now = Utc::now();
         let account = ExternalImapAccount {
             id: Uuid::new_v4().to_string(),
             owner_user_id: owner_user_id.to_string(),
@@ -76,7 +76,7 @@ impl ExternalImapService {
         input: UpdateExternalAccountInput,
     ) -> Result<Option<ExternalImapAccount>> {
         let mut set_doc = doc! {
-            "updatedAt": bson::DateTime::from_millis(Utc::now().timestamp_millis())
+            "updatedAt": Utc::now()
         };
 
         if let Some(v) = input.provider { set_doc.insert("provider", v); }
