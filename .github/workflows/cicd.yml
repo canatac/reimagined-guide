@@ -49,6 +49,20 @@ jobs:
       - name: Domain purity audit (cycle 18, soft)
         run: bash scripts/domain_purity_audit.sh
 
+      - name: KPI - Complexity CCN audit (cycle 21, soft)
+        continue-on-error: true
+        run: bash scripts/complexity_audit.sh
+
+      - name: KPI - Domain coverage audit (cycle 21, soft)
+        continue-on-error: true
+        run: |
+          rustup component add llvm-tools-preview || true
+          bash scripts/domain_coverage_audit.sh
+
+      - name: KPI - Ports migration audit (cycle 21, soft)
+        continue-on-error: true
+        run: bash scripts/ports_migration_audit.sh
+
   # ============================================================
   # JOB 2 : Build & Push SMTP image via Docker Buildx to SCW Registry
   #          SKIPPED on repository_dispatch (DKIM-only change)

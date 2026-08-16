@@ -90,52 +90,9 @@ impl From<std::io::Error> for MainError {
     }
 }
 
-// Enum to represent different types of streams (TLS or Plain)
-#[derive(Debug)]
-enum StreamType {
-    Tls(tokio::io::BufReader<TlsStream<TcpStream>>),
-    Plain(tokio::io::BufReader<TcpStream>),
-}
-
-// Implement AsyncRead trait for StreamType
-impl AsyncRead for StreamType {
-    fn poll_read(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &mut tokio::io::ReadBuf<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        match self.get_mut() {
-            StreamType::Tls(s) => std::pin::Pin::new(s).poll_read(cx, buf),
-            StreamType::Plain(s) => std::pin::Pin::new(s).poll_read(cx, buf),
-        }
-    }
-}
-
-// Implement AsyncBufRead trait for StreamType
-impl AsyncBufRead for StreamType {
-    fn poll_fill_buf(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<std::io::Result<&[u8]>> {
-        match self.get_mut() {
-            StreamType::Tls(s) => std::pin::Pin::new(s).poll_fill_buf(cx),
-            StreamType::Plain(s) => std::pin::Pin::new(s).poll_fill_buf(cx),
-        }
-    }
-
-    fn consume(self: std::pin::Pin<&mut Self>, amt: usize) {
-        match self.get_mut() {
-            StreamType::Tls(s) => std::pin::Pin::new(s).consume(amt),
-            StreamType::Plain(s) => std::pin::Pin::new(s).consume(amt),
-        }
-    }
-}
-
-impl StreamType {
-    fn is_tls(&self) -> bool {
-        matches!(self, StreamType::Tls(_))
-    }
-}
+#[path = "smtp_server_dir/stream.rs"]
+mod stream_helpers;
+use stream_helpers::StreamType;
 
 #[path = "smtp_server_dir/recipient.rs"]
 mod recipient_helpers;
@@ -161,66 +118,9 @@ use headers_helpers::{
 };
 use commands_helpers::process_command;
 
-fn env_bool(key: &str, default: bool) -> bool {
-    match env::var(key) {
-        Ok(raw) => {
-            let v = raw.trim().to_ascii_lowercase();
-            matches!(v.as_str(), "1" | "true" | "yes" | "on")
-                || (!matches!(v.as_str(), "0" | "false" | "no" | "off") && default)
-        }
-        Err(_) => default,
-    }
-}
-
-// Struct to represent the mail server
-struct MailServer {
-    mail_dir: String,
-}
-
-impl MailServer {
-    // Create a new MailServer instance
-    fn new(mail_dir: &str) -> Self {
-        fs::create_dir_all(mail_dir).unwrap();
-        MailServer {
-            mail_dir: mail_dir.to_string(),
-        }
-    }
-
-    // Store an email in the mail directory
-    async fn store_email(&self, email: &CustomEmail) -> std::io::Result<()> {
-        let timestamp = Utc::now().format("%Y%m%d%H%M%S");
-        let filename = format!("{}-{}.eml", timestamp, email.email.to.replace("@", "_at_"));
-        let path = Path::new(&self.mail_dir).join(filename);
-
-        let mut file = tokio::fs::File::create(path).await?;
-        file.write_all(format!("From: {}\r\n", email.email.from).as_bytes())
-            .await?;
-        file.write_all(format!("To: {}\r\n", email.email.to).as_bytes())
-            .await?;
-        file.write_all(format!("Subject: {}\r\n\r\n", email.email.subject).as_bytes())
-            .await?;
-        file.write_all(email.email.body.as_bytes()).await?;
-
-        Ok(())
-    }
-}
-
-
-
-
-// Write a response to the client
-async fn write_response(stream: &mut StreamType, response: &str) -> std::io::Result<()> {
-    match stream {
-        StreamType::Tls(ref mut s) => {
-            s.write_all(response.as_bytes()).await?;
-            s.flush().await
-        }
-        StreamType::Plain(ref mut s) => {
-            s.write_all(response.as_bytes()).await?;
-            s.flush().await
-        }
-    }
-}
+#[path = "smtp_server_dir/mailserver.rs"]
+mod mailserver_helpers;
+use mailserver_helpers::{env_bool, write_response, MailServer};
 
 // Load SSL certificates
 // (moved to tls_helpers.rs)
