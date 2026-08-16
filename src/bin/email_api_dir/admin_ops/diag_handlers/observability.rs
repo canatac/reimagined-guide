@@ -9,7 +9,7 @@ struct SmtpStatusStats {
     failed: u64,
     deferred: u64,
     by_status: serde_json::Map<String, serde_json::Value>,
-    p95: u64,
+    p95: Option<u64>,
 }
 
 async fn collect_smtp_stats(
