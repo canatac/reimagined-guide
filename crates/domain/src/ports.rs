@@ -156,3 +156,27 @@ pub trait UserAliasPort: Send + Sync {
     async fn create_alias(&self, alias: &str, target: &str) -> DomainResult<()>;
     async fn update_user_locale(&self, username: &str, locale: &str) -> DomainResult<()>;
 }
+
+/// Port user registration — création + authentification comptes.
+///
+/// Cycle 32 : 10ème port autonome (post cycle31 MailboxListPort). Signatures
+/// 100 % primitives (`&str` / `bool`), aucun type infrastructure. Concrètement
+/// couvre les opérations `create_user` + `authenticate_user` de la couche
+/// `DatabaseInterface` historique.
+#[async_trait]
+pub trait UserRegistrationPort: Send + Sync {
+    /// Crée un utilisateur (username + password + mailbox par défaut).
+    async fn register_user(
+        &self,
+        username: &str,
+        password: &str,
+        mailbox: &str,
+    ) -> DomainResult<()>;
+
+    /// Authentifie (`true` si credentials valides).
+    async fn verify_credentials(
+        &self,
+        username: &str,
+        password: &str,
+    ) -> DomainResult<bool>;
+}
