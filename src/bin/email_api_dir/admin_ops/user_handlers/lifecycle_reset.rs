@@ -2,6 +2,8 @@
 use super::super::*;
 use super::audit::log_admin_action;
 
+use super::lifecycle_shared::*;
+
 /// POST /api/admin/users/{id}/reset-password
 ///
 /// Définit un nouveau mot de passe (bcrypt) sur l'AdminUserRecord.
