@@ -8,8 +8,6 @@ pub mod drafts_handlers;
 
 mod folder_utils;
 mod mime_utils;
-mod mime_attachments;
-mod mime_dto;
 
 // Le mod.rs originel exposait via glob les types du parent (Arc, Logic, Email,
 // Responder, bson, monitoring, ...). Après split minimal (helpers déplacés),
@@ -28,8 +26,6 @@ pub(crate) use folder_utils::{
     canonical_folder, folder_to_mailboxes, resolve_user_id, EmailListQuery,
 };
 pub(crate) use mime_utils::{
-    parse_address, strip_tags, EmailAddressDto, EmailDto,
+    email_to_dto, extract_attachments_for_ui, parse_address, strip_tags, EmailAddressDto, EmailDto,
+    ExtractedAttachment,
 };
-pub(crate) use mime_attachments::ExtractedAttachment;
-pub(crate) use mime_attachments::extract_attachments_for_ui;
-pub(crate) use mime_dto::email_to_dto;
