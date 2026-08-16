@@ -77,86 +77,91 @@ pub(crate) fn build_cors_layer() -> Cors {
         .max_age(3600)
 }
 
-/// Register all HTTP routes on the given ServiceConfig.
-///
-/// This mirrors the previous inline `.route(...)` chain in `main()`.
-#[allow(clippy::too_many_lines)]
-pub(crate) fn register_http_routes(cfg: &mut web::ServiceConfig) {
+/// Documentation & OpenAPI routes.
+fn register_docs_routes(cfg: &mut web::ServiceConfig) {
     cfg.route("/api/openapi.json", web::get().to(api_openapi_json))
         .route("/api/docs", web::get().to(api_swagger_ui))
         .route(
             "/api/openapi/external-imap.yaml",
             web::get().to(api_external_openapi),
-        )
-        .route(
-            "/api/external-accounts",
-            web::get().to(api_external_accounts_list),
-        )
-        .route(
-            "/api/external-accounts/probe-stream",
-            web::post().to(external_probe_handlers::api_external_probe_stream),
-        )
-        .route(
-            "/api/external-accounts",
-            web::post().to(api_external_accounts_create),
-        )
-        .route(
-            "/api/external-accounts/{id}",
-            web::get().to(api_external_account_get),
-        )
-        .route(
-            "/api/external-accounts/{id}",
-            web::patch().to(api_external_account_patch),
-        )
-        .route(
-            "/api/external-accounts/{id}",
-            web::delete().to(api_external_account_delete),
-        )
-        .route(
-            "/api/external-accounts/{id}/test",
-            web::post().to(api_external_account_test),
-        )
-        .route(
-            "/api/external-accounts/{id}/folders",
-            web::get().to(api_external_folders_list),
-        )
-        .route(
-            "/api/external-accounts/{id}/folders/discover",
-            web::post().to(api_external_folders_discover),
-        )
-        .route(
-            "/api/external-accounts/{id}/folders/{folder_id}/mapping",
-            web::put().to(api_external_folder_mapping_put),
-        )
-        .route(
-            "/api/external-accounts/{id}/sync",
-            web::post().to(api_external_sync_start),
-        )
-        .route(
-            "/api/external-accounts/{id}/sync/status",
-            web::get().to(api_external_sync_status),
-        )
-        .route(
-            "/api/external-accounts/{id}/sync/pause",
-            web::post().to(api_external_sync_pause),
-        )
-        .route(
-            "/api/external-accounts/{id}/sync/resume",
-            web::post().to(api_external_sync_resume),
-        )
-        .route(
-            "/api/external-sync-runs/{run_id}",
-            web::get().to(api_external_sync_run_get),
-        )
-        .route(
-            "/api/external-messages",
-            web::get().to(api_external_messages_list),
-        )
-        .route(
-            "/api/external-messages/{id}/action",
-            web::post().to(api_external_message_action),
-        )
-        .route("/api/auth/login", web::post().to(auth_login))
+        );
+}
+
+/// External IMAP account routes.
+fn register_external_routes(cfg: &mut web::ServiceConfig) {
+    cfg.route(
+        "/api/external-accounts",
+        web::get().to(api_external_accounts_list),
+    )
+    .route(
+        "/api/external-accounts/probe-stream",
+        web::post().to(external_probe_handlers::api_external_probe_stream),
+    )
+    .route(
+        "/api/external-accounts",
+        web::post().to(api_external_accounts_create),
+    )
+    .route(
+        "/api/external-accounts/{id}",
+        web::get().to(api_external_account_get),
+    )
+    .route(
+        "/api/external-accounts/{id}",
+        web::patch().to(api_external_account_patch),
+    )
+    .route(
+        "/api/external-accounts/{id}",
+        web::delete().to(api_external_account_delete),
+    )
+    .route(
+        "/api/external-accounts/{id}/test",
+        web::post().to(api_external_account_test),
+    )
+    .route(
+        "/api/external-accounts/{id}/folders",
+        web::get().to(api_external_folders_list),
+    )
+    .route(
+        "/api/external-accounts/{id}/folders/discover",
+        web::post().to(api_external_folders_discover),
+    )
+    .route(
+        "/api/external-accounts/{id}/folders/{folder_id}/mapping",
+        web::put().to(api_external_folder_mapping_put),
+    )
+    .route(
+        "/api/external-accounts/{id}/sync",
+        web::post().to(api_external_sync_start),
+    )
+    .route(
+        "/api/external-accounts/{id}/sync/status",
+        web::get().to(api_external_sync_status),
+    )
+    .route(
+        "/api/external-accounts/{id}/sync/pause",
+        web::post().to(api_external_sync_pause),
+    )
+    .route(
+        "/api/external-accounts/{id}/sync/resume",
+        web::post().to(api_external_sync_resume),
+    )
+    .route(
+        "/api/external-sync-runs/{run_id}",
+        web::get().to(api_external_sync_run_get),
+    )
+    .route(
+        "/api/external-messages",
+        web::get().to(api_external_messages_list),
+    )
+    .route(
+        "/api/external-messages/{id}/action",
+        web::post().to(api_external_message_action),
+    );
+}
+
+/// Auth & user session routes.
+fn register_auth_routes(cfg: &mut web::ServiceConfig) {
+    cfg.route("/api/auth/login", web::post().to(auth_login))
         .route("/api/auth/register", web::post().to(auth_register))
         .route("/api/auth/logout", web::post().to(auth_logout))
         .route("/api/auth/refresh", web::post().to(auth_refresh))
@@ -181,8 +186,12 @@ pub(crate) fn register_http_routes(cfg: &mut web::ServiceConfig) {
         .route(
             "/api/auth/oauth/{provider}/callback",
             web::get().to(auth_oauth_callback),
-        )
-        .route("/api/emails", web::get().to(api_emails))
+        );
+}
+
+/// Mailbox / send / drafts / templates / hermes / calendar routes.
+fn register_mailbox_routes(cfg: &mut web::ServiceConfig) {
+    cfg.route("/api/emails", web::get().to(api_emails))
         .route("/api/emails/{id}", web::get().to(api_email_by_id))
         .route(
             "/api/emails/{id}/attachments/{attachment_id}",
@@ -233,8 +242,12 @@ pub(crate) fn register_http_routes(cfg: &mut web::ServiceConfig) {
         .route(
             "/send-to-mailing-list",
             web::post().to(send_to_mailing_list),
-        )
-        .route("/api/events", web::get().to(api_events))
+        );
+}
+
+/// Monitoring / security / diagnostics routes.
+fn register_diag_routes(cfg: &mut web::ServiceConfig) {
+    cfg.route("/api/events", web::get().to(api_events))
         .route("/api/events/stream", web::get().to(api_events_stream))
         .route(
             "/api/monitoring/summary",
@@ -277,8 +290,12 @@ pub(crate) fn register_http_routes(cfg: &mut web::ServiceConfig) {
         .route(
             "/api/security/remediation/{alert_id}/rollback",
             web::post().to(api_security_rollback),
-        )
-        .route("/api/admin/users", web::get().to(api_admin_users_list))
+        );
+}
+
+/// Admin routes (users, change-requests, deliverability, observability).
+fn register_admin_routes(cfg: &mut web::ServiceConfig) {
+    cfg.route("/api/admin/users", web::get().to(api_admin_users_list))
         .route("/api/admin/users", web::post().to(api_admin_user_create))
         .route("/api/admin/whoami", web::get().to(api_admin_whoami))
         .route("/api/admin/audit-log", web::get().to(api_admin_audit_log))
@@ -343,4 +360,16 @@ pub(crate) fn register_http_routes(cfg: &mut web::ServiceConfig) {
             "/api/admin/observability/overview",
             web::get().to(api_admin_observability_overview),
         );
+}
+
+/// Register all HTTP routes on the given ServiceConfig.
+///
+/// Composed from domain-specific registrations to keep each helper small.
+pub(crate) fn register_http_routes(cfg: &mut web::ServiceConfig) {
+    register_docs_routes(cfg);
+    register_external_routes(cfg);
+    register_auth_routes(cfg);
+    register_mailbox_routes(cfg);
+    register_diag_routes(cfg);
+    register_admin_routes(cfg);
 }
