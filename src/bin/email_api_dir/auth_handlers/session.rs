@@ -1,10 +1,7 @@
-// auth_handlers.rs — extracted from email_api_dir/main.rs Sprint 2
-// Handlers: auth_login, auth_register, auth_logout, auth_refresh,
-//           auth_oauth_start, auth_oauth_callback,
-//           api_2fa_verify, api_password_reset_request, api_password_reset_confirm,
-//           api_patch_user_locale
-
-use super::*;
+// session.rs — Core session handlers : login/register/logout/refresh + password reset + patch locale.
+// Extraits de auth_handlers.rs. OAuth → oauth.rs, TOTP/2FA → totp.rs.
+#![allow(unused_imports, dead_code)]
+use super::super::*;
 
 // ─── Auth types ─────────────────────────────────────────────────────────────
 
@@ -29,22 +26,6 @@ pub(crate) struct RegisterRequest {
 }
 
 #[derive(Deserialize)]
-pub(crate) struct OAuthCallbackQuery {
-    pub code: Option<String>,
-    pub state: Option<String>,
-}
-
-pub(crate) fn default_2fa_method() -> String { "email".to_string() }
-
-#[derive(Deserialize)]
-pub(crate) struct TwoFactorVerifyRequest {
-    pub email: String,
-    pub code: String,
-    #[serde(default = "default_2fa_method")]
-    pub method: String,
-}
-
-#[derive(Deserialize)]
 pub(crate) struct PasswordResetRequestBody {
     pub email: String,
 }
@@ -64,9 +45,6 @@ pub(crate) struct PatchLocaleRequest {
 
 /// Cherche l'utilisateur dans `admin_users` par email; s'il est actif,
 /// persiste une session admin et renvoie le token à utiliser côté client.
-/// Si aucun compte admin correspondant n'existe (ou en cas d'erreur),
-/// retourne `None` — dans ce cas `make_session` génère un token éphémère
-/// non persisté (comportement pré-RBAC préservé).
 async fn issue_session_if_admin(
     mongo: &mongodb::Client,
     email: &str,
@@ -74,7 +52,7 @@ async fn issue_session_if_admin(
     let db_name = std::env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
     let coll = mongo
         .database(&db_name)
-        .collection::<AdminUserRecord>(super::admin_ops::ADMIN_USERS_COLL);
+        .collection::<AdminUserRecord>(super::super::admin_ops::ADMIN_USERS_COLL);
     let email_lc = email.trim().to_lowercase();
     let user_opt = match coll.find_one(doc! { "email": &email_lc }).await {
         Ok(Some(u)) => Some(u),
@@ -98,7 +76,7 @@ async fn issue_session_if_admin(
     if user.status != "active" {
         return None;
     }
-    let session = super::admin_auth::issue_admin_session(
+    let session = super::super::admin_auth::issue_admin_session(
         mongo,
         &db_name,
         &user.id,
@@ -115,9 +93,6 @@ pub(crate) fn make_session(email: &str, display_name: &str) -> AuthResponse {
     make_session_with_token(email, display_name, &Uuid::new_v4().to_string())
 }
 
-/// Variante utilisée par `auth_login` quand on veut réutiliser un token
-/// persisté dans `admin_sessions` — permet au frontend d'appeler ensuite
-/// les endpoints `/api/admin/*` avec ce même token.
 pub(crate) fn make_session_with_token(
     email: &str,
     display_name: &str,
@@ -143,46 +118,6 @@ pub(crate) fn make_session_with_token(
             issued_at: now,
         },
     }
-}
-
-// ─── TOTP helpers ─────────────────────────────────────────────────────────
-
-pub(crate) fn compute_hotp(key: &[u8], counter: u64) -> u32 {
-    type HmacSha1 = Hmac<Sha1>;
-    let mut mac = HmacSha1::new_from_slice(key).expect("HMAC accepts any key size");
-    mac.update(&counter.to_be_bytes());
-    let result = mac.finalize().into_bytes();
-    let offset = (result[19] & 0x0f) as usize;
-    let code = ((result[offset] as u32 & 0x7f) << 24)
-        | ((result[offset + 1] as u32) << 16)
-        | ((result[offset + 2] as u32) << 8)
-        | (result[offset + 3] as u32);
-    code % 1_000_000
-}
-
-pub(crate) fn verify_totp(secret_b32: &str, code: &str) -> bool {
-    use constant_time_eq::constant_time_eq;
-    let s = secret_b32.to_uppercase();
-    let pad = s.len() % 8;
-    let padded = if pad == 0 { s } else { format!("{}{}", s, "=".repeat(8 - pad)) };
-    let key = match BASE32.decode(padded.as_bytes()) { Ok(k) => k, Err(_) => return false };
-    let t = Utc::now().timestamp() / 30;
-    for delta in [-1i64, 0, 1] {
-        let counter = (t + delta).max(0) as u64;
-        let candidate = format!("{:06}", compute_hotp(&key, counter));
-        if constant_time_eq(candidate.as_bytes(), code.as_bytes()) { return true; }
-    }
-    false
-}
-
-pub(crate) fn generate_totp_secret() -> String {
-    BASE32.encode(Uuid::new_v4().as_bytes())
-}
-
-pub(crate) fn generate_otp_code() -> String {
-    let b = Uuid::new_v4();
-    let n = u32::from_be_bytes([b.as_bytes()[0], b.as_bytes()[1], b.as_bytes()[2], b.as_bytes()[3]]);
-    format!("{:06}", n % 1_000_000)
 }
 
 // ─── Handlers ─────────────────────────────────────────────────────────────
@@ -337,120 +272,6 @@ pub(crate) async fn auth_refresh() -> impl Responder {
             "issuedAt": Utc::now().timestamp_millis() as u64,
         }
     }))
-}
-
-pub(crate) async fn auth_oauth_start(path: web::Path<String>) -> impl Responder {
-    let provider_raw = path.into_inner();
-    let provider = match normalize_oauth_provider(&provider_raw) {
-        Some(p) => p,
-        None => return HttpResponse::BadRequest().json(serde_json::json!({ "message": "Unsupported OAuth provider." })),
-    };
-    let state = Uuid::new_v4().to_string();
-    let callback_base = env::var("OAUTH_CALLBACK_BASE_URL").unwrap_or_else(|_| "https://mail.misfits.ai".to_string());
-    let auth_url = match provider.as_str() {
-        "github" => {
-            let client_id = match env::var("GITHUB_CLIENT_ID").ok().filter(|v| !v.is_empty()) {
-                Some(id) => id,
-                None => { eprintln!("OAuth start: GITHUB_CLIENT_ID is not set"); return HttpResponse::InternalServerError().json(serde_json::json!({ "message": "OAuth provider not configured." })); }
-            };
-            let redirect_uri = format!("{}/api/auth/oauth/github/callback", callback_base.trim_end_matches('/'));
-            format!("https://github.com/login/oauth/authorize?client_id={}&redirect_uri={}&state={}&scope=user:email", client_id, urlencoding::encode(&redirect_uri), state)
-        }
-        _ => return HttpResponse::BadRequest().json(serde_json::json!({ "message": "Unsupported OAuth provider." })),
-    };
-    HttpResponse::Found().insert_header(("Location", auth_url)).finish()
-}
-
-pub(crate) async fn auth_oauth_callback(
-    path: web::Path<String>,
-    query: web::Query<OAuthCallbackQuery>,
-    logic: web::Data<Arc<Logic>>,
-) -> impl Responder {
-    let provider_raw = path.into_inner();
-    let provider = match normalize_oauth_provider(&provider_raw) {
-        Some(p) => p,
-        None => return HttpResponse::BadRequest().json(serde_json::json!({ "message": "Unsupported OAuth provider." })),
-    };
-    let code = match query.code.as_ref().map(|v| v.trim()).filter(|v| !v.is_empty()) {
-        Some(v) => v.to_string(),
-        None => return HttpResponse::BadRequest().json(serde_json::json!({ "message": "Missing OAuth authorization code." })),
-    };
-    let callback_base = env::var("OAUTH_CALLBACK_BASE_URL").unwrap_or_else(|_| "https://mail.misfits.ai".to_string());
-    let frontend_base = env::var("FRONTEND_BASE_URL").unwrap_or_else(|_| "https://mail.misfits.ai".to_string());
-    let http_client = reqwest::Client::builder().user_agent("misfits-email-api/1.0").build().unwrap_or_else(|_| reqwest::Client::new());
-
-    match provider.as_str() {
-        "github" => {
-            let client_id = env::var("GITHUB_CLIENT_ID").unwrap_or_default();
-            let client_secret = env::var("GITHUB_CLIENT_SECRET").unwrap_or_default();
-            if client_id.is_empty() || client_secret.is_empty() {
-                return HttpResponse::InternalServerError().json(serde_json::json!({ "message": "OAuth provider not configured." }));
-            }
-            let redirect_uri = format!("{}/api/auth/oauth/github/callback", callback_base.trim_end_matches('/'));
-            let token_resp = match http_client.post("https://github.com/login/oauth/access_token")
-                .header("Accept", "application/json")
-                .json(&serde_json::json!({ "client_id": client_id, "client_secret": client_secret, "code": code, "redirect_uri": redirect_uri }))
-                .send().await {
-                Ok(r) => r, Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({ "message": format!("OAuth token exchange failed: {}", e) })),
-            };
-            let token_json: serde_json::Value = match token_resp.json().await {
-                Ok(j) => j, Err(_) => return HttpResponse::InternalServerError().json(serde_json::json!({ "message": "OAuth token parse failed" })),
-            };
-            let access_token = match token_json.get("access_token").and_then(|v| v.as_str()) {
-                Some(t) => t.to_string(), None => return HttpResponse::Unauthorized().json(serde_json::json!({ "message": "OAuth access token missing" })),
-            };
-            let user_resp = match http_client.get("https://api.github.com/user")
-                .header("Authorization", format!("token {}", access_token))
-                .header("Accept", "application/vnd.github.v3+json")
-                .send().await {
-                Ok(r) => r, Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({ "message": format!("GitHub user fetch failed: {}", e) })),
-            };
-            let user_json: serde_json::Value = match user_resp.json().await { Ok(j) => j, Err(_) => return HttpResponse::InternalServerError().json(serde_json::json!({ "message": "GitHub user parse failed" })) };
-            let gh_login = user_json.get("login").and_then(|v| v.as_str()).unwrap_or("ghuser").to_string();
-            let gh_name  = user_json.get("name").and_then(|v| v.as_str()).unwrap_or(&gh_login).to_string();
-            let email_addr = format!("{}@github.oauth.misfits.ai", gh_login);
-            let _ = logic.create_user(&email_addr, &Uuid::new_v4().to_string(), "inbox").await;
-            let session = make_session(&email_addr, &gh_name);
-            let token_param = urlencoding::encode(&session.session.access_token);
-            let redirect = format!("{}/oauth/callback?token={}&provider=github", frontend_base.trim_end_matches('/'), token_param);
-            HttpResponse::Found().insert_header(("Location", redirect)).finish()
-        }
-        _ => HttpResponse::BadRequest().json(serde_json::json!({ "message": "Unsupported OAuth provider." })),
-    }
-}
-
-pub(crate) async fn api_2fa_verify(
-    body: web::Json<TwoFactorVerifyRequest>,
-    mongo: web::Data<Arc<mongodb::Client>>,
-) -> impl Responder {
-    let db = mongo_db_name();
-    if body.method == "totp" {
-        let coll = mongo.database(&db).collection::<bson::Document>("users");
-        let local = body.email.split('@').next().unwrap_or(&body.email);
-        let user_doc = match coll.find_one(doc! { "$or": [{ "username": local }, { "username": &body.email }] }).await {
-            Ok(Some(d)) => d,
-            Ok(None) => return HttpResponse::Unauthorized().json(serde_json::json!({ "verified": false, "error": "User not found" })),
-            Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({ "error": e.to_string() })),
-        };
-        let totp_secret = match user_doc.get_str("totp_secret").ok().filter(|s| !s.is_empty()) {
-            Some(s) => s.to_string(),
-            None => return HttpResponse::BadRequest().json(serde_json::json!({ "verified": false, "error": "TOTP not configured for this user" })),
-        };
-        if !verify_totp(&totp_secret, &body.code) {
-            return HttpResponse::Unauthorized().json(serde_json::json!({ "verified": false, "error": "Invalid TOTP code" }));
-        }
-    } else {
-        let coll = mongo.database(&db).collection::<bson::Document>("two_factor_codes");
-        let now_ms = Utc::now().timestamp_millis();
-        match coll.find_one(doc! { "email": &body.email, "code": &body.code, "used": false, "expires_at": { "$gt": bson::DateTime::from_millis(now_ms) } }).await {
-            Ok(Some(d)) => { if let Ok(oid) = d.get_object_id("_id") { let _ = coll.update_one(doc! { "_id": oid }, doc! { "$set": { "used": true } }).await; } }
-            Ok(None) => return HttpResponse::Unauthorized().json(serde_json::json!({ "verified": false, "error": "Invalid or expired code" })),
-            Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({ "error": e.to_string() })),
-        }
-    }
-    let display = body.email.split('@').next().unwrap_or(&body.email).to_string();
-    let session = make_session(&body.email, &display);
-    HttpResponse::Ok().json(serde_json::json!({ "verified": true, "session": session.session }))
 }
 
 pub(crate) async fn api_password_reset_request(
