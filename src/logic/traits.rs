@@ -189,3 +189,8 @@ pub use simple_smtp_domain::ports::LogicPort;
 // Cycle 23 hexagonal — 2ème port migré : `MailboxSessionPort` couvre
 // NOOP / CLOSE / CHECK, entièrement autonome (pas de dépendances mongodb).
 pub use simple_smtp_domain::ports::MailboxSessionPort;
+
+// Cycle 24 hexagonal — 3ème port migré : `MailboxSubscriptionPort`
+// couvre IMAP SUBSCRIBE / UNSUBSCRIBE (signatures primitives, aucun
+// type infrastructure).
+pub use simple_smtp_domain::ports::MailboxSubscriptionPort;
