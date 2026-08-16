@@ -1,7 +1,7 @@
 // oauth.rs — Handlers OAuth (start + callback). Extraits de auth_handlers.rs.
 #![allow(unused_imports, dead_code)]
 use super::super::*;
-use super::session::make_session;
+use super::login::make_session;
 
 #[derive(Deserialize)]
 pub(crate) struct OAuthCallbackQuery {
