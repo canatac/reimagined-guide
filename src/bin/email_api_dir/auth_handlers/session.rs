@@ -237,7 +237,7 @@ pub(crate) async fn auth_register(
         flags: vec![],
         sequence_number: 1,
         uid: 1,
-        internal_date: mongodb::bson::DateTime::from_millis(Utc::now().timestamp_millis()),
+        internal_date: Utc::now(),
         dkim_signature: None,
     };
     if let Err(e) = logic.deliver_to_inbox(&local_part, &welcome).await {
@@ -303,7 +303,7 @@ pub(crate) async fn api_password_reset_request(
         subject: "Password Reset Request".to_string(), body: body_html,
         headers: vec![("Content-Type".to_string(), "text/html; charset=utf-8".to_string())],
         flags: vec![], sequence_number: 0, uid: 0,
-        internal_date: bson::DateTime::from_millis(Utc::now().timestamp_millis()), dkim_signature: None,
+        internal_date: Utc::now(), dkim_signature: None,
     };
     if let Err(e) = logic.deliver_to_inbox(&local, &reset_email).await { eprintln!("password reset email delivery error: {}", e); }
     HttpResponse::Ok().json(serde_json::json!({ "message": "If the address is registered, a reset link has been sent." }))

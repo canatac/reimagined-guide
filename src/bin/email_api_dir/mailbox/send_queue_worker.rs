@@ -13,7 +13,7 @@ pub(crate) async fn send_queue_worker(mongo: Arc<mongodb::Client>) {
         let coll = mongo
             .database(&db_name)
             .collection::<bson::Document>(SEND_QUEUE_COLL);
-        let now = bson::DateTime::from_millis(Utc::now().timestamp_millis());
+        let now = Utc::now();
 
         let cursor = match coll
             .find(doc! {
@@ -129,7 +129,7 @@ pub(crate) async fn send_queue_worker(mongo: Arc<mongodb::Client>) {
                 flags: vec![],
                 sequence_number: 0,
                 uid: 0,
-                internal_date: bson::DateTime::from_millis(Utc::now().timestamp_millis()),
+                internal_date: Utc::now(),
                 dkim_signature: if dkim_sig.is_empty() {
                     None
                 } else {

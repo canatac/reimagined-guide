@@ -236,7 +236,7 @@ pub(crate) fn build_email_and_message_id(
         flags: vec![],
         sequence_number: 0,
         uid: 0,
-        internal_date: mongodb::bson::DateTime::from_millis(Utc::now().timestamp_millis()),
+        internal_date: Utc::now(),
         dkim_signature: if dkim.dkim_sig.is_empty() {
             None
         } else {
