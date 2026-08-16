@@ -148,6 +148,55 @@ pub(crate) async fn api_admin_user_invite(
     }))
 }
 
+/// Génère un mot de passe temporaire (16 chars, avec 2 symboles) conforme
+/// aux politiques classiques.
+fn generate_temp_password() -> String {
+    let a = Uuid::new_v4().simple().to_string();
+    let b = Uuid::new_v4().simple().to_string();
+    let mixed = format!("{}{}", &a[..7], &b[..7]);
+    format!("{}!{}#", &mixed[..7], &mixed[7..])
+}
+
+/// Résout le mot de passe à appliquer : celui fourni par l'admin ou un
+/// mot de passe temporaire généré. Retourne (password, generated).
+fn resolve_new_password(input: &Option<String>) -> (String, bool) {
+    match input {
+        Some(p) if !p.trim().is_empty() => (p.trim().to_string(), false),
+        _ => (generate_temp_password(), true),
+    }
+}
+
+/// Propage le nouveau hash à la collection `users` (login classique + IMAP/SMTP).
+/// Non-bloquant : seulement un log en cas d'erreur.
+async fn sync_users_password(
+    mongo: &Arc<mongodb::Client>,
+    email: &str,
+    hash: &str,
+) {
+    let users_coll = mongo
+        .database(&mongo_db_name())
+        .collection::<mongodb::bson::Document>("users");
+    if let Err(e) = users_coll
+        .update_one(
+            doc! { "username": email },
+            doc! { "$set": { "password": hash } },
+        )
+        .await
+    {
+        eprintln!("reset_password: users sync warning: {}", e);
+    }
+}
+
+/// Supprime toutes les sessions actives d'un user (best-effort).
+async fn revoke_all_sessions(mongo: &Arc<mongodb::Client>, user_id: &str) {
+    let sessions = mongo
+        .database(&mongo_db_name())
+        .collection::<admin_auth::AdminSession>(admin_auth::ADMIN_SESSIONS_COLL);
+    if let Err(e) = sessions.delete_many(doc! { "user_id": user_id }).await {
+        eprintln!("reset_password: revoke sessions error: {}", e);
+    }
+}
+
 /// POST /api/admin/users/{id}/reset-password
 ///
 /// Définit un nouveau mot de passe (bcrypt) sur l'AdminUserRecord.
@@ -180,35 +229,12 @@ pub(crate) async fn api_admin_user_reset_password(
         }
     };
 
-    // Si aucun mot de passe fourni, on génère un temporaire (16 chars,
-    // alphanumérique + 2 symboles insérés à des positions déterministes).
-    // Base: 2 UUID hex concaténés (32 chars aléatoires) tronqués à 14,
-    // puis '!' et '#' injectés pour satisfaire les politiques classiques.
-    let (new_password, generated) = match &body.new_password {
-        Some(p) if !p.trim().is_empty() => (p.trim().to_string(), false),
-        _ => {
-            let a = Uuid::new_v4().simple().to_string();
-            let b = Uuid::new_v4().simple().to_string();
-            let mixed = format!("{}{}", &a[..7], &b[..7]);
-            // Insertion de 2 symboles à positions fixes → 16 chars finaux.
-            let temp = format!("{}!{}#", &mixed[..7], &mixed[7..]);
-            (temp, true)
-        }
-    };
-
+    let (new_password, generated) = resolve_new_password(&body.new_password);
     if new_password.len() < 8 {
         return HttpResponse::BadRequest()
             .json(serde_json::json!({ "message": "password must be at least 8 chars" }));
     }
-
-    // Conserver la valeur en clair pour la réponse (uniquement dans le cas
-    // `generated=true` — pour un mot de passe fourni par l'admin, aucun
-    // intérêt à le lui renvoyer).
-    let clear_for_response = if generated {
-        Some(new_password.clone())
-    } else {
-        None
-    };
+    let clear_for_response = if generated { Some(new_password.clone()) } else { None };
 
     let hash = match web::block(move || bcrypt::hash(&new_password, 12)).await {
         Ok(Ok(h)) => h,
@@ -227,7 +253,6 @@ pub(crate) async fn api_admin_user_reset_password(
     let now = now_iso();
     user.password_hash = Some(hash.clone());
     user.updated_at = now.clone();
-    // Consommer un éventuel jeton d'invitation en cours.
     user.invite_token = None;
     user.invite_expires_at = None;
     let mut recent = user.recent_activity.clone();
@@ -256,35 +281,9 @@ pub(crate) async fn api_admin_user_reset_password(
             .json(serde_json::json!({ "message": "Failed to update password" }));
     }
 
-    // Propager le hash à la collection `users` (utilisée par
-    // `authenticate_user` pour le login classique + IMAP/SMTP). Sans cette
-    // synchro, l'admin définit un nouveau mot de passe côté `admin_users`
-    // mais l'utilisateur reste incapable de se connecter.
-    // Le match se fait sur `username = email` (convention Misfits Mail).
-    let users_coll = mongo
-        .database(&mongo_db_name())
-        .collection::<mongodb::bson::Document>("users");
-    if let Err(e) = users_coll
-        .update_one(
-            doc! { "username": &user.email },
-            doc! { "$set": { "password": &hash } },
-        )
-        .await
-    {
-        // Non-bloquant: on log mais on renvoie succès. Le hash reste
-        // désynchronisé si `users` ne contient pas encore ce username —
-        // c'est le cas si le compte a été créé UNIQUEMENT côté admin.
-        eprintln!("reset_password: users sync warning: {}", e);
-    }
-
-    // Révocation des sessions optionnelle.
+    sync_users_password(&mongo, &user.email, &hash).await;
     if body.revoke_sessions {
-        let sessions = mongo
-            .database(&mongo_db_name())
-            .collection::<admin_auth::AdminSession>(admin_auth::ADMIN_SESSIONS_COLL);
-        if let Err(e) = sessions.delete_many(doc! { "user_id": &id }).await {
-            eprintln!("reset_password: revoke sessions error: {}", e);
-        }
+        revoke_all_sessions(&mongo, &id).await;
     }
 
     log_admin_action(
@@ -302,9 +301,6 @@ pub(crate) async fn api_admin_user_reset_password(
         "reset": true,
         "user": user,
         "generated": generated,
-        // Mot de passe en clair — présent UNIQUEMENT si `generated=true`.
-        // L'admin doit le communiquer au propriétaire hors-bande puis
-        // exiger un changement à la prochaine connexion.
         "password": clear_for_response,
     }))
 }
