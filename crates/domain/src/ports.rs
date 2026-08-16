@@ -146,3 +146,13 @@ pub trait MailboxListPort: Send + Sync {
         mailbox: &str,
     ) -> DomainResult<Vec<String>>;
 }
+
+/// Port user alias / locale — opérations administratives sur utilisateurs.
+///
+/// Cycle 30 : 10ème port migré depuis `DatabaseInterface`. Autonome :
+/// signatures 100 % primitives (`&str`), aucun type infrastructure.
+#[async_trait]
+pub trait UserAliasPort: Send + Sync {
+    async fn create_alias(&self, alias: &str, target: &str) -> DomainResult<()>;
+    async fn update_user_locale(&self, username: &str, locale: &str) -> DomainResult<()>;
+}
