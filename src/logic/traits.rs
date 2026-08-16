@@ -212,3 +212,6 @@ pub use simple_smtp_domain::ports::MessageStoreFlagsPort;
 
 /// Re-export du port autonome `ExternalImapAccountQueryPort` (cycle 29 hexagonal, 8ème port).
 pub use simple_smtp_domain::ports::ExternalImapAccountQueryPort;
+
+// Cycle 30 hexagonal — 10ème port migré : `UserAliasPort` (primitives &str).
+pub use simple_smtp_domain::ports::UserAliasPort;
