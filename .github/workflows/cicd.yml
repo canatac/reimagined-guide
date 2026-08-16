@@ -46,6 +46,9 @@ jobs:
       - name: Architecture guard (hexagonal port discipline)
         run: bash scripts/arch_guard.sh
 
+      - name: Domain purity audit (cycle 18, soft)
+        run: bash scripts/domain_purity_audit.sh
+
   # ============================================================
   # JOB 2 : Build & Push SMTP image via Docker Buildx to SCW Registry
   #          SKIPPED on repository_dispatch (DKIM-only change)
