@@ -1,7 +1,7 @@
 // totp.rs — Helpers HOTP/TOTP + endpoint api_2fa_verify. Extraits de auth_handlers.rs.
 #![allow(unused_imports, dead_code)]
 use super::super::*;
-use super::session::make_session;
+use super::login::make_session;
 
 pub(crate) fn default_2fa_method() -> String { "email".to_string() }
 
