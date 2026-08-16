@@ -209,3 +209,8 @@ pub use simple_smtp_domain::ports::MailboxCrudPort;
 // IMAP SEARCH / EXPUNGE / COPY / STORE (signatures primitives : &str,
 // Vec<String>, Vec<u32>). Aucun type infrastructure.
 pub use simple_smtp_domain::ports::MessageStoreFlagsPort;
+
+// Cycle 30 hexagonal — 8ème port migré : `UserAliasPort` couvre la
+// création d'alias mail et la mise à jour de la locale utilisateur.
+// Signatures 100 % primitives (`&str`), aucun type infrastructure.
+pub use simple_smtp_domain::ports::UserAliasPort;
