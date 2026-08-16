@@ -212,3 +212,8 @@ pub use simple_smtp_domain::ports::MessageStoreFlagsPort;
 
 /// Re-export du port autonome `ExternalImapAccountQueryPort` (cycle 29 hexagonal, 8ème port).
 pub use simple_smtp_domain::ports::ExternalImapAccountQueryPort;
+
+// Cycle 30 hexagonal — 9ème port migré : `UserAliasPort` couvre la
+// création d'alias mail et la mise à jour de la locale utilisateur.
+// Signatures 100 % primitives (`&str`), aucun type infrastructure.
+pub use simple_smtp_domain::ports::UserAliasPort;

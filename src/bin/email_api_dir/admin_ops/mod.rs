@@ -236,6 +236,7 @@ pub mod user_handlers;
 pub mod cr_handlers;
 pub mod ai_handlers;
 pub mod hermes_handlers;
+pub mod hermes_runs;
 pub mod diag_handlers;
 
 pub use user_handlers::*;

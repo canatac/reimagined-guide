@@ -128,3 +128,17 @@ pub trait ExternalImapAccountQueryPort: Send + Sync {
         owner_user_id: &str,
     ) -> DomainResult<Vec<crate::ExternalImapAccount>>;
 }
+
+/// Port user alias / locale — opérations administratives sur utilisateurs.
+///
+/// Cycle 30 : 9ème port migré depuis `DatabaseInterface`
+/// (`src/logic/traits.rs`). Autonome : signatures 100 % primitives
+/// (`&str`) — aucun type infrastructure ni domaine. Regroupe la
+/// création d'alias mail et la mise à jour de la locale utilisateur.
+#[async_trait]
+pub trait UserAliasPort: Send + Sync {
+    /// Crée un alias mail `alias` -> `target`.
+    async fn create_alias(&self, alias: &str, target: &str) -> DomainResult<()>;
+    /// Met à jour la locale de l'utilisateur `username`.
+    async fn update_user_locale(&self, username: &str, locale: &str) -> DomainResult<()>;
+}
