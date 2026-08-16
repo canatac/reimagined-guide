@@ -185,3 +185,7 @@ impl LogicTrait for Logic {
 // Les nouveaux use-cases doivent dépendre de `simple_smtp_domain::ports::LogicPort`
 // (exprimé en `DomainResult`) plutôt que du `LogicTrait` historique lié à mongodb.
 pub use simple_smtp_domain::ports::LogicPort;
+
+// Cycle 23 hexagonal — 2ème port migré : `MailboxSessionPort` couvre
+// NOOP / CLOSE / CHECK, entièrement autonome (pas de dépendances mongodb).
+pub use simple_smtp_domain::ports::MailboxSessionPort;

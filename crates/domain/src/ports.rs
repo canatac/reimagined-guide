@@ -1,8 +1,10 @@
 //! Ports du domaine — interfaces d'inversion pures (aucun import externe).
 //!
-//! Cycle 22 : premier port migré depuis `src/logic/traits.rs`.
-//! Objectif : que les use-cases dépendent uniquement de ces traits, pas de
-//! `mongodb::error::Result` ni d'autres détails d'infrastructure.
+//! Cycle 22 : premier port migré depuis `src/logic/traits.rs` (`LogicPort`).
+//! Cycle 23 : deuxième port migré — `MailboxSessionPort` (sous-ensemble
+//! autonome de `DatabaseInterface` couvrant les opérations de session
+//! IMAP sans argument : NOOP, CLOSE, CHECK). Choisi car totalement
+//! indépendant de tout type externe (mongodb / bson / entities).
 
 use crate::errors::DomainResult;
 use async_trait::async_trait;
@@ -22,4 +24,19 @@ pub trait LogicPort: Send + Sync {
         password: &str,
         mailbox: &str,
     ) -> DomainResult<()>;
+}
+
+/// Port session mailbox — opérations IMAP sans argument.
+///
+/// Cycle 23 : extrait de `DatabaseInterface` (`src/logic/traits.rs`).
+/// Ces trois primitives ne dépendent d'aucun type infrastructure et
+/// constituent la 2ème migration hexagonale (Phase 3).
+#[async_trait]
+pub trait MailboxSessionPort: Send + Sync {
+    /// IMAP NOOP — keep-alive / poll d'état.
+    async fn noop(&self) -> DomainResult<()>;
+    /// IMAP CLOSE — ferme la mailbox sélectionnée sans EXPUNGE explicite.
+    async fn close_mailbox(&self) -> DomainResult<()>;
+    /// IMAP CHECK — flush de l'état de la mailbox courante.
+    async fn check_mailbox(&self) -> DomainResult<()>;
 }
