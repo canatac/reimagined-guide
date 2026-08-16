@@ -199,3 +199,8 @@ pub use simple_smtp_domain::ports::MailboxSubscriptionPort;
 // update_email_flag / delete_email / archive_email (signatures &str,
 // aucun type mongodb/bson).
 pub use simple_smtp_domain::ports::EmailMutationPort;
+
+// Cycle 26 hexagonal — 5ème port migré : `MailboxCrudPort` couvre
+// IMAP CREATE / DELETE / RENAME (variantes non user-scopées).
+// Signatures 100 % primitives (`&str`), aucun type infrastructure.
+pub use simple_smtp_domain::ports::MailboxCrudPort;
