@@ -194,3 +194,8 @@ pub use simple_smtp_domain::ports::MailboxSessionPort;
 // couvre IMAP SUBSCRIBE / UNSUBSCRIBE (signatures primitives, aucun
 // type infrastructure).
 pub use simple_smtp_domain::ports::MailboxSubscriptionPort;
+
+// Cycle 25 hexagonal — 4ème port migré : `MailboxCrudPort` couvre
+// IMAP CREATE / DELETE / RENAME (variantes non user-scopées).
+// Signatures 100 % primitives (`&str`), aucun type infrastructure.
+pub use simple_smtp_domain::ports::MailboxCrudPort;
