@@ -234,6 +234,7 @@ pub(crate) struct AdminUsersQuery {
 
 pub mod user_handlers;
 pub mod cr_handlers;
+pub mod cr_patch;
 pub mod ai_handlers;
 pub mod hermes_handlers;
 pub mod diag_handlers;
