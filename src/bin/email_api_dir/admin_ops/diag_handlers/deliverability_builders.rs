@@ -9,7 +9,7 @@ struct DnsFindings {
     smtp_public_ip: String,
 }
 
-async fn collect_dns_findings(domain: &str, selector: &str) -> DnsFindings {
+pub(super) async fn collect_dns_findings(domain: &str, selector: &str) -> DnsFindings {
     let spf_rows = dns_txt_lookup(domain).await;
     let dmarc_rows = dns_txt_lookup(&format!("_dmarc.{}", domain)).await;
     let helo_rows = dns_txt_lookup(&format!("mail.{}", domain)).await;
@@ -47,7 +47,7 @@ struct ProcedureState {
     checklist_overrides: bson::Document,
 }
 
-async fn load_procedure_state(mongo: &Arc<mongodb::Client>) -> ProcedureState {
+pub(super) async fn load_procedure_state(mongo: &Arc<mongodb::Client>) -> ProcedureState {
     let db = env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
     let coll = mongo
         .database(&db)
@@ -91,7 +91,7 @@ async fn load_procedure_state(mongo: &Arc<mongodb::Client>) -> ProcedureState {
     state
 }
 
-fn build_checklist(
+pub(super) fn build_checklist(
     dns: &DnsFindings,
     domain: &str,
     selector: &str,
@@ -149,7 +149,7 @@ fn build_checklist(
     ]
 }
 
-fn apply_checklist_overrides(checklist: &mut [serde_json::Value], overrides: &bson::Document) {
+pub(super) fn apply_checklist_overrides(checklist: &mut [serde_json::Value], overrides: &bson::Document) {
     for entry in checklist.iter_mut() {
         if let Some(id) = entry.get("id").and_then(|v| v.as_str()) {
             if let Ok(override_doc) = overrides.get_document(id) {
@@ -168,7 +168,7 @@ fn apply_checklist_overrides(checklist: &mut [serde_json::Value], overrides: &bs
     }
 }
 
-fn compute_procedure_diff(checklist: &[serde_json::Value], gmail_blocks: u64) -> (usize, &'static str) {
+pub(super) fn compute_procedure_diff(checklist: &[serde_json::Value], gmail_blocks: u64) -> (usize, &'static str) {
     let done_count = checklist
         .iter()
         .filter(|item| {
