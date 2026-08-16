@@ -1,6 +1,7 @@
 #![allow(unused_imports, dead_code)]
-use super::super::*;
-use super::audit::log_admin_action;
+use super::super::super::*;
+use super::super::audit::log_admin_action;
+use super::shared::*;
 
 /// POST /api/admin/users/{id}/reset-password
 ///
