@@ -209,3 +209,6 @@ pub use simple_smtp_domain::ports::MailboxCrudPort;
 // IMAP SEARCH / EXPUNGE / COPY / STORE (signatures primitives : &str,
 // Vec<String>, Vec<u32>). Aucun type infrastructure.
 pub use simple_smtp_domain::ports::MessageStoreFlagsPort;
+
+/// Re-export du port autonome `ExternalImapAccountQueryPort` (cycle 29 hexagonal, 8ème port).
+pub use simple_smtp_domain::ports::ExternalImapAccountQueryPort;

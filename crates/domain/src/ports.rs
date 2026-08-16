@@ -107,3 +107,24 @@ pub trait EmailQueryPort: Send + Sync {
     /// Récupère un email par son `email_id`, ou `None` s'il n'existe pas.
     async fn find_email(&self, email_id: &str) -> DomainResult<Option<crate::Email>>;
 }
+
+/// Port autonome pour la lecture des comptes IMAP externes.
+///
+/// Port hexagonal (cycle 29, 8ème port) exposant les opérations de
+/// **lecture** sur `ExternalImapAccount`. Autonome : dépend uniquement
+/// du type domaine `ExternalImapAccount` et de primitives (`&str`).
+/// Sépare les responsabilités de query côté domaine des couches
+/// d'infrastructure (MongoDB, cache, etc.).
+#[async_trait]
+pub trait ExternalImapAccountQueryPort: Send + Sync {
+    /// Récupère un compte IMAP externe par son `id`, ou `None` s'il n'existe pas.
+    async fn find_external_imap_account(
+        &self,
+        id: &str,
+    ) -> DomainResult<Option<crate::ExternalImapAccount>>;
+    /// Liste tous les comptes IMAP externes appartenant à `owner_user_id`.
+    async fn list_external_imap_accounts_by_owner(
+        &self,
+        owner_user_id: &str,
+    ) -> DomainResult<Vec<crate::ExternalImapAccount>>;
+}
