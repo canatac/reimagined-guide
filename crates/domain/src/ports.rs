@@ -10,12 +10,6 @@ use crate::errors::DomainResult;
 use async_trait::async_trait;
 
 /// Port applicatif — orchestration de haut niveau (use-cases).
-///
-/// Correspond à l'ancien `LogicTrait` de `src/logic/traits.rs`, mais
-/// s'exprime en termes de `DomainResult` pour rester indépendant de
-/// l'infrastructure. Les adapters (ex. `Logic` côté crate racine)
-/// implémentent ce port en convertissant leurs erreurs concrètes via
-/// `From<mongodb::Error> for DomainError`.
 #[async_trait]
 pub trait LogicPort: Send + Sync {
     async fn create_user(
@@ -27,10 +21,6 @@ pub trait LogicPort: Send + Sync {
 }
 
 /// Port session mailbox — opérations IMAP sans argument.
-///
-/// Cycle 23 : extrait de `DatabaseInterface` (`src/logic/traits.rs`).
-/// Ces trois primitives ne dépendent d'aucun type infrastructure et
-/// constituent la 2ème migration hexagonale (Phase 3).
 #[async_trait]
 pub trait MailboxSessionPort: Send + Sync {
     /// IMAP NOOP — keep-alive / poll d'état.
@@ -42,12 +32,6 @@ pub trait MailboxSessionPort: Send + Sync {
 }
 
 /// Port souscription mailbox — IMAP SUBSCRIBE / UNSUBSCRIBE.
-///
-/// Cycle 24 : 3ème port migré depuis `DatabaseInterface`
-/// (`src/logic/traits.rs`). Autonome : signatures 100 % primitives
-/// (`&str`) et pas de types infrastructure. Couvre la variante
-/// non-user-scopée héritée ; les variantes `*_for_user` restent pour
-/// une migration ultérieure.
 #[async_trait]
 pub trait MailboxSubscriptionPort: Send + Sync {
     /// IMAP SUBSCRIBE — ajoute la mailbox à la liste des abonnements.
@@ -58,10 +42,8 @@ pub trait MailboxSubscriptionPort: Send + Sync {
 
 /// Port mutation email — opérations sur un email identifié par id.
 ///
-/// Cycle 25 : 4ème port migré depuis `DatabaseInterface`
-/// (`src/logic/traits.rs`). Autonome : signatures 100 % primitives
-/// (`&str`) et aucun type infrastructure. Regroupe les mutations
-/// sur un email identifié par son id (flag update, delete, archive).
+/// Cycle 25 (a) : 4ème port migré depuis `DatabaseInterface`.
+/// Autonome : signatures 100 % primitives (`&str`).
 #[async_trait]
 pub trait EmailMutationPort: Send + Sync {
     /// Met à jour un flag IMAP sur l'email `email_id`.
@@ -70,4 +52,37 @@ pub trait EmailMutationPort: Send + Sync {
     async fn delete_email(&self, email_id: &str) -> DomainResult<()>;
     /// Archive l'email `email_id`.
     async fn archive_email(&self, email_id: &str) -> DomainResult<()>;
+}
+
+/// Port CRUD mailbox — création / suppression / renommage.
+///
+/// Cycle 26 : 5ème port migré depuis `DatabaseInterface`
+/// (`src/logic/traits.rs`). Autonome : signatures 100 % primitives
+/// (`&str`) et aucun type infrastructure. Regroupe les opérations
+/// structurelles sur une mailbox (variante non user-scopée).
+#[async_trait]
+pub trait MailboxCrudPort: Send + Sync {
+    /// IMAP CREATE — crée la mailbox `mailbox`.
+    async fn create_mailbox(&self, mailbox: &str) -> DomainResult<()>;
+    /// IMAP DELETE — supprime la mailbox `mailbox`.
+    async fn delete_mailbox(&self, mailbox: &str) -> DomainResult<()>;
+    /// IMAP RENAME — renomme `old_name` vers `new_name`.
+    async fn rename_mailbox(&self, old_name: &str, new_name: &str) -> DomainResult<()>;
+}
+
+/// Port CRUD mailbox — création / suppression / renommage (non user-scopé).
+///
+/// Cycle 25 (b) : 5ème port migré depuis `DatabaseInterface`
+/// (`src/logic/traits.rs`). Signatures 100 % primitives (`&str`),
+/// aucune dépendance à mongodb / bson / entities. Couvre les
+/// variantes historiques non user-scopées ; les `*_for_user`
+/// correspondantes restent pour un cycle ultérieur.
+#[async_trait]
+pub trait MailboxCrudPort: Send + Sync {
+    /// CREATE — crée une mailbox par nom.
+    async fn create_mailbox(&self, mailbox: &str) -> DomainResult<()>;
+    /// DELETE — supprime une mailbox par nom.
+    async fn delete_mailbox(&self, mailbox: &str) -> DomainResult<()>;
+    /// RENAME — renomme une mailbox (`old_name` → `new_name`).
+    async fn rename_mailbox(&self, old_name: &str, new_name: &str) -> DomainResult<()>;
 }
