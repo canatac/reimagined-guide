@@ -1,6 +1,7 @@
 #![allow(unused_imports, dead_code)]
 use super::super::*;
-use super::send_handlers::*;
+use super::send_pipeline::*;
+use super::send_endpoints::*;
 
 // --- Send queue background worker ---
 
