@@ -194,3 +194,8 @@ pub use simple_smtp_domain::ports::MailboxSessionPort;
 // couvre IMAP SUBSCRIBE / UNSUBSCRIBE (signatures primitives, aucun
 // type infrastructure).
 pub use simple_smtp_domain::ports::MailboxSubscriptionPort;
+
+// Cycle 25 hexagonal — 4ème port migré : `EmailMutationPort` couvre
+// update_email_flag / delete_email / archive_email (signatures &str,
+// aucun type mongodb/bson).
+pub use simple_smtp_domain::ports::EmailMutationPort;
