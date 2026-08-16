@@ -55,3 +55,19 @@ pub trait MailboxSubscriptionPort: Send + Sync {
     /// IMAP UNSUBSCRIBE — retire la mailbox de la liste des abonnements.
     async fn unsubscribe_mailbox(&self, mailbox: &str) -> DomainResult<()>;
 }
+
+/// Port mutation email — opérations sur un email identifié par id.
+///
+/// Cycle 25 : 4ème port migré depuis `DatabaseInterface`
+/// (`src/logic/traits.rs`). Autonome : signatures 100 % primitives
+/// (`&str`) et aucun type infrastructure. Regroupe les mutations
+/// sur un email identifié par son id (flag update, delete, archive).
+#[async_trait]
+pub trait EmailMutationPort: Send + Sync {
+    /// Met à jour un flag IMAP sur l'email `email_id`.
+    async fn update_email_flag(&self, email_id: &str, flag: &str) -> DomainResult<()>;
+    /// Supprime l'email `email_id`.
+    async fn delete_email(&self, email_id: &str) -> DomainResult<()>;
+    /// Archive l'email `email_id`.
+    async fn archive_email(&self, email_id: &str) -> DomainResult<()>;
+}
