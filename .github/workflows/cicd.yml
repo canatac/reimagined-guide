@@ -32,6 +32,17 @@ jobs:
       - name: Cargo check (lib + bins)
         run: cargo check --lib --bins --verbose
 
+      - name: Clippy (deny warnings, soft during cycle 15)
+        run: cargo clippy --workspace --all-targets -- -D warnings || echo "::warning::clippy failed (soft during cycle 15 — baseline 74 warnings to clean incrementally)"
+
+      - name: LOC guard (max 300 lines per file, soft during cycle 15)
+        run: bash scripts/loc_guard.sh || echo "::warning::LOC guard failed (soft during cycle 15)"
+
+      - name: Cyclomatic complexity check (lizard, soft)
+        run: |
+          pip install lizard
+          lizard src -x '*/tests/*' -C 8 -T CCN --warnings_only || true
+
       - name: Architecture guard (hexagonal port discipline)
         run: bash scripts/arch_guard.sh
 
