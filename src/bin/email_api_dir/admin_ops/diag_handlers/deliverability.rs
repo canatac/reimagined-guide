@@ -146,19 +146,18 @@ pub(crate) async fn api_admin_deliverability_diagnostics(
     }))
 }
 
-pub(crate) async fn api_admin_deliverability_procedure(
-    query: web::Query<AdminWindowQuery>,
-    mongo: web::Data<Arc<mongodb::Client>>,
-) -> impl Responder {
-    let domain = env::var("DOMAIN_NAME")
-        .or_else(|_| env::var("MAIL_DOMAIN"))
-        .unwrap_or_else(|_| "misfits.ai".to_string())
-        .trim()
-        .trim_end_matches('.')
-        .to_string();
-    let selector = env::var("KEY_SELECTOR").unwrap_or_else(|_| "default".to_string());
+// --- Helpers privés pour api_admin_deliverability_procedure -----------------
 
-    let spf_rows = dns_txt_lookup(&domain).await;
+struct DnsFindings {
+    dmarc_policy: &'static str,
+    spf_apex_ok: bool,
+    dkim_dns_ok: bool,
+    helo_spf_ok: bool,
+    smtp_public_ip: String,
+}
+
+async fn collect_dns_findings(domain: &str, selector: &str) -> DnsFindings {
+    let spf_rows = dns_txt_lookup(domain).await;
     let dmarc_rows = dns_txt_lookup(&format!("_dmarc.{}", domain)).await;
     let helo_rows = dns_txt_lookup(&format!("mail.{}", domain)).await;
     let dkim_rows = dns_txt_lookup(&format!("{}._domainkey.{}", selector, domain)).await;
@@ -185,23 +184,17 @@ pub(crate) async fn api_admin_deliverability_procedure(
         .any(|row| row.to_ascii_lowercase().contains("v=dkim1"));
     let helo_spf_ok = helo_joined.contains("v=spf1");
 
-    let since = since_str(&query.window);
-    let gmail_blocks = storage::count_events(
-        &mongo,
-        doc! {
-            "ts": {"$gte": &since},
-            "to": {"$regex": "@gmail\\.com$", "$options": "i"},
-            "smtp_reply": {"$regex": "NotAuthorizedError|550-5\\.7\\.1", "$options": "i"}
-        },
-    )
-    .await;
+    DnsFindings { dmarc_policy, spf_apex_ok, dkim_dns_ok, helo_spf_ok, smtp_public_ip }
+}
 
-    let dkim_alerts = simple_smtp_server::security::audit::query_active_alerts(&mongo, 300)
-        .await
-        .into_iter()
-        .filter(|a| a.rule_name.to_ascii_lowercase().contains("dkim"))
-        .count() as u64;
+struct ProcedureState {
+    reminder_enabled: bool,
+    reminder_cadence_hours: u32,
+    reminder_anchor: DateTime<Utc>,
+    checklist_overrides: bson::Document,
+}
 
+async fn load_procedure_state(mongo: &Arc<mongodb::Client>) -> ProcedureState {
     let db = env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
     let coll = mongo
         .database(&db)
@@ -212,50 +205,53 @@ pub(crate) async fn api_admin_deliverability_procedure(
         .ok()
         .flatten();
 
-    let mut reminder_enabled = true;
-    let mut reminder_cadence_hours = 24u32;
-    let mut reminder_anchor = Utc::now();
-    let mut checklist_overrides = bson::Document::new();
+    let mut state = ProcedureState {
+        reminder_enabled: true,
+        reminder_cadence_hours: 24,
+        reminder_anchor: Utc::now(),
+        checklist_overrides: bson::Document::new(),
+    };
 
     if let Some(saved_doc) = saved.as_ref() {
         if let Ok(reminder) = saved_doc.get_document("reminder") {
-            reminder_enabled = reminder.get_bool("enabled").unwrap_or(true);
-            reminder_cadence_hours = reminder
+            state.reminder_enabled = reminder.get_bool("enabled").unwrap_or(true);
+            state.reminder_cadence_hours = reminder
                 .get_i32("cadence_hours")
                 .ok()
                 .map(|v| v.max(1) as u32)
                 .unwrap_or(24);
-
             if let Ok(last_ack_at) = reminder.get_str("last_ack_at") {
                 if let Ok(parsed) = DateTime::parse_from_rfc3339(last_ack_at) {
-                    reminder_anchor = parsed.with_timezone(&Utc);
+                    state.reminder_anchor = parsed.with_timezone(&Utc);
                 }
             }
         }
-
         if let Ok(updated_at) = saved_doc.get_str("updated_at") {
             if let Ok(parsed) = DateTime::parse_from_rfc3339(updated_at) {
-                reminder_anchor = parsed.with_timezone(&Utc);
+                state.reminder_anchor = parsed.with_timezone(&Utc);
             }
         }
-
         if let Ok(overrides) = saved_doc.get_document("checklist_overrides") {
-            checklist_overrides = overrides.clone();
+            state.checklist_overrides = overrides.clone();
         }
     }
+    state
+}
 
-    let next_reminder_due_at = if reminder_enabled {
-        (reminder_anchor + chrono::Duration::hours(reminder_cadence_hours as i64)).to_rfc3339()
-    } else {
-        String::new()
-    };
-
-    let mut checklist = vec![
+fn build_checklist(
+    dns: &DnsFindings,
+    domain: &str,
+    selector: &str,
+    window: &str,
+    gmail_blocks: u64,
+    dkim_alerts: u64,
+) -> Vec<serde_json::Value> {
+    vec![
         serde_json::json!({
             "id": "dmarc-enforcement",
             "title": "Activer DMARC enforcement progressif",
-            "status": if dmarc_policy == "reject" {"done"} else if dmarc_policy == "quarantine" {"in_progress"} else {"todo"},
-            "evidence": format!("policy actuelle: {}", dmarc_policy),
+            "status": if dns.dmarc_policy == "reject" {"done"} else if dns.dmarc_policy == "quarantine" {"in_progress"} else {"todo"},
+            "evidence": format!("policy actuelle: {}", dns.dmarc_policy),
             "cta": {
                 "label": "Mettre à jour _dmarc",
                 "kind": "dns",
@@ -265,63 +261,45 @@ pub(crate) async fn api_admin_deliverability_procedure(
         serde_json::json!({
             "id": "spf-helo",
             "title": "Corriger SPF_HELO_NONE",
-            "status": if helo_spf_ok {"done"} else {"todo"},
-            "evidence": if helo_spf_ok {"TXT SPF trouvé sur mail.<domain>"} else {"TXT SPF absent sur mail.<domain>"},
-            "cta": {
-                "label": "Ajouter TXT SPF HELO",
-                "kind": "dns",
-                "details": "host=mail value=v=spf1 a -all"
-            }
+            "status": if dns.helo_spf_ok {"done"} else {"todo"},
+            "evidence": if dns.helo_spf_ok {"TXT SPF trouvé sur mail.<domain>"} else {"TXT SPF absent sur mail.<domain>"},
+            "cta": {"label": "Ajouter TXT SPF HELO", "kind": "dns", "details": "host=mail value=v=spf1 a -all"}
         }),
         serde_json::json!({
             "id": "dkim-dns",
             "title": "Vérifier la clé DKIM publique",
-            "status": if dkim_dns_ok {"done"} else {"todo"},
+            "status": if dns.dkim_dns_ok {"done"} else {"todo"},
             "evidence": format!("selector {}._domainkey.{}", selector, domain),
-            "cta": {
-                "label": "Valider la clé DKIM",
-                "kind": "dns",
-                "details": format!("dig +short TXT {}._domainkey.{}", selector, domain)
-            }
+            "cta": {"label": "Valider la clé DKIM", "kind": "dns", "details": format!("dig +short TXT {}._domainkey.{}", selector, domain)}
         }),
         serde_json::json!({
             "id": "gmail-policy",
             "title": "Traiter les rejets policy Gmail",
             "status": if gmail_blocks == 0 {"done"} else {"blocked"},
-            "evidence": format!("NotAuthorizedError sur fenêtre {}: {}", query.window, gmail_blocks),
-            "cta": {
-                "label": "Lancer plan warmup Gmail",
-                "kind": "ops",
-                "details": "Réputation IP/domain + Postmaster + ramp-up progressif"
-            }
+            "evidence": format!("NotAuthorizedError sur fenêtre {}: {}", window, gmail_blocks),
+            "cta": {"label": "Lancer plan warmup Gmail", "kind": "ops", "details": "Réputation IP/domain + Postmaster + ramp-up progressif"}
         }),
         serde_json::json!({
             "id": "dkim-runtime",
             "title": "Confirmer absence de régression DKIM",
             "status": if dkim_alerts == 0 {"done"} else {"todo"},
             "evidence": format!("alertes DKIM actives: {}", dkim_alerts),
-            "cta": {
-                "label": "Exécuter un probe externe",
-                "kind": "probe",
-                "details": "Envoyer un test mail-tester + vérifier DKIM/SPF/DMARC"
-            }
+            "cta": {"label": "Exécuter un probe externe", "kind": "probe", "details": "Envoyer un test mail-tester + vérifier DKIM/SPF/DMARC"}
         }),
         serde_json::json!({
             "id": "apex-spf",
             "title": "Conserver SPF apex aligné IP prod",
-            "status": if spf_apex_ok {"done"} else {"todo"},
-            "evidence": format!("SPF apex contient {}: {}", smtp_public_ip, spf_apex_ok),
-            "cta": {
-                "label": "Mettre à jour SPF apex",
-                "kind": "dns",
-                "details": format!("v=spf1 ip4:{} -all", smtp_public_ip)
-            }
+            "status": if dns.spf_apex_ok {"done"} else {"todo"},
+            "evidence": format!("SPF apex contient {}: {}", dns.smtp_public_ip, dns.spf_apex_ok),
+            "cta": {"label": "Mettre à jour SPF apex", "kind": "dns", "details": format!("v=spf1 ip4:{} -all", dns.smtp_public_ip)}
         }),
-    ];
+    ]
+}
 
-    for entry in &mut checklist {
+fn apply_checklist_overrides(checklist: &mut [serde_json::Value], overrides: &bson::Document) {
+    for entry in checklist.iter_mut() {
         if let Some(id) = entry.get("id").and_then(|v| v.as_str()) {
-            if let Ok(override_doc) = checklist_overrides.get_document(id) {
+            if let Ok(override_doc) = overrides.get_document(id) {
                 if let Ok(checked) = override_doc.get_bool("checked") {
                     if checked {
                         entry["status"] = serde_json::json!("done_manual");
@@ -335,7 +313,9 @@ pub(crate) async fn api_admin_deliverability_procedure(
             }
         }
     }
+}
 
+fn compute_procedure_diff(checklist: &[serde_json::Value], gmail_blocks: u64) -> (usize, &'static str) {
     let done_count = checklist
         .iter()
         .filter(|item| {
@@ -345,7 +325,6 @@ pub(crate) async fn api_admin_deliverability_procedure(
                 .unwrap_or(false)
         })
         .count();
-
     let overall_status = if gmail_blocks > 0 {
         "blocked_gmail_policy"
     } else if done_count == checklist.len() {
@@ -353,42 +332,72 @@ pub(crate) async fn api_admin_deliverability_procedure(
     } else {
         "in_progress"
     };
+    (done_count, overall_status)
+}
+
+pub(crate) async fn api_admin_deliverability_procedure(
+    query: web::Query<AdminWindowQuery>,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    let domain = env::var("DOMAIN_NAME")
+        .or_else(|_| env::var("MAIL_DOMAIN"))
+        .unwrap_or_else(|_| "misfits.ai".to_string())
+        .trim()
+        .trim_end_matches('.')
+        .to_string();
+    let selector = env::var("KEY_SELECTOR").unwrap_or_else(|_| "default".to_string());
+
+    let dns = collect_dns_findings(&domain, &selector).await;
+
+    let since = since_str(&query.window);
+    let gmail_blocks = storage::count_events(
+        &mongo,
+        doc! {
+            "ts": {"$gte": &since},
+            "to": {"$regex": "@gmail\\.com$", "$options": "i"},
+            "smtp_reply": {"$regex": "NotAuthorizedError|550-5\\.7\\.1", "$options": "i"}
+        },
+    )
+    .await;
+    let dkim_alerts = simple_smtp_server::security::audit::query_active_alerts(&mongo, 300)
+        .await
+        .into_iter()
+        .filter(|a| a.rule_name.to_ascii_lowercase().contains("dkim"))
+        .count() as u64;
+
+    let state = load_procedure_state(&mongo).await;
+    let next_reminder_due_at = if state.reminder_enabled {
+        (state.reminder_anchor + chrono::Duration::hours(state.reminder_cadence_hours as i64))
+            .to_rfc3339()
+    } else {
+        String::new()
+    };
+
+    let mut checklist =
+        build_checklist(&dns, &domain, &selector, &query.window, gmail_blocks, dkim_alerts);
+    apply_checklist_overrides(&mut checklist, &state.checklist_overrides);
+    let (done_count, overall_status) = compute_procedure_diff(&checklist, gmail_blocks);
 
     HttpResponse::Ok().json(serde_json::json!({
         "window": query.window,
         "domain": domain,
         "overall_status": overall_status,
-        "progress": {
-            "done": done_count,
-            "total": checklist.len()
-        },
+        "progress": {"done": done_count, "total": checklist.len()},
         "automation": {
             "auto_checks": ["dns_txt", "smtp_events", "security_alerts"],
             "last_computed_at": Utc::now().to_rfc3339(),
             "next_recompute_hint": "refresh tab or call endpoint"
         },
         "reminder": {
-            "enabled": reminder_enabled,
-            "cadence_hours": reminder_cadence_hours,
+            "enabled": state.reminder_enabled,
+            "cadence_hours": state.reminder_cadence_hours,
             "next_due_at": next_reminder_due_at
         },
         "checklist": checklist,
         "cta_details": [
-            {
-                "id": "run_external_probe",
-                "label": "Lancer un test externe",
-                "description": "Envoi test + vérification mail-tester + trace monitoring"
-            },
-            {
-                "id": "publish_dmarc_stage",
-                "label": "Publier DMARC stage suivant",
-                "description": "none -> quarantine(25) -> quarantine(100) -> reject(100)"
-            },
-            {
-                "id": "ack_review",
-                "label": "Marquer revue hebdomadaire",
-                "description": "Cocher les items validés et conserver une note opérateur"
-            }
+            {"id": "run_external_probe", "label": "Lancer un test externe", "description": "Envoi test + vérification mail-tester + trace monitoring"},
+            {"id": "publish_dmarc_stage", "label": "Publier DMARC stage suivant", "description": "none -> quarantine(25) -> quarantine(100) -> reject(100)"},
+            {"id": "ack_review", "label": "Marquer revue hebdomadaire", "description": "Cocher les items validés et conserver une note opérateur"}
         ]
     }))
 }
