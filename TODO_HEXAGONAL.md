@@ -58,3 +58,13 @@ Estimation : ~40 méthodes × 2 (trait + impl) = ~80 modifications ; risque de c
 ## Suivi
 - Métrique clé : `bash scripts/domain_purity_audit.sh` → compteur = 0.
 - LOC `crates/domain/src/` cible : ≤ 400 LOC après extraction ports.
+
+## KPI baseline post-cycle 21
+
+Garde-fous soft CI branchés (mode warning, non bloquants) :
+
+- **CCN (lizard, seuil 8)** : baseline mesurée en CI — voir logs step "KPI - Complexity CCN audit"
+- **Coverage domain (cargo-llvm-cov, seuil 90%)** : baseline mesurée — actuellement pas de tests → 0% attendu, target 90%
+- **Ports migration** : baseline locale = 0 ports dans `crates/domain/`, **5 ports** encore dans `src/logic/traits.rs` → objectif 0.
+
+Scripts : `scripts/complexity_audit.sh`, `scripts/domain_coverage_audit.sh`, `scripts/ports_migration_audit.sh`.
