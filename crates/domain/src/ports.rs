@@ -70,4 +70,26 @@ pub trait MailboxCrudPort: Send + Sync {
     async fn rename_mailbox(&self, old_name: &str, new_name: &str) -> DomainResult<()>;
 }
 
-
+/// Port message store / flags — opérations IMAP sur séquences de messages.
+///
+/// Cycle 27 : 6ème port migré depuis `DatabaseInterface`
+/// (`src/logic/traits.rs`). Autonome : signatures 100 % primitives
+/// (`&str`, `Vec<String>`, `Vec<u32>`) — aucun type infrastructure.
+/// Regroupe les opérations IMAP au niveau messages : SEARCH,
+/// EXPUNGE, COPY, STORE flags.
+#[async_trait]
+pub trait MessageStoreFlagsPort: Send + Sync {
+    /// IMAP SEARCH — retourne les UIDs matchant `criteria`.
+    async fn search_messages(&self, criteria: &str) -> DomainResult<Vec<u32>>;
+    /// IMAP EXPUNGE — purge les messages `\Deleted` et retourne leurs séquences.
+    async fn expunge_mailbox(&self) -> DomainResult<Vec<u32>>;
+    /// IMAP COPY — copie `sequence_set` vers `target_mailbox`.
+    async fn copy_messages(&self, sequence_set: &str, target_mailbox: &str) -> DomainResult<()>;
+    /// IMAP STORE — applique `flags` sur `sequence_set` selon `mode` (`+FLAGS` / `-FLAGS` / `FLAGS`).
+    async fn store_flags(
+        &self,
+        sequence_set: &str,
+        flags: Vec<String>,
+        mode: &str,
+    ) -> DomainResult<()>;
+}

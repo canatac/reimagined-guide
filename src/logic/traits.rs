@@ -204,3 +204,8 @@ pub use simple_smtp_domain::ports::EmailMutationPort;
 // IMAP CREATE / DELETE / RENAME (variantes non user-scopées).
 // Signatures 100 % primitives (`&str`), aucun type infrastructure.
 pub use simple_smtp_domain::ports::MailboxCrudPort;
+
+// Cycle 27 hexagonal — 6ème port migré : `MessageStoreFlagsPort` couvre
+// IMAP SEARCH / EXPUNGE / COPY / STORE (signatures primitives : &str,
+// Vec<String>, Vec<u32>). Aucun type infrastructure.
+pub use simple_smtp_domain::ports::MessageStoreFlagsPort;
