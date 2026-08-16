@@ -70,19 +70,4 @@ pub trait MailboxCrudPort: Send + Sync {
     async fn rename_mailbox(&self, old_name: &str, new_name: &str) -> DomainResult<()>;
 }
 
-/// Port CRUD mailbox — création / suppression / renommage (non user-scopé).
-///
-/// Cycle 25 (b) : 5ème port migré depuis `DatabaseInterface`
-/// (`src/logic/traits.rs`). Signatures 100 % primitives (`&str`),
-/// aucune dépendance à mongodb / bson / entities. Couvre les
-/// variantes historiques non user-scopées ; les `*_for_user`
-/// correspondantes restent pour un cycle ultérieur.
-#[async_trait]
-pub trait MailboxCrudPort: Send + Sync {
-    /// CREATE — crée une mailbox par nom.
-    async fn create_mailbox(&self, mailbox: &str) -> DomainResult<()>;
-    /// DELETE — supprime une mailbox par nom.
-    async fn delete_mailbox(&self, mailbox: &str) -> DomainResult<()>;
-    /// RENAME — renomme une mailbox (`old_name` → `new_name`).
-    async fn rename_mailbox(&self, old_name: &str, new_name: &str) -> DomainResult<()>;
-}
+
