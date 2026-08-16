@@ -128,3 +128,21 @@ pub trait ExternalImapAccountQueryPort: Send + Sync {
         owner_user_id: &str,
     ) -> DomainResult<Vec<crate::ExternalImapAccount>>;
 }
+
+/// Port autonome pour lister les mailboxes IMAP d'un utilisateur.
+///
+/// Port hexagonal (cycle 31, 9ème port) exposant l'opération LIST IMAP.
+/// Autonome : dépend uniquement de primitives (`&str`, `String`).
+/// Sépare la logique de listing mailbox de l'infrastructure de stockage
+/// (MongoDB, filesystem Maildir, etc.).
+#[async_trait]
+pub trait MailboxListPort: Send + Sync {
+    /// Liste les mailboxes de `username` matchant `reference`/`mailbox`
+    /// (sémantique IMAP LIST — wildcards `%` et `*` supportés côté impl).
+    async fn list_mailboxes(
+        &self,
+        username: &str,
+        reference: &str,
+        mailbox: &str,
+    ) -> DomainResult<Vec<String>>;
+}
