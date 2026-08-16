@@ -237,6 +237,7 @@ pub mod cr_handlers;
 pub mod cr_patch_helpers;
 pub mod ai_handlers;
 pub mod hermes_handlers;
+pub mod hermes_events;
 pub mod diag_handlers;
 
 pub use user_handlers::*;
@@ -244,4 +245,5 @@ pub use cr_handlers::*;
 pub use cr_patch_helpers::*;
 pub use ai_handlers::*;
 pub use hermes_handlers::*;
+pub use hermes_events::*;
 pub use diag_handlers::*;
