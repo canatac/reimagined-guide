@@ -1,6 +1,7 @@
 // mailbox/mod.rs — re-exports uniquement (split Sprint 15)
 pub mod read_handlers;
-pub mod send_handlers;
+pub mod send_pipeline;
+pub mod send_endpoints;
 pub mod send_queue_worker;
 pub mod single_handlers;
 pub mod drafts_handlers;
@@ -15,7 +16,8 @@ mod mime_utils;
 pub(crate) use super::*;
 
 pub use read_handlers::*;
-pub use send_handlers::*;
+pub use send_pipeline::*;
+pub use send_endpoints::*;
 pub use send_queue_worker::*;
 pub use single_handlers::*;
 pub use drafts_handlers::*;
