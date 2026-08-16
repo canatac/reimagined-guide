@@ -164,10 +164,10 @@ pub(crate) fn redact_account(mut a: ExternalImapAccount) -> ExternalImapAccount 
     a
 }
 
-pub(crate) fn parse_rfc3339_as_bson(s: &String) -> Option<bson::DateTime> {
+pub(crate) fn parse_rfc3339_as_bson(s: &String) -> Option<chrono::DateTime<chrono::Utc>> {
     chrono::DateTime::parse_from_rfc3339(s)
         .ok()
-        .map(|dt| bson::DateTime::from_millis(dt.timestamp_millis()))
+        .map(|dt| dt.with_timezone(&chrono::Utc))
 }
 
 pub(crate) fn infer_role(remote_name: &str) -> String {
