@@ -257,10 +257,3 @@ pub(crate) async fn api_admin_user_delete(
         }
     }
 }
-
-/// PR1 (RBAC) — GET /api/admin/whoami
-///
-/// Utilisé par le frontend pour connaître le rôle réel de l'utilisateur
-/// courant et adapter l'UI (viewer vs admin). Respecte le feature flag :
-/// - RBAC OFF → répond `{ role: "admin", email: "system@...", enforced: false }`
-///   (compat rétro : le front continue à voir un admin).

@@ -290,6 +290,3 @@ pub(crate) fn register_admin_routes(cfg: &mut web::ServiceConfig) {
             web::get().to(api_admin_observability_overview),
         );
 }
-
-/// Register all HTTP routes on the given ServiceConfig.
-///
