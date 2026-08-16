@@ -112,7 +112,7 @@ pub(crate) async fn api_swagger_ui() -> impl Responder {
 }
 
 pub(crate) async fn api_external_openapi() -> impl Responder {
-    static OPENAPI_YAML: &str = include_str!("../../../ops/openapi/external-imap-v1.yaml");
+    static OPENAPI_YAML: &str = include_str!("../../../../ops/openapi/external-imap-v1.yaml");
     HttpResponse::Ok()
         .content_type("application/yaml; charset=utf-8")
         .body(OPENAPI_YAML)
