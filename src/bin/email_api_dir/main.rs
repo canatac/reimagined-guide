@@ -60,6 +60,7 @@ mod deliverability_dto;
 mod mailing_list;
 mod dkim_service;
 mod startup;
+mod startup_routes;
 #[cfg(test)] mod main_tests;
 pub use event_bus::*;
 pub use deliverability_dto::*;
