@@ -84,7 +84,7 @@ impl ExternalImapService {
 
         // Compute the SEARCH SINCE date from run.since (default: today).
         let since_bson = run.since.unwrap_or_else(|| {
-            bson::DateTime::from_millis(Utc::now().timestamp_millis())
+            Utc::now()
         });
         let since_chrono = chrono::DateTime::<Utc>::from_timestamp_millis(
             since_bson.timestamp_millis(),
@@ -133,19 +133,15 @@ impl ExternalImapService {
 
         // Persist headers: dedupe on (account_id, remote_uid) via replace_one
         // upsert to keep the sync idempotent.
-        let now = bson::DateTime::from_millis(Utc::now().timestamp_millis());
+        let now = Utc::now();
         let mut fetched = 0u64;
         let folder_id = inbox_folder.as_ref().map(|f| f.id.clone());
 
         for h in fetched_headers {
             let msg_id_header = h.message_id.clone();
             let dedup = format!("uid:{}:{}", account.id, h.uid);
-            let internal_dt = h
-                .internal_date
-                .map(|dt| bson::DateTime::from_millis(dt.timestamp_millis()));
-            let sent_dt = h
-                .date
-                .map(|dt| bson::DateTime::from_millis(dt.timestamp_millis()));
+            let internal_dt = h.internal_date;
+            let sent_dt = h.date;
 
             let doc_id = Uuid::new_v4().to_string();
             let msg = ExternalImapMessage {
@@ -185,9 +181,9 @@ impl ExternalImapService {
             .update_one(
                 doc! { "ownerUserId": owner_user_id, "id": &account.id },
                 doc! { "$set": {
-                    "lastSyncAt": bson::DateTime::from_millis(Utc::now().timestamp_millis()),
+                    "lastSyncAt": Utc::now(),
                     "lastError": bson::Bson::Null,
-                    "updatedAt": bson::DateTime::from_millis(Utc::now().timestamp_millis())
+                    "updatedAt": Utc::now()
                 }},
             )
             .await?;
