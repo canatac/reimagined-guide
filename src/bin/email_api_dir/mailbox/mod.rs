@@ -1,11 +1,13 @@
 // mailbox/mod.rs — split from mailbox_handlers.rs (Sprint 8)
 pub mod read_handlers;
 pub mod send_handlers;
+pub mod send_queue_worker;
 pub mod single_handlers;
 pub mod drafts_handlers;
 
 pub use read_handlers::*;
 pub use send_handlers::*;
+pub use send_queue_worker::*;
 pub use single_handlers::*;
 pub use drafts_handlers::*;
 
