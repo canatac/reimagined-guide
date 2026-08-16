@@ -198,10 +198,10 @@ pub(crate) struct CalendarQueryParams {
     end: Option<String>, // ISO 8601
 }
 
-pub(crate) fn parse_iso_to_bson(s: &str) -> Option<bson::DateTime> {
+pub(crate) fn parse_iso_to_bson(s: &str) -> Option<chrono::DateTime<chrono::Utc>> {
     chrono::DateTime::parse_from_rfc3339(s)
         .ok()
-        .map(|dt| bson::DateTime::from_millis(dt.timestamp_millis()))
+        .map(|dt| dt.with_timezone(&chrono::Utc))
 }
 
 pub(crate) fn get_user_from_headers(req: &actix_web::HttpRequest) -> String {
