@@ -113,7 +113,7 @@ fn default_color() -> String {
 
 impl CalendarEvent {
     pub fn new(user_id: &str, title: &str, start: DateTime<Utc>, end: DateTime<Utc>) -> Self {
-        let now = DateTime<Utc>::from_millis(chrono::Utc::now().timestamp_millis());
+        let now = chrono::Utc::now();
         CalendarEvent {
             id: uuid::Uuid::new_v4().to_string(),
             user_id: user_id.to_string(),
@@ -162,7 +162,7 @@ impl Email {
             flags: Vec::new(),
             sequence_number: 0,
             uid: 0,
-            internal_date: DateTime<Utc>::from_millis(chrono::Utc::now().timestamp_millis()),
+            internal_date: chrono::Utc::now(),
             dkim_signature: None,
         }
     }
