@@ -78,11 +78,11 @@ pub(crate) fn strip_tags(html: &str) -> String {
     out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn compact_preview(text: &str) -> String {
+pub(super) fn compact_preview(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn raw_mime_from_email(email: &Email) -> String {
+pub(super) fn raw_mime_from_email(email: &Email) -> String {
     if email.headers.is_empty() {
         email.body.clone()
     } else {
@@ -96,7 +96,7 @@ fn raw_mime_from_email(email: &Email) -> String {
     }
 }
 
-fn walk_mime_parts(part: &mailparse::ParsedMail<'_>, html: &mut Option<String>, text: &mut Option<String>) {
+pub(super) fn walk_mime_parts(part: &mailparse::ParsedMail<'_>, html: &mut Option<String>, text: &mut Option<String>) {
     if part.subparts.is_empty() {
         let mt = part.ctype.mimetype.to_ascii_lowercase();
         if mt == "text/html" && html.is_none() {
@@ -116,7 +116,7 @@ fn walk_mime_parts(part: &mailparse::ParsedMail<'_>, html: &mut Option<String>, 
     }
 }
 
-fn decode_parts_from_parsed(parsed: &mailparse::ParsedMail<'_>) -> Option<(String, String, String)> {
+pub(super) fn decode_parts_from_parsed(parsed: &mailparse::ParsedMail<'_>) -> Option<(String, String, String)> {
     let mut html = None;
     let mut text = None;
     walk_mime_parts(parsed, &mut html, &mut text);
@@ -133,12 +133,12 @@ fn decode_parts_from_parsed(parsed: &mailparse::ParsedMail<'_>) -> Option<(Strin
     None
 }
 
-fn looks_like_raw_multipart_dump(body: &str) -> bool {
+pub(super) fn looks_like_raw_multipart_dump(body: &str) -> bool {
     let b = body.trim_start();
     b.starts_with("--") && b.contains("Content-Type:")
 }
 
-fn decode_from_synthetic_boundary(body: &str) -> Option<(String, String, String)> {
+pub(super) fn decode_from_synthetic_boundary(body: &str) -> Option<(String, String, String)> {
     let first_line = body.lines().next()?.trim();
     if !first_line.starts_with("--") {
         return None;
@@ -159,7 +159,7 @@ fn decode_from_synthetic_boundary(body: &str) -> Option<(String, String, String)
     decode_parts_from_parsed(&parsed)
 }
 
-fn infer_attachment_kind(content_type: &str, filename: &str) -> &'static str {
+pub(super) fn infer_attachment_kind(content_type: &str, filename: &str) -> &'static str {
     let ct = content_type.to_ascii_lowercase();
     let lower_name = filename.to_ascii_lowercase();
     if ct.starts_with("image/") {
@@ -202,246 +202,6 @@ fn infer_attachment_kind(content_type: &str, filename: &str) -> &'static str {
     }
 }
 
-#[derive(Clone)]
-pub(crate) struct ExtractedAttachment {
-    pub id: String,
-    pub filename: String,
-    pub content_type: String,
-    pub size: u64,
-    pub kind: String,
-    pub data: Vec<u8>,
-}
-
-fn walk_mime_attachments(
-    part: &mailparse::ParsedMail<'_>,
-    out: &mut Vec<ExtractedAttachment>,
-    index: &mut usize,
-) {
-    if !part.subparts.is_empty() {
-        for sub in &part.subparts {
-            walk_mime_attachments(sub, out, index);
-        }
-        return;
-    }
-
-    let content_type = part.ctype.mimetype.to_ascii_lowercase();
-    let disp = part.get_content_disposition();
-    let disp_kind = format!("{:?}", disp.disposition).to_ascii_lowercase();
-    let filename = disp
-        .params
-        .get("filename")
-        .cloned()
-        .or_else(|| part.ctype.params.get("name").cloned())
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| format!("attachment-{}", *index + 1));
-
-    let is_attachment = disp_kind == "attachment"
-        || disp.params.contains_key("filename")
-        || part.ctype.params.contains_key("name")
-        || (!content_type.starts_with("text/") && content_type != "application/pgp-signature");
-
-    if !is_attachment {
-        return;
-    }
-
-    let bytes = part.get_body_raw().unwrap_or_default();
-    let kind = infer_attachment_kind(&content_type, &filename).to_string();
-    let id = format!("att-{}", *index);
-    *index += 1;
-
-    out.push(ExtractedAttachment {
-        id,
-        filename,
-        content_type,
-        size: bytes.len() as u64,
-        kind,
-        data: bytes,
-    });
-}
-
-pub(crate) fn extract_attachments_for_ui(email: &Email) -> Vec<ExtractedAttachment> {
-    let raw_mime = raw_mime_from_email(email);
-    if let Ok(parsed) = mailparse::parse_mail(raw_mime.as_bytes()) {
-        let mut out = Vec::new();
-        let mut idx = 0usize;
-        walk_mime_attachments(&parsed, &mut out, &mut idx);
-        return out;
-    }
-
-    if looks_like_raw_multipart_dump(&email.body) {
-        let first_line = match email.body.lines().next() {
-            Some(l) => l.trim(),
-            None => return Vec::new(),
-        };
-        let boundary = first_line
-            .trim_start_matches("--")
-            .trim_end_matches("--")
-            .trim();
-        if boundary.is_empty() {
-            return Vec::new();
-        }
-        let synthetic = format!(
-            "Content-Type: multipart/mixed; boundary=\"{}\"\r\n\r\n{}",
-            boundary, email.body
-        );
-        if let Ok(parsed) = mailparse::parse_mail(synthetic.as_bytes()) {
-            let mut out = Vec::new();
-            let mut idx = 0usize;
-            walk_mime_attachments(&parsed, &mut out, &mut idx);
-            return out;
-        }
-    }
-
-    Vec::new()
-}
-
-fn decoded_mail_body_for_ui(email: &Email) -> (String, String, String) {
-    let raw_mime = raw_mime_from_email(email);
-
-    if let Ok(parsed) = mailparse::parse_mail(raw_mime.as_bytes()) {
-        if let Some(decoded) = decode_parts_from_parsed(&parsed) {
-            return decoded;
-        }
-
-        if let Ok(body) = parsed.get_body() {
-            if looks_like_raw_multipart_dump(&body) {
-                if let Some(decoded) = decode_from_synthetic_boundary(&body) {
-                    return decoded;
-                }
-            }
-
-            let looks_html = body.to_ascii_lowercase().contains("<html")
-                || body.contains("</")
-                || body.contains("<p");
-            if looks_html {
-                let preview = compact_preview(&strip_tags(&body)).chars().take(160).collect();
-                return (body, "html".to_string(), preview);
-            }
-            let preview = compact_preview(&body).chars().take(160).collect();
-            return (body, "text".to_string(), preview);
-        }
-    }
-
-    if let Some(decoded) = decode_from_synthetic_boundary(&email.body) {
-        return decoded;
-    }
-
-    let body_type = if email.body.to_ascii_lowercase().contains("<html")
-        || email.body.contains("</")
-        || email.body.contains("<p")
-    {
-        "html"
-    } else {
-        "text"
-    };
-    let plain = if body_type == "html" {
-        strip_tags(&email.body)
-    } else {
-        email.body.clone()
-    };
-    let preview = compact_preview(&plain).chars().take(160).collect();
-    (email.body.clone(), body_type.to_string(), preview)
-}
-
-pub(crate) fn email_to_dto(email: &Email, folder: &str, include_body: bool) -> EmailDto {
-    let flags_l: Vec<String> = email.flags.iter().map(|f| f.to_ascii_lowercase()).collect();
-    let is_read = flags_l.iter().any(|f| f == "seen" || f == "\\seen");
-    let is_starred = flags_l
-        .iter()
-        .any(|f| f == "flagged" || f == "\\flagged" || f == "starred");
-    let (decoded_body, body_type, preview) = decoded_mail_body_for_ui(email);
-    let date = {
-        let ms = email.internal_date.timestamp_millis();
-        chrono::DateTime::from_timestamp_millis(ms)
-            .map(|d| d.to_rfc3339())
-            .unwrap_or_else(|| Utc::now().to_rfc3339())
-    };
-    let message_id = email
-        .headers
-        .iter()
-        .find_map(|(k, v)| {
-            if k.eq_ignore_ascii_case("message-id") && !v.is_empty() {
-                Some(v.clone())
-            } else if k.to_ascii_lowercase().starts_with("message-id:") {
-                let val = k.splitn(2, ':').nth(1).unwrap_or("").trim();
-                if !val.is_empty() {
-                    Some(val.to_string())
-                } else if !v.is_empty() {
-                    Some(v.clone())
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        })
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| {
-            if !email.id.is_empty() {
-                email.id.clone()
-            } else if email.uid > 0 {
-                format!("uid-{}", email.uid)
-            } else {
-                Uuid::new_v4().to_string()
-            }
-        });
-    let id = if email.id.is_empty() {
-        message_id
-            .trim_matches(|c| c == '<' || c == '>')
-            .to_string()
-    } else {
-        email.id.clone()
-    };
-    let to_list: Vec<EmailAddressDto> = email
-        .to
-        .split(',')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(parse_address)
-        .collect();
-    let attachments = extract_attachments_for_ui(email);
-    let attachments_json: Vec<serde_json::Value> = attachments
-        .iter()
-        .map(|att| {
-            serde_json::json!({
-                "id": att.id,
-                "filename": att.filename,
-                "contentType": att.content_type,
-                "size": att.size,
-                "type": att.kind,
-                "downloadUrl": format!("/api/emails/{}/attachments/{}", id, att.id),
-            })
-        })
-        .collect();
-
-    EmailDto {
-        id,
-        thread_id: message_id.clone(),
-        folder: folder.to_ascii_lowercase(),
-        from: parse_address(&email.from),
-        to: to_list,
-        subject: email.subject.clone(),
-        preview,
-        body: if include_body {
-            decoded_body.clone()
-        } else {
-            String::new()
-        },
-        body_type,
-        date: date.clone(),
-        received_at: date,
-        is_read,
-        is_starred,
-        is_important: false,
-        has_attachments: !attachments_json.is_empty(),
-        attachments: attachments_json,
-        labels: vec![],
-        size: email.body.len() as u64,
-        message_id,
-    }
-}
-
-// Silence unused import lint for base64 which is used transitively by some subcrates.
 #[allow(dead_code)]
 fn _touch_base64(s: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(s)
