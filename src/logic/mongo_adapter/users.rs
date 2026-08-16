@@ -62,7 +62,7 @@ impl MongoDatabaseAdapter {
         mailbox: &str,
     ) -> Result<()> {
         // Délègue à insert_user pour cohérence (même chemin).
-        self.insert_user(User {
+        self.insert_user_impl(User {
             id: None,
             username: username.to_string(),
             password: password.to_string(),
