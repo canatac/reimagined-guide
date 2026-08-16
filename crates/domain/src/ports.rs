@@ -40,3 +40,18 @@ pub trait MailboxSessionPort: Send + Sync {
     /// IMAP CHECK — flush de l'état de la mailbox courante.
     async fn check_mailbox(&self) -> DomainResult<()>;
 }
+
+/// Port souscription mailbox — IMAP SUBSCRIBE / UNSUBSCRIBE.
+///
+/// Cycle 24 : 3ème port migré depuis `DatabaseInterface`
+/// (`src/logic/traits.rs`). Autonome : signatures 100 % primitives
+/// (`&str`) et pas de types infrastructure. Couvre la variante
+/// non-user-scopée héritée ; les variantes `*_for_user` restent pour
+/// une migration ultérieure.
+#[async_trait]
+pub trait MailboxSubscriptionPort: Send + Sync {
+    /// IMAP SUBSCRIBE — ajoute la mailbox à la liste des abonnements.
+    async fn subscribe_mailbox(&self, mailbox: &str) -> DomainResult<()>;
+    /// IMAP UNSUBSCRIBE — retire la mailbox de la liste des abonnements.
+    async fn unsubscribe_mailbox(&self, mailbox: &str) -> DomainResult<()>;
+}
