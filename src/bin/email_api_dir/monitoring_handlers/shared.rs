@@ -4,8 +4,6 @@
 use chrono::Utc;
 use serde::Deserialize;
 
-// ─── Shared helpers ────────────────────────────────────────────────────────
-
 pub(crate) fn parse_window(s: &str) -> chrono::Duration {
     let s = s.trim();
     if let Some(n) = s.strip_suffix('m').and_then(|n| n.parse::<i64>().ok()) {
@@ -24,29 +22,12 @@ pub(crate) fn since_str(window: &str) -> String {
     (Utc::now() - dur).to_rfc3339()
 }
 
-pub(crate) fn default_monitoring_window() -> String {
-    "15m".into()
-}
-
-pub(crate) fn default_window() -> String {
-    "1h".into()
-}
-
-pub(crate) fn default_mon_page() -> u32 {
-    1
-}
-pub(crate) fn default_mon_page_size() -> u32 {
-    50
-}
-
-pub(crate) fn one() -> u32 {
-    1
-}
-pub(crate) fn twenty() -> u32 {
-    20
-}
-
-// ─── Query types ───────────────────────────────────────────────────────────
+pub(crate) fn default_monitoring_window() -> String { "15m".into() }
+pub(crate) fn default_window() -> String { "1h".into() }
+pub(crate) fn default_mon_page() -> u32 { 1 }
+pub(crate) fn default_mon_page_size() -> u32 { 50 }
+pub(crate) fn one() -> u32 { 1 }
+pub(crate) fn twenty() -> u32 { 20 }
 
 #[derive(Deserialize)]
 pub(crate) struct MonitoringWindowQuery {
@@ -98,8 +79,6 @@ pub(crate) struct SecurityIncidentsQuery {
     pub tenant_id: Option<String>,
     pub severity: Option<String>,
 }
-
-// ─── Misc helpers used by admin_ops_handlers via super::* ─────────────
 
 pub(crate) fn env_bool(name: &str, default: bool) -> bool {
     match std::env::var(name) {
