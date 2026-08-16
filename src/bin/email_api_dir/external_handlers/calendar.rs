@@ -1,6 +1,71 @@
 #![allow(unused_imports, dead_code)]
 use super::super::*;
 
+#[derive(Deserialize)]
+pub(crate) struct CreateCalendarEventRequest {
+    title: String,
+    #[serde(default)]
+    description: String,
+    start: String, // ISO 8601
+    end: String,   // ISO 8601
+    #[serde(default = "default_event_type_str")]
+    event_type: String,
+    #[serde(default = "default_color_str")]
+    color: String,
+    #[serde(default)]
+    location: String,
+}
+
+pub(crate) fn default_event_type_str() -> String {
+    "default".to_string()
+}
+pub(crate) fn default_color_str() -> String {
+    "#3788d8".to_string()
+}
+
+#[derive(Deserialize)]
+pub(crate) struct UpdateCalendarEventRequest {
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    start: Option<String>,
+    #[serde(default)]
+    end: Option<String>,
+    #[serde(default)]
+    event_type: Option<String>,
+    #[serde(default)]
+    color: Option<String>,
+    #[serde(default)]
+    location: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct CalendarQueryParams {
+    #[serde(default)]
+    start: Option<String>, // ISO 8601
+    #[serde(default)]
+    end: Option<String>, // ISO 8601
+}
+
+pub(crate) fn parse_iso_to_bson(s: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    chrono::DateTime::parse_from_rfc3339(s)
+        .ok()
+        .map(|dt| dt.with_timezone(&chrono::Utc))
+}
+
+pub(crate) fn get_user_from_headers(req: &actix_web::HttpRequest) -> String {
+    if let Some(email) = req
+        .headers()
+        .get("x-user-email")
+        .and_then(|v| v.to_str().ok())
+    {
+        return email.to_string();
+    }
+    env::var("SMTP_USERNAME").unwrap_or_else(|_| "admin@misfits.ai".to_string())
+}
+
 // --- Calendar handlers ---
 
 pub(crate) async fn calendar_create_event(
@@ -168,4 +233,3 @@ pub(crate) async fn calendar_delete_event(
         }
     }
 }
-
