@@ -8,6 +8,12 @@ pub mod drafts_handlers;
 mod folder_utils;
 mod mime_utils;
 
+// Le mod.rs originel exposait via glob les types du parent (Arc, Logic, Email,
+// Responder, bson, monitoring, ...). Après split minimal (helpers déplacés),
+// les sous-modules continuent d'utiliser `use super::*;` — donc on doit
+// propager le glob du parent depuis ici pour préserver leur surface.
+pub(crate) use super::*;
+
 pub use read_handlers::*;
 pub use send_handlers::*;
 pub use send_queue_worker::*;
