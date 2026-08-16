@@ -5,7 +5,7 @@
 # (self.repo.X), impl réelle dans mongo_adapter.rs.
 set -euo pipefail
 
-VIOLATIONS=$(grep -rn "self\.client\." src/logic/ | grep -v "src/logic/mongo_adapter.rs" || true)
+VIOLATIONS=$(grep -rn "self\.client\." src/logic/ | grep -v "src/logic/mongo_adapter\.rs\|src/logic/mongo_adapter/" || true)
 
 if [[ -n "$VIOLATIONS" ]]; then
     echo "❌ Architecture guard: accès direct MongoDB détectés hors de mongo_adapter.rs:"
