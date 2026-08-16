@@ -93,3 +93,17 @@ pub trait MessageStoreFlagsPort: Send + Sync {
         mode: &str,
     ) -> DomainResult<()>;
 }
+
+/// Port lecture emails — requêtes read-only sur emails/mailboxes.
+///
+/// Cycle 28 : 7ème port migré depuis `DatabaseInterface`
+/// (`src/logic/traits.rs`). Autonome : dépend uniquement de
+/// `Email` (type domaine pur) et primitives (`&str`). Regroupe
+/// les opérations IMAP de lecture emails : FETCH par mailbox / par id.
+#[async_trait]
+pub trait EmailQueryPort: Send + Sync {
+    /// Liste tous les emails de `mailbox`.
+    async fn find_emails(&self, mailbox: &str) -> DomainResult<Vec<crate::Email>>;
+    /// Récupère un email par son `email_id`, ou `None` s'il n'existe pas.
+    async fn find_email(&self, email_id: &str) -> DomainResult<Option<crate::Email>>;
+}
