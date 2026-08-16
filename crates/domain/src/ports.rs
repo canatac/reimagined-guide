@@ -180,3 +180,15 @@ pub trait UserRegistrationPort: Send + Sync {
         password: &str,
     ) -> DomainResult<bool>;
 }
+
+/// Port message search — recherche IMAP SEARCH.
+///
+/// Cycle 33 : 12ème port autonome. Signatures 100 % primitives (`&str`, `u32`).
+/// Couvre l'opération `search_messages` de la couche `DatabaseInterface`
+/// historique (sémantique IMAP SEARCH — retourne les UIDs matchant).
+#[async_trait]
+pub trait MessageSearchPort: Send + Sync {
+    /// Recherche les messages correspondant à `criteria` (syntaxe IMAP SEARCH).
+    /// Retourne la liste des UIDs matchant.
+    async fn search_messages(&self, criteria: &str) -> DomainResult<Vec<u32>>;
+}
