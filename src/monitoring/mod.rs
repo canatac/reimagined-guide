@@ -1,9 +1,11 @@
 pub mod alerts;
 pub mod enrichment;
+pub mod parse;
 pub mod storage;
 
 pub use alerts::{ActiveAlert, AlertConfig};
 pub use enrichment::GeoInfo;
+pub use parse::parse_smtp_code;
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -239,12 +241,6 @@ impl SmtpEvent {
 
         self.risk_score = Some(score.min(100.0));
     }
-}
-
-/// Parse SMTP error code from an error string (e.g. "Unexpected response: 550 …").
-pub fn parse_smtp_code(msg: &str) -> Option<u16> {
-    msg.split_whitespace()
-        .find_map(|w| w.parse::<u16>().ok().filter(|&c| (200..600).contains(&c)))
 }
 
 #[cfg(test)]
