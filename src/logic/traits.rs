@@ -222,8 +222,6 @@ pub use simple_smtp_domain::ports::CalendarPort;
 // Cycle 34 hexagonal — 14ème port : EmailStorePort.
 pub use simple_smtp_domain::ports::EmailStorePort;
 
+// Cycle 35 hexagonal — 15ème port : MailEventLoggingPort.
 // Cycle 36 hexagonal — 16ème port : EmailDeliveryPort.
-pub use simple_smtp_domain::ports::EmailDeliveryPort;
-
-// Cycle 35 hexagonal — 15ème port : MailEventLoggingPort (journal mail events).
 pub use simple_smtp_domain::ports::{EmailDeliveryPort, MailEventLoggingPort};
