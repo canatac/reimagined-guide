@@ -572,3 +572,15 @@ pub trait UserProfileUpdatePort: Send + Sync {
 pub trait MessageFetchHeadersPort: Send + Sync {
     async fn fetch_headers(&self, username: &str, mailbox: &str, uid: u32) -> DomainResult<Option<String>>;
 }
+
+/// Port message set flags — Cycle 56, 47ème port.
+#[async_trait]
+pub trait MessageSetFlagsPort: Send + Sync {
+    async fn set_flags(&self, username: &str, mailbox: &str, uid: u32, flags: &[String]) -> DomainResult<()>;
+}
+
+/// Port calendar list — Cycle 56, 48ème port.
+#[async_trait]
+pub trait CalendarListPort: Send + Sync {
+    async fn list_calendars(&self, username: &str) -> DomainResult<Vec<String>>;
+}
