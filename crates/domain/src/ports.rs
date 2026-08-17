@@ -322,3 +322,36 @@ pub trait MailboxDeliveryPort: Send + Sync {
     /// Livre le message RFC 5322 `raw_message` dans l'INBOX de `username`.
     async fn deliver_to_inbox(&self, username: &str, raw_message: &str) -> DomainResult<()>;
 }
+
+/// Port message search user — recherche IMAP côté utilisateur.
+///
+/// Cycle 41 : 21ème port autonome. Signatures 100 % primitives (`&str`, `u32`),
+/// aucun type infrastructure ni domaine.
+#[async_trait]
+pub trait MessageSearchUserPort: Send + Sync {
+    /// Recherche des messages pour `username` selon `criteria` IMAP brut.
+    ///
+    /// Retourne la liste des UIDs correspondants.
+    async fn search_messages_for_user(
+        &self,
+        username: &str,
+        criteria: &str,
+    ) -> DomainResult<Vec<u32>>;
+}
+
+/// Port mailbox list user — commande IMAP LIST côté utilisateur.
+///
+/// Cycle 41 : 22ème port autonome. Signatures 100 % primitives (`&str`),
+/// aucun type infrastructure ni domaine.
+#[async_trait]
+pub trait MailboxListUserPort: Send + Sync {
+    /// Liste les mailboxes de `username` selon `reference` et `mailbox` (motif IMAP LIST).
+    ///
+    /// Retourne les noms des mailboxes correspondant au motif.
+    async fn list_mailboxes_for_user(
+        &self,
+        username: &str,
+        reference: &str,
+        mailbox: &str,
+    ) -> DomainResult<Vec<String>>;
+}
