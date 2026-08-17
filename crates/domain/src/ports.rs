@@ -276,3 +276,21 @@ pub trait MailboxStatusPort: Send + Sync {
         mailbox: &str,
     ) -> DomainResult<Vec<(String, String)>>;
 }
+
+/// Port OAuth user — find-or-create d'un utilisateur à partir d'une identité OAuth.
+///
+/// Cycle 38 : 18ème port autonome. Signatures 100 % primitives (`&str`, `String`),
+/// aucun type infrastructure ni dépendance à un type domaine `User` (non exporté).
+/// Retourne l'identifiant utilisateur (username) créé ou déjà existant.
+#[async_trait]
+pub trait OAuthUserPort: Send + Sync {
+    /// Récupère ou crée un utilisateur pour l'identité OAuth `(provider, subject)`.
+    ///
+    /// Retourne le `username` de l'utilisateur.
+    async fn find_or_create_oauth_user(
+        &self,
+        provider: &str,
+        subject: &str,
+        email: &str,
+    ) -> DomainResult<String>;
+}
