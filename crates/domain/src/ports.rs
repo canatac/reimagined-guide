@@ -500,3 +500,15 @@ pub trait RawEmailStorePort: Send + Sync {
 pub trait MessageDeletePort: Send + Sync {
     async fn delete_email(&self, username: &str, mailbox: &str, uid: u32) -> DomainResult<()>;
 }
+
+/// Port message body — Cycle 47, 35ème port.
+#[async_trait]
+pub trait MessageBodyPort: Send + Sync {
+    async fn get_email_body(&self, username: &str, mailbox: &str, uid: u32) -> DomainResult<Option<String>>;
+}
+
+/// Port email list — Cycle 47, 36ème port.
+#[async_trait]
+pub trait EmailListPort: Send + Sync {
+    async fn list_emails_for_mailbox(&self, username: &str, mailbox: &str) -> DomainResult<Vec<u32>>;
+}
