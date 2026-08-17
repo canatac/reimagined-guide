@@ -192,3 +192,19 @@ pub trait MessageSearchPort: Send + Sync {
     /// Retourne la liste des UIDs matchant.
     async fn search_messages(&self, criteria: &str) -> DomainResult<Vec<u32>>;
 }
+
+/// Port email store — persistance d'un email dans une mailbox utilisateur.
+///
+/// Cycle 34 : 13ème port autonome. Dépend uniquement du type domaine
+/// `Email` et de primitives (`&str`). Couvre l'opération `store_email`
+/// de la couche `DatabaseInterface` historique (APPEND IMAP côté domaine).
+#[async_trait]
+pub trait EmailStorePort: Send + Sync {
+    /// Persiste `email` dans `mailbox` pour l'utilisateur `username`.
+    async fn store_email(
+        &self,
+        username: &str,
+        mailbox: &str,
+        email: &crate::Email,
+    ) -> DomainResult<()>;
+}
