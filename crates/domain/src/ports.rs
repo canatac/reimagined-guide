@@ -356,6 +356,30 @@ pub trait MailboxListUserPort: Send + Sync {
     ) -> DomainResult<Vec<String>>;
 }
 
+/// Port mailbox expunge user — commande IMAP EXPUNGE côté utilisateur.
+///
+/// Cycle 42 : 23ème port autonome. Signatures 100 % primitives.
+#[async_trait]
+pub trait MailboxExpungeUserPort: Send + Sync {
+    /// Expunge la mailbox courante de `username`. Retourne les UIDs supprimés.
+    async fn expunge_mailbox_for_user(&self, username: &str) -> DomainResult<Vec<u32>>;
+}
+
+/// Port message copy user — commande IMAP COPY côté utilisateur.
+///
+/// Cycle 42 : 24ème port autonome. Signatures 100 % primitives.
+#[async_trait]
+pub trait MessageCopyUserPort: Send + Sync {
+    /// Copie les messages `sequence_set` (syntaxe IMAP) vers `target_mailbox`
+    /// pour `username`.
+    async fn copy_messages_for_user(
+        &self,
+        username: &str,
+        sequence_set: &str,
+        target_mailbox: &str,
+    ) -> DomainResult<()>;
+}
+
 /// Port user creation — création d'un utilisateur avec sa mailbox initiale.
 ///
 /// Cycle 42 : 23ème port autonome. Signatures 100 % primitives (`&str`),
