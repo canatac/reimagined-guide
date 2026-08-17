@@ -524,3 +524,15 @@ pub trait CalendarEventCreatePort: Send + Sync {
 pub trait MessageAppendPort: Send + Sync {
     async fn append_message(&self, username: &str, mailbox: &str, raw_email: &[u8]) -> DomainResult<u32>;
 }
+
+/// Port calendar event list — Cycle 49, 39ème port.
+#[async_trait]
+pub trait CalendarEventListPort: Send + Sync {
+    async fn list_events(&self, username: &str, calendar_id: &str) -> DomainResult<Vec<String>>;
+}
+
+/// Port mailbox rename — Cycle 49, 40ème port.
+#[async_trait]
+pub trait MailboxRenamePort: Send + Sync {
+    async fn rename_mailbox(&self, username: &str, from: &str, to: &str) -> DomainResult<()>;
+}
