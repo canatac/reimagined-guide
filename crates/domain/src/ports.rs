@@ -488,4 +488,3 @@ pub trait MailboxSubscribePort: Send + Sync {
     async fn subscribe_mailbox_for_user(&self, username: &str, mailbox: &str) -> DomainResult<()>;
     async fn unsubscribe_mailbox_for_user(&self, username: &str, mailbox: &str) -> DomainResult<()>;
 }
-}
