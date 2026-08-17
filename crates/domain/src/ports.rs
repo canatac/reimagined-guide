@@ -311,3 +311,14 @@ pub trait SessionMailboxPort: Send + Sync {
     /// Commande IMAP CHECK — force la synchronisation de la mailbox courante.
     async fn check_mailbox(&self) -> DomainResult<()>;
 }
+
+/// Port mailbox delivery — livraison d'un message brut dans l'INBOX d'un
+/// utilisateur.
+///
+/// Cycle 40 : 20ème port autonome. Signatures 100 % primitives (`&str`),
+/// aucun type infrastructure ni domaine.
+#[async_trait]
+pub trait MailboxDeliveryPort: Send + Sync {
+    /// Livre le message RFC 5322 `raw_message` dans l'INBOX de `username`.
+    async fn deliver_to_inbox(&self, username: &str, raw_message: &str) -> DomainResult<()>;
+}
