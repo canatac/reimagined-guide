@@ -294,3 +294,20 @@ pub trait OAuthUserPort: Send + Sync {
         email: &str,
     ) -> DomainResult<String>;
 }
+
+/// Port session mailbox — opérations de session IMAP sans état persistant.
+///
+/// Cycle 39 : 19ème port autonome. Signatures 100 % primitives, aucun type
+/// infrastructure ni domaine. Couvre les commandes IMAP `NOOP`, `CLOSE`,
+/// `CHECK` de la couche session historique.
+#[async_trait]
+pub trait SessionMailboxPort: Send + Sync {
+    /// Commande IMAP NOOP — ne fait rien, sert de heartbeat.
+    async fn noop(&self) -> DomainResult<()>;
+
+    /// Commande IMAP CLOSE — ferme la mailbox courante pour `username`.
+    async fn close_mailbox(&self, username: &str) -> DomainResult<()>;
+
+    /// Commande IMAP CHECK — force la synchronisation de la mailbox courante.
+    async fn check_mailbox(&self) -> DomainResult<()>;
+}
