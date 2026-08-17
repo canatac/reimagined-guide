@@ -447,3 +447,31 @@ pub trait EmailFlagPort: Send + Sync {
         starred: bool,
     ) -> DomainResult<()>;
 }
+
+/// Port mailbox check — vérification/statut d'une mailbox pour un utilisateur.
+///
+/// Cycle 44 : 29ème port autonome. Signatures 100 % primitives (`&str`).
+#[async_trait]
+pub trait MailboxCheckPort: Send + Sync {
+    /// Vérifie la mailbox `mailbox` pour `username` (IMAP CHECK/STATUS-like).
+    async fn check_mailbox_for_user(
+        &self,
+        username: &str,
+        mailbox: &str,
+    ) -> DomainResult<()>;
+}
+
+/// Port message move — déplacement d'un message vers une autre mailbox.
+///
+/// Cycle 44 : 30ème port autonome. Signatures 100 % primitives (`&str`, `u32`).
+#[async_trait]
+pub trait MessageMovePort: Send + Sync {
+    /// Déplace le message `uid` de `source_mailbox` vers `target_mailbox` pour `username`.
+    async fn move_email_to_mailbox(
+        &self,
+        username: &str,
+        source_mailbox: &str,
+        uid: u32,
+        target_mailbox: &str,
+    ) -> DomainResult<()>;
+}
