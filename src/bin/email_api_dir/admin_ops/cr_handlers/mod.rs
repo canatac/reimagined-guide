@@ -4,6 +4,7 @@
 pub mod read;
 pub mod create;
 pub mod patch;
+pub mod patch_helpers;
 pub mod delete;
 
 pub use read::*;
