@@ -228,3 +228,22 @@ pub trait EmailStorePort: Send + Sync {
         email: &crate::Email,
     ) -> DomainResult<()>;
 }
+
+/// Port mail event logging — journal des événements mail (delivered, sent, bounce, etc.).
+///
+/// Cycle 35 : 15ème port autonome. Signatures 100 % primitives (`&str`),
+/// aucun type infrastructure. Couvre l'opération `log_mail_event` de la
+/// couche `DatabaseInterface` historique.
+#[async_trait]
+pub trait MailEventLoggingPort: Send + Sync {
+    /// Journalise un événement mail (kind = "delivered" | "sent" | "bounce" | ...).
+    async fn log_mail_event(
+        &self,
+        kind: &str,
+        user_id: &str,
+        email_id: &str,
+        subject: &str,
+        from: &str,
+        to: &str,
+    ) -> DomainResult<()>;
+}
