@@ -487,17 +487,3 @@ pub trait AuthUserPort: Send + Sync {
 pub trait MailboxSubscribePort: Send + Sync {
     async fn subscribe_mailbox_for_user(&self, username: &str, mailbox: &str) -> DomainResult<()>;
     async fn unsubscribe_mailbox_for_user(&self, username: &str, mailbox: &str) -> DomainResult<()>;
-}
-
-/// Port auth user — Cycle 45, 31ème port.
-#[async_trait]
-pub trait AuthUserPort: Send + Sync {
-    async fn authenticate_user(&self, username: &str, password: &str) -> Option<String>;
-}
-
-/// Port mailbox subscribe — Cycle 45, 32ème port.
-#[async_trait]
-pub trait MailboxSubscribePort: Send + Sync {
-    async fn subscribe_mailbox_for_user(&self, username: &str, mailbox: &str) -> DomainResult<()>;
-    async fn unsubscribe_mailbox_for_user(&self, username: &str, mailbox: &str) -> DomainResult<()>;
-}
