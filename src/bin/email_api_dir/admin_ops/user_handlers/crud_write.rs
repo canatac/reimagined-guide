@@ -220,6 +220,7 @@ pub(crate) async fn api_admin_user_delete(
 
     match coll.delete_one(doc! { "id": &id }).await {
         Ok(res) if res.deleted_count > 0 => {
+            log_admin_action(
                 mongo.as_ref(),
                 &actor,
                 "user.delete",
