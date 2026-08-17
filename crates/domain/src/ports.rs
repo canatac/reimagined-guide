@@ -7,6 +7,7 @@
 //! indépendant de tout type externe (mongodb / bson / entities).
 
 use crate::errors::DomainResult;
+use crate::Email;
 use async_trait::async_trait;
 
 /// Port applicatif — orchestration de haut niveau (use-cases).
@@ -246,4 +247,15 @@ pub trait MailEventLoggingPort: Send + Sync {
         from: &str,
         to: &str,
     ) -> DomainResult<()>;
+}
+
+/// Port email delivery — dépôt d'un email dans la boîte de réception d'un utilisateur.
+///
+/// Cycle 36 : 16ème port autonome. Signature 100 % types domaine (`Email`)
+/// et primitives (`&str`), aucun type infrastructure. Couvre l'opération
+/// `deliver_to_inbox` de la couche `DatabaseInterface` historique.
+#[async_trait]
+pub trait EmailDeliveryPort: Send + Sync {
+    /// Dépose un email dans la boîte INBOX de `username`.
+    async fn deliver_to_inbox(&self, username: &str, email: &Email) -> DomainResult<()>;
 }
