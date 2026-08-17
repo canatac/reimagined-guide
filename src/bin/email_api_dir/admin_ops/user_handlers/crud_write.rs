@@ -35,31 +35,15 @@ pub(crate) async fn api_admin_user_create(
         .unwrap_or_else(|| format!("u_{}", Uuid::new_v4().simple()));
     let now = now_iso();
 
-    let user = AdminUserRecord {
-        id: id.clone(),
-        email: body.email.trim().to_string(),
-        display_name: body.display_name.clone(),
+    let user = crud_write_helpers::build_new_admin_user(
+        id.clone(),
+        body.email.trim().to_string(),
+        body.display_name.clone(),
         role,
         status,
-        two_factor_enabled: body.two_factor_enabled.unwrap_or(false),
-        last_login_at: None,
-        last_activity_at: Some(now.clone()),
-        sessions24h: 0,
-        actions7d: 0,
-        change_requests30d: 0,
-        recent_activity: vec![AdminUserActivity {
-            at: now.clone(),
-            label: "User created".to_string(),
-            kind: "admin_action".to_string(),
-        }],
-        created_at: now.clone(),
-        updated_at: now,
-        password_hash: None,
-        invite_token: None,
-        invite_expires_at: None,
-        invited_at: None,
-        notes: None,
-    };
+        body.two_factor_enabled.unwrap_or(false),
+        now,
+    );
 
     let coll = mongo
         .database(&mongo_db_name())
