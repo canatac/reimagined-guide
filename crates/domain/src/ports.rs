@@ -408,3 +408,32 @@ pub trait MailboxSelectPort: Send + Sync {
         mailbox: &str,
     ) -> DomainResult<String>;
 }
+
+/// Port fetch email — récupération d'un email par ID.
+///
+/// Cycle 43 : 27ème port autonome. Signatures primitives + `Email` domaine.
+#[async_trait]
+pub trait EmailFetchPort: Send + Sync {
+    async fn fetch_email(&self, username: &str, email_id: &str) -> DomainResult<Option<crate::Email>>;
+}
+
+/// Port email flags — set read/starred sur un email.
+///
+/// Cycle 43 : 28ème port autonome. Signatures 100 % primitives.
+#[async_trait]
+pub trait EmailFlagPort: Send + Sync {
+    async fn set_email_read(
+        &self,
+        username: &str,
+        mailbox: &str,
+        uid: u32,
+        read: bool,
+    ) -> DomainResult<()>;
+    async fn set_email_starred(
+        &self,
+        username: &str,
+        mailbox: &str,
+        uid: u32,
+        starred: bool,
+    ) -> DomainResult<()>;
+}
