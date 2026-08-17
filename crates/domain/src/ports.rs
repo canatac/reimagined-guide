@@ -355,3 +355,32 @@ pub trait MailboxListUserPort: Send + Sync {
         mailbox: &str,
     ) -> DomainResult<Vec<String>>;
 }
+
+/// Port user creation — création d'un utilisateur avec sa mailbox initiale.
+///
+/// Cycle 42 : 23ème port autonome. Signatures 100 % primitives (`&str`),
+/// aucun type infrastructure ni domaine.
+#[async_trait]
+pub trait UserCreationPort: Send + Sync {
+    /// Crée l'utilisateur `username` avec `password` et sa `mailbox` initiale.
+    async fn create_user(
+        &self,
+        username: &str,
+        password: &str,
+        mailbox: &str,
+    ) -> DomainResult<()>;
+}
+
+/// Port mailbox select — sélection d'une mailbox pour un utilisateur (IMAP SELECT).
+///
+/// Cycle 42 : 24ème port autonome. Signatures 100 % primitives (`&str`),
+/// retourne le nom canonique de la mailbox sélectionnée.
+#[async_trait]
+pub trait MailboxSelectPort: Send + Sync {
+    /// Sélectionne `mailbox` pour `username` et retourne son nom canonique.
+    async fn select_mailbox_for_user(
+        &self,
+        username: &str,
+        mailbox: &str,
+    ) -> DomainResult<String>;
+}
