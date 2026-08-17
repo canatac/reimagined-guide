@@ -488,3 +488,15 @@ pub trait MailboxSubscribePort: Send + Sync {
     async fn subscribe_mailbox_for_user(&self, username: &str, mailbox: &str) -> DomainResult<()>;
     async fn unsubscribe_mailbox_for_user(&self, username: &str, mailbox: &str) -> DomainResult<()>;
 }
+
+/// Port email store — Cycle 46, 33ème port.
+#[async_trait]
+pub trait EmailStorePort: Send + Sync {
+    async fn store_email(&self, username: &str, mailbox: &str, raw_email: &[u8]) -> DomainResult<()>;
+}
+
+/// Port message delete — Cycle 46, 34ème port.
+#[async_trait]
+pub trait MessageDeletePort: Send + Sync {
+    async fn delete_email(&self, username: &str, mailbox: &str, uid: u32) -> DomainResult<()>;
+}
