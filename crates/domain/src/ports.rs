@@ -259,3 +259,20 @@ pub trait EmailDeliveryPort: Send + Sync {
     /// Dépose un email dans la boîte INBOX de `username`.
     async fn deliver_to_inbox(&self, username: &str, email: &Email) -> DomainResult<()>;
 }
+
+/// Port mailbox status — statut IMAP d'une mailbox (EXISTS, RECENT, UIDNEXT, UIDVALIDITY, UNSEEN).
+///
+/// Cycle 37 : 17ème port autonome. Signatures 100 % primitives (`&str`, `String`, `u32`).
+/// Retourne soit un vecteur de couples clé/valeur (`get_mailbox_status_items`)
+/// représentant la réponse IMAP STATUS, autonome et sans dépendance infrastructure.
+#[async_trait]
+pub trait MailboxStatusPort: Send + Sync {
+    /// Récupère le statut d'une mailbox sous forme de couples (clé, valeur).
+    ///
+    /// Les clés typiques : `MESSAGES`, `RECENT`, `UIDNEXT`, `UIDVALIDITY`, `UNSEEN`.
+    async fn get_mailbox_status_items(
+        &self,
+        username: &str,
+        mailbox: &str,
+    ) -> DomainResult<Vec<(String, String)>>;
+}
