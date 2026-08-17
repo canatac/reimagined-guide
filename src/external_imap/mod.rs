@@ -3,6 +3,7 @@ use crate::entities::{
 };
 
 pub mod live_probe;
+mod live_probe_helpers;
 
 mod dialog;
 mod parser;

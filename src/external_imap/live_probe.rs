@@ -27,13 +27,7 @@ use std::net::{TcpStream, ToSocketAddrs};
 use std::time::Duration;
 use tokio::sync::mpsc::Sender;
 
-fn escape_imap(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"")
-}
-
-fn sse_line_frame(payload: &str) -> String {
-    format!("event: line\ndata: {payload}\n\n")
-}
+use super::live_probe_helpers::{escape_imap, sse_line_frame};
 
 pub struct ProbeParams<'a> {
     pub host: &'a str,
