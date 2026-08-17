@@ -1,39 +1,3 @@
-/*
-SMTP Server Implementation
-
-This file contains the main SMTP server implementation for a custom email handling system.
-
-Key features:
-- Supports both plain (SMTP) and TLS (SMTPS) connections
-- Implements basic SMTP commands (HELO/EHLO, MAIL FROM, RCPT TO, DATA, QUIT, etc.)
-- Handles STARTTLS for upgrading plain connections to TLS
-- Supports basic authentication (AUTH LOGIN and AUTH PLAIN)
-- Stores received emails in a local directory
-
-Known Issues:
-- **DATA command handling**: The server closes the connection unexpectedly after receiving email data.
-  This is a known bug and should be fixed in a future update.
-
-Usage:
-To run the SMTP server, use the following command from the project root:
-    cargo run --bin smtp_server
-
-The server listens on two ports:
-1. TLS port (default: 8465) for secure connections
-2. Plain port (default: 8025) for non-secure connections and STARTTLS
-
-Environment variables (set in .env file):
-- SMTP_TLS_ADDR: Address for TLS connections (default: "0.0.0.0:8465")
-- SMTP_PLAIN_ADDR: Address for plain connections (default: "0.0.0.0:8025")
-- SMTP_REQUIRE_STARTTLS: Require STARTTLS before AUTH on plain SMTP port (default: true)
-- CERT_PATH: Path to SSL certificate file
-- KEY_PATH: Path to SSL private key file
-- SMTP_USERNAME: Username for SMTP authentication
-- SMTP_PASSWORD: Password for SMTP authentication
-
-Note: This server is intended for development and testing purposes.
-For production use, additional security measures and optimizations should be implemented.
-*/
 
 use dotenv::dotenv;
 
