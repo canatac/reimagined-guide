@@ -215,3 +215,9 @@ pub use simple_smtp_domain::ports::ExternalImapAccountQueryPort;
 
 // Cycle 30 hexagonal — 10ème port migré : `UserAliasPort` (primitives &str).
 pub use simple_smtp_domain::ports::UserAliasPort;
+
+// Cycle 34 hexagonal — 13ème port : CalendarPort (CRUD calendar_events).
+pub use simple_smtp_domain::ports::CalendarPort;
+
+// Cycle 34 hexagonal — 14ème port : EmailStorePort.
+pub use simple_smtp_domain::ports::EmailStorePort;

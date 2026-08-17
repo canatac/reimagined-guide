@@ -193,6 +193,26 @@ pub trait MessageSearchPort: Send + Sync {
     async fn search_messages(&self, criteria: &str) -> DomainResult<Vec<u32>>;
 }
 
+/// Port calendrier — CRUD événements calendrier utilisateur.
+///
+/// Cycle 34 : 13ème port autonome. Signatures avec `CalendarEvent`
+/// (type domaine pur) + primitives. Couvre les opérations calendar_*
+/// de `DatabaseInterface`.
+#[async_trait]
+pub trait CalendarPort: Send + Sync {
+    async fn create_calendar_event(&self, event: &crate::CalendarEvent) -> DomainResult<()>;
+    async fn get_calendar_event(
+        &self,
+        username: &str,
+        event_id: &str,
+    ) -> DomainResult<Option<crate::CalendarEvent>>;
+    async fn delete_calendar_event(
+        &self,
+        username: &str,
+        event_id: &str,
+    ) -> DomainResult<()>;
+}
+
 /// Port email store — persistance d'un email dans une mailbox utilisateur.
 ///
 /// Cycle 34 : 13ème port autonome. Dépend uniquement du type domaine
