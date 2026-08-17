@@ -1,8 +1,8 @@
 //! Contexte d'envoi + émission d'événements de monitoring pour `mx.rs`.
 //! Extrait de `mx.rs` (cycle 39) pour maintenir chaque fichier sous le seuil LOC.
 
-use super::*;
 use crate::entities::Email;
+use uuid::Uuid;
 
 /// Contexte partagé pour l'émission d'événements de monitoring pendant l'envoi.
 pub(super) struct SendContext {
