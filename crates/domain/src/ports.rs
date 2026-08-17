@@ -536,3 +536,15 @@ pub trait CalendarEventListPort: Send + Sync {
 pub trait MailboxRenamePort: Send + Sync {
     async fn rename_mailbox(&self, username: &str, from: &str, to: &str) -> DomainResult<()>;
 }
+
+/// Port user password update — Cycle 50, 41ème port.
+#[async_trait]
+pub trait UserPasswordUpdatePort: Send + Sync {
+    async fn update_password(&self, username: &str, new_password: &str) -> DomainResult<()>;
+}
+
+/// Port mailbox create — Cycle 50, 42ème port.
+#[async_trait]
+pub trait MailboxCreatePort: Send + Sync {
+    async fn create_mailbox(&self, username: &str, mailbox: &str) -> DomainResult<()>;
+}
