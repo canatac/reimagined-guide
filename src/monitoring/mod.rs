@@ -1,9 +1,11 @@
 pub mod alerts;
 pub mod enrichment;
+pub mod parse;
 pub mod storage;
 
 pub use alerts::{ActiveAlert, AlertConfig};
 pub use enrichment::GeoInfo;
+pub use parse::parse_smtp_code;
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
