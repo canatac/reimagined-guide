@@ -35,16 +35,7 @@ fn apply_action_advance(
     }
 }
 
-fn set_run_id_if_present(item: &mut ChangeRequestItem, body: &PatchChangeRequestInputApi) {
-    if let Some(run_id) = body
-        .execution_run_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        item.execution_run_id = Some(run_id.to_string());
-    }
-}
+use super::patch_helpers::set_run_id_if_present;
 
 fn apply_execution_action(
     item: &mut ChangeRequestItem,

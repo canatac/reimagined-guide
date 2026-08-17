@@ -24,3 +24,14 @@ pub(super) fn apply_action_reject(item: &mut ChangeRequestItem) {
     item.execution_finished_at = Some(now_iso());
     item.execution_last_error = None;
 }
+
+pub(super) fn set_run_id_if_present(item: &mut ChangeRequestItem, body: &PatchChangeRequestInputApi) {
+    if let Some(run_id) = body
+        .execution_run_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        item.execution_run_id = Some(run_id.to_string());
+    }
+}
