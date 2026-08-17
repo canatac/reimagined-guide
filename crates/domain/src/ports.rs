@@ -475,3 +475,19 @@ pub trait MessageMovePort: Send + Sync {
         target_mailbox: &str,
     ) -> DomainResult<()>;
 }
+
+/// Port auth user — Cycle 45, 31ème port. Primitives only.
+#[async_trait]
+pub trait AuthUserPort: Send + Sync {
+    /// Authentifie `username` avec `password`. Retourne `Some(username)` si OK, `None` sinon.
+    async fn authenticate_user(&self, username: &str, password: &str) -> Option<String>;
+}
+
+/// Port mailbox subscribe — Cycle 45, 32ème port. Primitives only.
+#[async_trait]
+pub trait MailboxSubscribePort: Send + Sync {
+    /// IMAP SUBSCRIBE.
+    async fn subscribe_mailbox_for_user(&self, username: &str, mailbox: &str) -> DomainResult<()>;
+    /// IMAP UNSUBSCRIBE.
+    async fn unsubscribe_mailbox_for_user(&self, username: &str, mailbox: &str) -> DomainResult<()>;
+}
