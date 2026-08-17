@@ -6,6 +6,7 @@ pub mod live_probe;
 mod live_probe_helpers;
 
 mod dialog;
+mod dialog_helpers;
 mod parser;
 
 use futures_util::TryStreamExt;
@@ -18,7 +19,8 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 // Re-exports internes utilisés par account_ops / folder_ops / sync_ops / message_ops.
-pub(crate) use dialog::{imap_fetch_headers_since, imap_probe};
+pub(crate) use dialog::imap_fetch_headers_since;
+pub(crate) use dialog_helpers::imap_probe;
 pub(crate) use parser::{format_imap_date, ImapFetchedHeader};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
