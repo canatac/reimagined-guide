@@ -548,3 +548,15 @@ pub trait UserPasswordUpdatePort: Send + Sync {
 pub trait MailboxCreatePort: Send + Sync {
     async fn create_mailbox(&self, username: &str, mailbox: &str) -> DomainResult<()>;
 }
+
+/// Port mailbox delete — Cycle 54, 43ème port.
+#[async_trait]
+pub trait MailboxDeletePort: Send + Sync {
+    async fn delete_mailbox(&self, username: &str, mailbox: &str) -> DomainResult<()>;
+}
+
+/// Port user lookup by email — Cycle 54, 44ème port.
+#[async_trait]
+pub trait UserLookupPort: Send + Sync {
+    async fn find_user_by_email(&self, email: &str) -> DomainResult<Option<String>>;
+}
