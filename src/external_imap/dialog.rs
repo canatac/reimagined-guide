@@ -1,9 +1,10 @@
 //! Dialogues IMAP hand-rollés (extrait de mod.rs).
 
 use chrono::Utc;
-use openssl::ssl::SslStream;
+use openssl::ssl::{SslConnector, SslMethod, SslStream};
 use std::io::Write;
-use std::net::TcpStream;
+use std::net::{TcpStream, ToSocketAddrs};
+use std::time::Duration;
 
 use super::parser::{
     escape_imap, parse_capabilities, parse_fetch_headers, parse_list_folders, parse_uid_search,
