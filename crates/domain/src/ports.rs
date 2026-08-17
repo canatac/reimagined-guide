@@ -584,3 +584,15 @@ pub trait MessageSetFlagsPort: Send + Sync {
 pub trait CalendarListPort: Send + Sync {
     async fn list_calendars(&self, username: &str) -> DomainResult<Vec<String>>;
 }
+
+/// Port message copy — Cycle 57, 49ème port.
+#[async_trait]
+pub trait MessageCopyPort: Send + Sync {
+    async fn copy_message(&self, username: &str, src_mailbox: &str, uid: u32, dst_mailbox: &str) -> DomainResult<u32>;
+}
+
+/// Port user exists — Cycle 57, 50ème port.
+#[async_trait]
+pub trait UserExistsPort: Send + Sync {
+    async fn user_exists(&self, username: &str) -> DomainResult<bool>;
+}
