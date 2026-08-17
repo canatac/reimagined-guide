@@ -560,3 +560,15 @@ pub trait MailboxDeletePort: Send + Sync {
 pub trait UserLookupPort: Send + Sync {
     async fn find_user_by_email(&self, email: &str) -> DomainResult<Option<String>>;
 }
+
+/// Port user profile update — Cycle 55, 45ème port.
+#[async_trait]
+pub trait UserProfileUpdatePort: Send + Sync {
+    async fn update_profile(&self, username: &str, display_name: &str, quota_bytes: u64) -> DomainResult<()>;
+}
+
+/// Port message fetch headers — Cycle 55, 46ème port.
+#[async_trait]
+pub trait MessageFetchHeadersPort: Send + Sync {
+    async fn fetch_headers(&self, username: &str, mailbox: &str, uid: u32) -> DomainResult<Option<String>>;
+}
