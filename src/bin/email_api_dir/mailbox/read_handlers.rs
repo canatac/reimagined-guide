@@ -72,7 +72,7 @@ pub(crate) async fn api_emails(
                 collected.append(&mut batch);
             }
             Err(e) => {
-                eprintln!("get_emails user={} mailbox={}: {}", user_id, mailbox, e);
+                eprintln!("get_emails mailbox={}: {}", mailbox, e);
             }
         }
     }
