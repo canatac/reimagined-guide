@@ -15,12 +15,8 @@ const MAX_ACCEPT_LANGUAGE_LEN: usize = 256;
 
 pub(crate) fn normalize_segment(s: &str) -> String {
     // Limit input length to avoid allocating arbitrary amounts of memory from user-provided data.
-    let s = if s.len() > MAX_SEGMENT_LEN {
-        &s[..MAX_SEGMENT_LEN]
-    } else {
-        s
-    };
     s.chars()
+        .take(MAX_SEGMENT_LEN)
         .map(|c| match c {
             'à' | 'â' | 'ä' => 'a',
             'é' | 'è' | 'ê' | 'ë' => 'e',
@@ -64,12 +60,7 @@ pub(crate) fn req_ip_str(req: &actix_web::HttpRequest) -> String {
         .next()
         .unwrap_or("unknown");
     // Limit length to avoid allocating arbitrary amounts of memory from user-controlled header.
-    let raw = if raw.len() > MAX_IP_LEN {
-        &raw[..MAX_IP_LEN]
-    } else {
-        raw
-    };
-    raw.to_string()
+    raw.chars().take(MAX_IP_LEN).collect()
 }
 
 pub(crate) fn get_accept_language(req: &actix_web::HttpRequest) -> String {
@@ -79,12 +70,7 @@ pub(crate) fn get_accept_language(req: &actix_web::HttpRequest) -> String {
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
     // Limit length to avoid allocating arbitrary amounts of memory from user-controlled header.
-    let raw = if raw.len() > MAX_ACCEPT_LANGUAGE_LEN {
-        &raw[..MAX_ACCEPT_LANGUAGE_LEN]
-    } else {
-        raw
-    };
-    raw.to_string()
+    raw.chars().take(MAX_ACCEPT_LANGUAGE_LEN).collect()
 }
 
 pub(crate) fn welcome_email_html(
