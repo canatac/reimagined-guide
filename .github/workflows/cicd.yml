@@ -20,6 +20,8 @@ jobs:
   test:
     name: Compile & Check
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -71,6 +73,8 @@ jobs:
     name: Build & Push SMTP image (SCW Registry)
     needs: test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     if: >-
       (github.event_name == 'push' && github.ref == 'refs/heads/master')
       || github.event_name == 'workflow_dispatch'
@@ -109,6 +113,8 @@ jobs:
     name: Deploy to Scaleway VM
     needs: [test, build-push-smtp]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     if: >-
       needs.test.result == 'success' &&
       (

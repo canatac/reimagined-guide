@@ -84,7 +84,7 @@ pub(crate) async fn store_and_forward_mongo(
         return Ok(());
     }
 
-    println!("Email stored successfully in MongoDB for {user}/{mbox}");
+    println!("Email stored successfully in MongoDB");
     let _ = logic
         .log_mail_event(
             "received",
