@@ -4,7 +4,22 @@
 use actix_web::HttpRequest;
 use simple_smtp_server::i18n;
 
+/// Maximum length for name segments to prevent unbounded allocations from user input.
+const MAX_SEGMENT_LEN: usize = 256;
+
+/// Maximum length for IP address strings (IPv6 max is 39 chars; 64 is generous).
+const MAX_IP_LEN: usize = 64;
+
+/// Maximum length for Accept-Language header values.
+const MAX_ACCEPT_LANGUAGE_LEN: usize = 256;
+
 pub(crate) fn normalize_segment(s: &str) -> String {
+    // Limit input length to avoid allocating arbitrary amounts of memory from user-provided data.
+    let s = if s.len() > MAX_SEGMENT_LEN {
+        &s[..MAX_SEGMENT_LEN]
+    } else {
+        s
+    };
     s.chars()
         .map(|c| match c {
             'à' | 'â' | 'ä' => 'a',
@@ -41,21 +56,35 @@ pub(crate) fn normalize_oauth_provider(provider: &str) -> Option<String> {
 }
 
 pub(crate) fn req_ip_str(req: &actix_web::HttpRequest) -> String {
-    req.connection_info()
+    let conn = req.connection_info();
+    let raw = conn
         .realip_remote_addr()
         .unwrap_or("unknown")
         .split(':')
         .next()
-        .unwrap_or("unknown")
-        .to_string()
+        .unwrap_or("unknown");
+    // Limit length to avoid allocating arbitrary amounts of memory from user-controlled header.
+    let raw = if raw.len() > MAX_IP_LEN {
+        &raw[..MAX_IP_LEN]
+    } else {
+        raw
+    };
+    raw.to_string()
 }
 
 pub(crate) fn get_accept_language(req: &actix_web::HttpRequest) -> String {
-    req.headers()
+    let raw = req
+        .headers()
         .get("accept-language")
         .and_then(|v| v.to_str().ok())
-        .unwrap_or("")
-        .to_string()
+        .unwrap_or("");
+    // Limit length to avoid allocating arbitrary amounts of memory from user-controlled header.
+    let raw = if raw.len() > MAX_ACCEPT_LANGUAGE_LEN {
+        &raw[..MAX_ACCEPT_LANGUAGE_LEN]
+    } else {
+        raw
+    };
+    raw.to_string()
 }
 
 pub(crate) fn welcome_email_html(
