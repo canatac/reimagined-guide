@@ -53,10 +53,7 @@ async fn send_email_content_inner<T: AsyncWriteExt + AsyncReadExt + Unpin>(
     stream.write_all(b"DATA\r\n").await?;
     expect_code(stream, "354").await?;
     // Send the entire email content without alteration
-    println!(
-        "++++++++++++++++++++++++++++Sending unaltered email content: {}",
-        email_content
-    );
+    println!("++++++++++++++++++++++++++++Sending unaltered email content");
     stream.write_all(email_content.as_bytes()).await?;
 
     // Ensure the email content ends with \r\n.\r\n

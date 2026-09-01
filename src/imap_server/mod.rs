@@ -73,7 +73,7 @@ impl ImapServer {
                     let response = server_clone
                         .process_imap_command(&buffer[..n], &sessions, &mut session_id, &mut socket)
                         .await;
-                    println!("Response: {}", response);
+                    println!("Response sent");
                     if let Err(e) = socket.write_all(response.as_bytes()).await {
                         eprintln!("Failed to write to socket; err = {:?}", e);
                         return;
