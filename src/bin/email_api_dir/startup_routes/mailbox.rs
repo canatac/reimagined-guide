@@ -18,10 +18,30 @@ pub(crate) fn register_mailbox_routes(cfg: &mut web::ServiceConfig) {
         .route("/api/drafts", web::get().to(api_drafts_list))
         .route("/api/drafts", web::post().to(api_drafts_upsert))
         .route("/api/drafts/{id}", web::delete().to(api_drafts_delete))
-        .route("/api/newsletters/sources", web::get().to(api_newsletter_sources_list))
-        .route("/api/newsletters/sources", web::post().to(api_newsletter_sources_create))
-        .route("/api/newsletters/items", web::get().to(api_newsletter_items_list))
-        .route("/api/newsletters/items", web::post().to(api_newsletter_items_create))
+        .route(
+            "/api/newsletters/sources",
+            web::get().to(api_newsletter_sources_list),
+        )
+        .route(
+            "/api/newsletters/sources",
+            web::post().to(api_newsletter_sources_create),
+        )
+        .route(
+            "/api/newsletters/sources/{id}",
+            web::patch().to(api_newsletter_sources_update),
+        )
+        .route(
+            "/api/newsletters/sources/{id}",
+            web::delete().to(api_newsletter_sources_delete),
+        )
+        .route(
+            "/api/newsletters/items",
+            web::get().to(api_newsletter_items_list),
+        )
+        .route(
+            "/api/newsletters/items",
+            web::post().to(api_newsletter_items_create),
+        )
         .route("/api/templates", web::get().to(api_templates))
         .route("/api/settings/ai", web::get().to(api_get_ai_settings))
         .route("/api/settings/ai", web::put().to(api_put_ai_settings))
