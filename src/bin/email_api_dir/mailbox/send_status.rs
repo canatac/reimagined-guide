@@ -10,13 +10,50 @@ pub(crate) async fn api_send_status(
 ) -> impl Responder {
     let user_id = resolve_user_id(&req);
     let email_id = path.into_inner();
+    let db = env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
+
+    let queue_coll = mongo
+        .database(&db)
+        .collection::<bson::Document>(SEND_QUEUE_COLL);
 
     let email = match logic.fetch_email(&user_id, &email_id).await {
         Ok(Some(email)) => email,
         Ok(None) => {
-            return HttpResponse::NotFound().json(serde_json::json!({
-                "message": "Email not found"
-            }))
+            return match queue_coll
+                .find_one(doc! { "id": &email_id, "user_id": &user_id })
+                .await
+            {
+                Ok(Some(q)) => {
+                    let status = q.get_str("status").unwrap_or("pending");
+                    let delivery_state = match status {
+                        "sent" => "sent",
+                        "failed" | "sent_copy_failed" => "failed",
+                        "cancelled" => "cancelled",
+                        _ => "queued",
+                    };
+                    HttpResponse::Ok().json(serde_json::json!({
+                        "id": email_id,
+                        "deliveryState": delivery_state,
+                        "queueStatus": status,
+                        "from": q.get_str("from").unwrap_or_default(),
+                        "to": q.get_str("to").unwrap_or_default(),
+                        "subject": q.get_str("subject").unwrap_or_default(),
+                        "monitoring": {
+                            "traceable": false,
+                            "note": "Message still tracked in send queue (not yet available in Sent mailbox)."
+                        }
+                    }))
+                }
+                Ok(None) => HttpResponse::NotFound().json(serde_json::json!({
+                    "message": "Email not found"
+                })),
+                Err(e) => {
+                    eprintln!("api_send_status queue lookup error: {}", e);
+                    HttpResponse::InternalServerError().json(serde_json::json!({
+                        "message": "Failed to fetch email status"
+                    }))
+                }
+            };
         }
         Err(e) => {
             eprintln!("api_send_status fetch_email error: {}", e);
@@ -44,7 +81,6 @@ pub(crate) async fn api_send_status(
         }));
     }
 
-    let db = env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
     let coll = mongo
         .database(&db)
         .collection::<bson::Document>("smtp_events");
