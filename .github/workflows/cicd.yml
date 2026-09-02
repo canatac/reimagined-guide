@@ -43,7 +43,7 @@ jobs:
       - name: Cyclomatic complexity check (lizard, soft)
         run: |
           pip install lizard
-          lizard src -x '*/tests/*' -C 8 -T CCN --warnings_only || true
+          lizard src -x '*/tests/*' -C 8 -T cyclomatic_complexity=8 --warnings_only || true
 
       - name: Architecture guard (hexagonal port discipline)
         run: bash scripts/arch_guard.sh
