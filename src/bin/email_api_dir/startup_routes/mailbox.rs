@@ -35,6 +35,10 @@ pub(crate) fn register_mailbox_routes(cfg: &mut web::ServiceConfig) {
             web::delete().to(api_newsletter_sources_delete),
         )
         .route(
+            "/api/newsletters/sources/{id}/summarize",
+            web::post().to(api_newsletter_sources_summarize),
+        )
+        .route(
             "/api/newsletters/items",
             web::get().to(api_newsletter_items_list),
         )
