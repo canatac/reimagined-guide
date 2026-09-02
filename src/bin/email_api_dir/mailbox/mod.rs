@@ -9,6 +9,7 @@ pub mod send_queue_worker;
 pub mod single_handlers;
 pub mod drafts_handlers;
 pub mod newsletter_handlers;
+pub mod newsletter_summarize;
 
 mod folder_utils;
 mod mime_utils;
@@ -31,6 +32,7 @@ pub use send_queue_worker::*;
 pub use single_handlers::*;
 pub use drafts_handlers::*;
 pub use newsletter_handlers::*;
+pub use newsletter_summarize::*;
 
 pub(crate) use folder_utils::{
     canonical_folder, folder_to_mailboxes, resolve_user_id, EmailListQuery,
