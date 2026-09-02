@@ -221,10 +221,12 @@ jobs:
         env:
           INJECT_SCW_REGISTRY_ENDPOINT: ${{ secrets.SCW_REGISTRY_ENDPOINT }}
           INJECT_SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+          INJECT_REIMAGINED_GUIDE_SHA: ${{ github.sha }}
         run: |
           ssh -o StrictHostKeyChecking=no debian@${{ secrets.VM_IP }} \
             INJECT_SCW_REGISTRY_ENDPOINT="$INJECT_SCW_REGISTRY_ENDPOINT" \
             INJECT_SCW_SECRET_KEY="$INJECT_SCW_SECRET_KEY" \
+            INJECT_REIMAGINED_GUIDE_SHA="$INJECT_REIMAGINED_GUIDE_SHA" \
             bash << 'REMOTE'
             set -euo pipefail
             cd /home/debian
@@ -246,7 +248,9 @@ jobs:
             sudo docker pull "$INJECT_SCW_REGISTRY_ENDPOINT/dkim-service:latest"
             sudo docker pull "$INJECT_SCW_REGISTRY_ENDPOINT/misfits-web:latest"
 
-            # Persist concrete deployed image digests into .env.deploy for footer traceability
+            # Persist deployed versions into .env.deploy:
+            # - build versions use commit SHA (clickable commit links in frontend)
+            # - image digests are kept separately for artifact traceability
             upsert_env_file() {
               key="$1"
               val="$2"
@@ -260,14 +264,17 @@ jobs:
 
             MISFITS_WEB_DIGEST=$(sudo docker image inspect "$INJECT_SCW_REGISTRY_ENDPOINT/misfits-web:latest" --format '{{index .RepoDigests 0}}' 2>/dev/null | sed 's|.*@||' || true)
             SMTP_SERVER_DIGEST=$(sudo docker image inspect "$INJECT_SCW_REGISTRY_ENDPOINT/smtp-server:latest" --format '{{index .RepoDigests 0}}' 2>/dev/null | sed 's|.*@||' || true)
+            REIMAGINED_GUIDE_SHA="${INJECT_REIMAGINED_GUIDE_SHA:-unknown}"
 
             if [ -z "$MISFITS_WEB_DIGEST" ]; then MISFITS_WEB_DIGEST="unknown"; fi
             if [ -z "$SMTP_SERVER_DIGEST" ]; then SMTP_SERVER_DIGEST="unknown"; fi
+            if [ -z "$REIMAGINED_GUIDE_SHA" ]; then REIMAGINED_GUIDE_SHA="unknown"; fi
 
             upsert_env_file MISFITS_WEB_BUILD_VERSION "misfits-web@${MISFITS_WEB_DIGEST}"
-            upsert_env_file REIMAGINED_GUIDE_BUILD_VERSION "reimagined-guide@${SMTP_SERVER_DIGEST}"
+            upsert_env_file REIMAGINED_GUIDE_BUILD_VERSION "reimagined-guide@${REIMAGINED_GUIDE_SHA}"
             upsert_env_file NEXT_PUBLIC_MISFITS_WEB_BUILD_VERSION "misfits-web@${MISFITS_WEB_DIGEST}"
-            upsert_env_file NEXT_PUBLIC_REIMAGINED_GUIDE_BUILD_VERSION "reimagined-guide@${SMTP_SERVER_DIGEST}"
+            upsert_env_file NEXT_PUBLIC_REIMAGINED_GUIDE_BUILD_VERSION "reimagined-guide@${REIMAGINED_GUIDE_SHA}"
+            upsert_env_file REIMAGINED_GUIDE_IMAGE_DIGEST "${SMTP_SERVER_DIGEST}"
             echo "Footer versions set in .env.deploy"
 
             # Source .env.deploy so docker compose can resolve ${VAR} in the YAML
