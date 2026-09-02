@@ -167,15 +167,11 @@ paths:
       summary: List all change requests
       responses:
         "200":
+          description: Change requests list + workflow counts
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  items:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/ChangeRequest"
+                $ref: "#/components/schemas/ChangeRequestListResponse"
     post:
       operationId: createChangeRequest
       tags: [admin-change-requests]
@@ -186,11 +182,12 @@ paths:
             schema:
               $ref: "#/components/schemas/ChangeRequestCreateInput"
       responses:
-        "200":
+        "201":
+          description: Change request created
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ChangeRequest"
+                $ref: "#/components/schemas/ChangeRequestItemResponse"
 
   /api/admin/change-requests/{id}:
     get:
@@ -200,10 +197,11 @@ paths:
         - $ref: "#/components/parameters/ChangeRequestId"
       responses:
         "200":
+          description: Change request item
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ChangeRequest"
+                $ref: "#/components/schemas/ChangeRequestItemResponse"
         "404":
           $ref: "#/components/responses/NotFound"
     patch:
@@ -219,10 +217,11 @@ paths:
               $ref: "#/components/schemas/ChangeRequestPatchInput"
       responses:
         "200":
+          description: Change request updated
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ChangeRequest"
+                $ref: "#/components/schemas/ChangeRequestItemResponse"
     delete:
       operationId: deleteChangeRequest
       tags: [admin-change-requests]
@@ -365,24 +364,71 @@ components:
           type: string
         status:
           type: string
-          enum: [draft, in_progress, review, released, rejected]
+          enum: [submitted, triaged, planned, in_progress, qa, released, rejected]
         priority:
           type: string
           enum: [P0, P1, P2]
         scope:
           type: string
           enum: [ux, backend, fullstack, security]
-        actor:
+        requestedBy:
           type: string
+        linkedRepo:
+          type: string
+          enum: [misfits-web, reimagined-guide, cross-repo]
         createdAt:
           type: string
           format: date-time
         updatedAt:
           type: string
           format: date-time
+        takenInChargeAt:
+          type: string
+          format: date-time
+          nullable: true
+        takenInChargeBy:
+          type: string
+          nullable: true
+        targetReleaseWindow:
+          type: string
+        acceptanceCriteria:
+          type: array
+          items:
+            type: string
+        workflow:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkflowStage"
+        workflowEvents:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkflowEvent"
+        executionState:
+          type: string
+          enum: [idle, queued, running, failed, success]
+        executionRunId:
+          type: string
+          nullable: true
+        executionStartedAt:
+          type: string
+          format: date-time
+          nullable: true
+        executionLastHeartbeatAt:
+          type: string
+          format: date-time
+          nullable: true
+        executionFinishedAt:
+          type: string
+          format: date-time
+          nullable: true
+        executionLastError:
+          type: string
+          nullable: true
         changelogEntry:
           type: object
           properties:
+            title:
+              type: string
             summary:
               type: string
             releasedAt:
@@ -391,7 +437,7 @@ components:
 
     ChangeRequestCreateInput:
       type: object
-      required: [title]
+      required: [title, problem, desiredOutcome, scope, urgency, impact, requestedBy, linkedRepo]
       properties:
         title:
           type: string
@@ -399,18 +445,37 @@ components:
           type: string
         desiredOutcome:
           type: string
-        priority:
-          type: string
-          enum: [P0, P1, P2]
         scope:
           type: string
           enum: [ux, backend, fullstack, security]
+        urgency:
+          type: string
+          enum: [low, medium, high]
+        impact:
+          type: string
+          enum: [small, medium, high]
+        requestedBy:
+          type: string
+        linkedRepo:
+          type: string
+          enum: [misfits-web, reimagined-guide, cross-repo]
 
     ChangeRequestPatchInput:
       type: object
       properties:
         action:
           type: string
+          enum:
+            [
+              advance,
+              reject,
+              execution_queue,
+              execution_start,
+              execution_heartbeat,
+              execution_fail,
+              execution_success,
+              execution_reset,
+            ]
         note:
           type: string
         actor:
@@ -423,7 +488,90 @@ components:
           type: string
         status:
           type: string
-          enum: [draft, in_progress, review, released, rejected]
+          enum: [submitted, triaged, planned, in_progress, qa, released, rejected]
+        executionRunId:
+          type: string
+        executionError:
+          type: string
+
+    WorkflowStage:
+      type: object
+      properties:
+        key:
+          type: string
+        label:
+          type: string
+        owner:
+          type: string
+          enum: [product, backend, frontend, qa, ops]
+        status:
+          type: string
+          enum: [pending, active, done]
+        checklist:
+          type: array
+          items:
+            type: string
+        doneAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    WorkflowEvent:
+      type: object
+      properties:
+        at:
+          type: string
+          format: date-time
+        actor:
+          type: string
+        action:
+          type: string
+        fromStatus:
+          type: string
+          enum: [submitted, triaged, planned, in_progress, qa, released, rejected]
+        toStatus:
+          type: string
+          enum: [submitted, triaged, planned, in_progress, qa, released, rejected]
+        note:
+          type: string
+          nullable: true
+
+    ChangeRequestCounts:
+      type: object
+      properties:
+        submitted:
+          type: integer
+        triaged:
+          type: integer
+        planned:
+          type: integer
+        in_progress:
+          type: integer
+        qa:
+          type: integer
+        released:
+          type: integer
+        rejected:
+          type: integer
+
+    ChangeRequestListResponse:
+      type: object
+      properties:
+        generatedAt:
+          type: string
+          format: date-time
+        counts:
+          $ref: "#/components/schemas/ChangeRequestCounts"
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChangeRequest"
+
+    ChangeRequestItemResponse:
+      type: object
+      properties:
+        item:
+          $ref: "#/components/schemas/ChangeRequest"
 
     MessageError:
       type: object
