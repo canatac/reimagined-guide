@@ -224,16 +224,23 @@ pub(crate) async fn api_newsletter_sources_update(
     };
 
     let next_name_lc = next_name.to_lowercase();
-    if let Some(conflict) = coll
+    match coll
         .find_one(doc! { "user_id": &user_id, "name_lc": &next_name_lc, "id": { "$ne": id } })
         .await
-        .ok()
-        .flatten()
     {
-        let conflict_name = conflict.get_str("name").ok().unwrap_or("Source");
-        return HttpResponse::Conflict().json(serde_json::json!({
-            "message": format!("Source name already exists: {}", conflict_name),
-        }));
+        Ok(Some(conflict)) => {
+            let conflict_name = conflict.get_str("name").ok().unwrap_or("Source");
+            return HttpResponse::Conflict().json(serde_json::json!({
+                "message": format!("Source name already exists: {}", conflict_name),
+            }));
+        }
+        Ok(None) => {}
+        Err(e) => {
+            eprintln!("api_newsletter_sources_update duplicate check error: {}", e);
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "message": "Failed to update source",
+            }));
+        }
     }
 
     let now = Utc::now().to_rfc3339();
@@ -307,23 +314,22 @@ pub(crate) async fn api_newsletter_sources_delete(
     let sources_coll = db.collection::<bson::Document>("newsletter_sources");
     let items_coll = db.collection::<bson::Document>("newsletter_items");
 
-    let deleted_source = match sources_coll
-        .delete_one(doc! { "user_id": &user_id, "id": id })
+    match sources_coll
+        .find_one(doc! { "user_id": &user_id, "id": id })
         .await
     {
-        Ok(res) => res.deleted_count,
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            return HttpResponse::NotFound().json(serde_json::json!({
+                "message": "Source not found",
+            }));
+        }
         Err(e) => {
-            eprintln!("api_newsletter_sources_delete source delete error: {}", e);
+            eprintln!("api_newsletter_sources_delete find error: {}", e);
             return HttpResponse::InternalServerError().json(serde_json::json!({
                 "message": "Failed to delete source",
             }));
         }
-    };
-
-    if deleted_source == 0 {
-        return HttpResponse::NotFound().json(serde_json::json!({
-            "message": "Source not found",
-        }));
     }
 
     let deleted_items = match items_coll
@@ -333,14 +339,30 @@ pub(crate) async fn api_newsletter_sources_delete(
         Ok(res) => res.deleted_count,
         Err(e) => {
             eprintln!("api_newsletter_sources_delete item cleanup error: {}", e);
-            0
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "message": "Failed to delete source",
+            }));
         }
     };
 
-    HttpResponse::Ok().json(serde_json::json!({
-        "deleted": true,
-        "deletedItems": deleted_items,
-    }))
+    match sources_coll
+        .delete_one(doc! { "user_id": &user_id, "id": id })
+        .await
+    {
+        Ok(res) if res.deleted_count == 1 => HttpResponse::Ok().json(serde_json::json!({
+            "deleted": true,
+            "deletedItems": deleted_items,
+        })),
+        Ok(_) => HttpResponse::NotFound().json(serde_json::json!({
+            "message": "Source not found",
+        })),
+        Err(e) => {
+            eprintln!("api_newsletter_sources_delete source delete error: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({
+                "message": "Failed to delete source",
+            }))
+        }
+    }
 }
 
 pub(crate) async fn api_newsletter_items_list(
@@ -379,6 +401,36 @@ pub(crate) async fn api_newsletter_items_list(
                 "message": "Failed to load newsletter items",
             }))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_url;
+
+    #[test]
+    fn normalize_url_removes_blank_values() {
+        assert_eq!(normalize_url(Some("   ")), None);
+    }
+
+    #[test]
+    fn normalize_url_preserves_absolute_urls() {
+        assert_eq!(
+            normalize_url(Some("http://example.com/news")),
+            Some("http://example.com/news".to_string())
+        );
+        assert_eq!(
+            normalize_url(Some("https://example.com/news")),
+            Some("https://example.com/news".to_string())
+        );
+    }
+
+    #[test]
+    fn normalize_url_adds_https_scheme_when_missing() {
+        assert_eq!(
+            normalize_url(Some("example.com/news")),
+            Some("https://example.com/news".to_string())
+        );
     }
 }
 
