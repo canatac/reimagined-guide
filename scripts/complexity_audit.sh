@@ -1,6 +1,19 @@
 #!/usr/bin/env bash
 set -eu
-pip install --quiet lizard 2>/dev/null || true
+
+if ! command -v lizard >/dev/null 2>&1; then
+  if command -v pip >/dev/null 2>&1; then
+    pip install --quiet lizard 2>/dev/null || true
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -m pip install --quiet lizard 2>/dev/null || true
+  fi
+fi
+
+if ! command -v lizard >/dev/null 2>&1; then
+  echo "[audit] ERROR: lizard non disponible (pip/python3 -m pip introuvable)"
+  exit 2
+fi
+
 echo "[audit] Scan CCN Rust src/ + crates/domain/src/ (seuil 8)..."
 # lizard -T seuil sur cyclomatic_complexity (nom correct depuis lizard 1.17+)
 RESULT=$(lizard -l rust -T cyclomatic_complexity=8 src/ crates/domain/src/ --warnings_only 2>&1 || true)
