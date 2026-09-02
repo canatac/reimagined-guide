@@ -63,6 +63,7 @@ pub(crate) async fn api_emails(
         .max(page_size as i64);
 
     let mut collected: Vec<Email> = Vec::new();
+    let mut failed_mailboxes: Vec<String> = Vec::new();
     for mailbox in folder_to_mailboxes(&folder) {
         match logic
             .get_emails_page(&user_id, &mailbox, fetch_limit, 0)
@@ -73,8 +74,16 @@ pub(crate) async fn api_emails(
             }
             Err(e) => {
                 eprintln!("get_emails mailbox={}: {}", mailbox, e);
+                failed_mailboxes.push(mailbox);
             }
         }
+    }
+
+    if collected.is_empty() && !failed_mailboxes.is_empty() {
+        return HttpResponse::InternalServerError().json(serde_json::json!({
+            "message": "Failed to read mailbox storage",
+            "failedMailboxes": failed_mailboxes,
+        }));
     }
 
     // Newest first (Mongo sort already does this; keep stable merge)

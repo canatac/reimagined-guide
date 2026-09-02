@@ -119,9 +119,13 @@ pub(crate) async fn dispatch_and_finalize(
                 monitoring::emit(ev);
             }
 
-            if let Err(e) = logic.store_email(&v.user_id, "sent", email).await {
-                eprintln!("store sent copy failed: {}", e);
-            }
+            let sent_copy_persisted = match logic.store_email(&v.user_id, "sent", email).await {
+                Ok(_) => true,
+                Err(e) => {
+                    eprintln!("store sent copy failed: {}", e);
+                    false
+                }
+            };
             emit_event(
                 bus,
                 mongo,
@@ -152,6 +156,12 @@ pub(crate) async fn dispatch_and_finalize(
                 "id": id,
                 "messageId": message_id,
                 "deliveryState": delivery_state,
+                "storedInSent": sent_copy_persisted,
+                "warning": if sent_copy_persisted {
+                    serde_json::Value::Null
+                } else {
+                    serde_json::Value::String("Message sent but failed to persist Sent mailbox copy".to_string())
+                }
             }))
         }
         Err(e) => {

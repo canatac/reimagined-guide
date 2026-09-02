@@ -7,6 +7,7 @@ use super::send_endpoints::*;
 
 pub(crate) async fn send_queue_worker(mongo: Arc<mongodb::Client>) {
     let db_name = std::env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
+    let logic = Arc::new(Logic::new(mongo.clone()));
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
@@ -39,6 +40,7 @@ pub(crate) async fn send_queue_worker(mongo: Arc<mongodb::Client>) {
 
         for entry in entries {
             let id = entry.get_str("id").unwrap_or("").to_string();
+            let user_id = entry.get_str("user_id").unwrap_or("admin").to_string();
             let from = entry.get_str("from").unwrap_or("").to_string();
             let to = entry.get_str("to").unwrap_or("").to_string();
             let subject = entry.get_str("subject").unwrap_or("").to_string();
@@ -138,7 +140,13 @@ pub(crate) async fn send_queue_worker(mongo: Arc<mongodb::Client>) {
             };
 
             let status = match send_outgoing_email(&email).await {
-                Ok(_) => "sent",
+                Ok(_) => match logic.store_email(&user_id, "sent", &email).await {
+                    Ok(_) => "sent",
+                    Err(e) => {
+                        eprintln!("send_queue_worker store sent copy failed for {}: {}", id, e);
+                        "sent_copy_failed"
+                    }
+                },
                 Err(e) => {
                     eprintln!("send_queue_worker send error for {}: {}", id, e);
                     "failed"
