@@ -20,6 +20,14 @@ pub(crate) fn register_mailbox_routes(cfg: &mut web::ServiceConfig) {
         .route("/api/drafts/{id}", web::delete().to(api_drafts_delete))
         .route("/api/newsletters/sources", web::get().to(api_newsletter_sources_list))
         .route("/api/newsletters/sources", web::post().to(api_newsletter_sources_create))
+        .route(
+            "/api/newsletters/sources/{id}",
+            web::patch().to(api_newsletter_sources_update),
+        )
+        .route(
+            "/api/newsletters/sources/{id}",
+            web::delete().to(api_newsletter_sources_delete),
+        )
         .route("/api/newsletters/items", web::get().to(api_newsletter_items_list))
         .route("/api/newsletters/items", web::post().to(api_newsletter_items_create))
         .route("/api/templates", web::get().to(api_templates))
