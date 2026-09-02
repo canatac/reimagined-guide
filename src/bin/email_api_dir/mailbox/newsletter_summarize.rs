@@ -285,8 +285,8 @@ pub(crate) async fn api_newsletter_sources_summarize(
         "signal": signal,
         "links": [
             {
-                "name": source_name,
-                "url": source_url,
+                "name": &source_name,
+                "url": &source_url,
             }
         ],
         "createdAt": &now,
