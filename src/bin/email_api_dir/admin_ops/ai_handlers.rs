@@ -305,6 +305,27 @@ struct PricingRate {
     output_per_1m_usd: f64,
 }
 
+#[derive(Debug, Deserialize)]
+struct OpenRouterModelsResponse {
+    #[serde(default)]
+    data: Vec<OpenRouterModelItem>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenRouterModelItem {
+    id: String,
+    #[serde(default)]
+    pricing: Option<OpenRouterPricing>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenRouterPricing {
+    #[serde(default)]
+    prompt: Option<String>,
+    #[serde(default)]
+    completion: Option<String>,
+}
+
 fn parse_env_f64(key: &str) -> Option<f64> {
     env::var(key)
         .ok()
@@ -356,14 +377,65 @@ fn default_pricing_rate() -> PricingRate {
     }
 }
 
+fn parse_openrouter_token_price_to_per_1m(raw: Option<&str>) -> Option<f64> {
+    let per_token = raw
+        .map(|v| v.trim())
+        .filter(|v| !v.is_empty())
+        .and_then(|v| v.parse::<f64>().ok())
+        .filter(|v| v.is_finite() && *v >= 0.0)?;
+    Some(per_token * 1_000_000.0)
+}
+
+async fn fetch_openrouter_pricing_rates(
+) -> Result<HashMap<String, PricingRate>, Box<dyn std::error::Error + Send + Sync>> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()?;
+
+    let mut req = client.get("https://openrouter.ai/api/v1/models");
+    if let Ok(api_key) = env::var("OPENROUTER_API_KEY") {
+        let key = api_key.trim();
+        if !key.is_empty() {
+            req = req.bearer_auth(key);
+        }
+    }
+
+    let payload: OpenRouterModelsResponse = req.send().await?.error_for_status()?.json().await?;
+
+    let mut rates = HashMap::new();
+    for model in payload.data {
+        let pricing = match model.pricing {
+            Some(v) => v,
+            None => continue,
+        };
+        let input = parse_openrouter_token_price_to_per_1m(pricing.prompt.as_deref());
+        let output = parse_openrouter_token_price_to_per_1m(pricing.completion.as_deref());
+        if let (Some(i), Some(o)) = (input, output) {
+            rates.insert(
+                model.id.trim().to_ascii_lowercase(),
+                PricingRate {
+                    input_per_1m_usd: i,
+                    output_per_1m_usd: o,
+                },
+            );
+        }
+    }
+
+    Ok(rates)
+}
+
 fn resolve_pricing_rate(
     model: &str,
+    openrouter_rates: &HashMap<String, PricingRate>,
     overrides: &HashMap<String, PricingRate>,
     default_rate: PricingRate,
 ) -> (PricingRate, &'static str) {
     let key = model.trim().to_ascii_lowercase();
     if let Some(rate) = overrides.get(&key) {
         return (*rate, "model_override");
+    }
+    if let Some(rate) = openrouter_rates.get(&key) {
+        return (*rate, "openrouter");
     }
     (default_rate, "default")
 }
@@ -448,10 +520,24 @@ pub(crate) async fn api_admin_ai_activity(
 
     let default_rate = default_pricing_rate();
     let model_overrides = parse_pricing_overrides_json();
+    let mut warnings: Vec<String> = Vec::new();
+    let openrouter_rates = match fetch_openrouter_pricing_rates().await {
+        Ok(rates) => rates,
+        Err(e) => {
+            warnings.push(format!(
+                "OpenRouter pricing unavailable (fallback env pricing only): {}",
+                e
+            ));
+            HashMap::new()
+        }
+    };
 
     let mut normalized_runs: Vec<serde_json::Value> = Vec::new();
     let mut by_user: HashMap<String, Bucket> = HashMap::new();
     let mut by_model: HashMap<String, Bucket> = HashMap::new();
+    let mut by_feature: HashMap<String, Bucket> = HashMap::new();
+    let mut trend_global: HashMap<String, Bucket> = HashMap::new();
+    let mut trend_by_user: HashMap<String, HashMap<String, Bucket>> = HashMap::new();
 
     let total_runs = runs.len() as i64;
     let mut completed_runs = 0_i64;
@@ -500,6 +586,19 @@ pub(crate) async fn api_admin_ai_activity(
                     .and_then(|v| v.as_str())
                     .map(|v| v.to_string())
             });
+        let day_bucket = run
+            .get("started_at")
+            .and_then(|v| v.as_str())
+            .or_else(|| run.get("startedAt").and_then(|v| v.as_str()))
+            .and_then(|ts| {
+                let t = ts.trim();
+                if t.len() >= 10 {
+                    Some(t[..10].to_string())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| "unknown".to_string());
 
         if status == "completed" || status == "success" {
             completed_runs += 1;
@@ -533,7 +632,8 @@ pub(crate) async fn api_admin_ai_activity(
             latencies.push(latency);
         }
 
-        let (pricing_rate, pricing_applied) = resolve_pricing_rate(&model, &model_overrides, default_rate);
+        let (pricing_rate, pricing_applied) =
+            resolve_pricing_rate(&model, &openrouter_rates, &model_overrides, default_rate);
         let input_cost = ((p as f64) / 1_000_000.0) * pricing_rate.input_per_1m_usd;
         let output_cost = ((c as f64) / 1_000_000.0) * pricing_rate.output_per_1m_usd;
         let run_cost = round6(input_cost + output_cost);
@@ -548,7 +648,7 @@ pub(crate) async fn api_admin_ai_activity(
             .clone()
             .filter(|v| !v.trim().is_empty())
             .unwrap_or_else(|| "unknown".to_string());
-        let ub = by_user.entry(user_key).or_default();
+        let ub = by_user.entry(user_key.clone()).or_default();
         ub.runs += 1;
         ub.prompt_tokens += p;
         ub.completion_tokens += c;
@@ -572,6 +672,46 @@ pub(crate) async fn api_admin_ai_activity(
         }
         if ["failed", "error", "cancelled", "expired"].contains(&status.as_str()) {
             mb.failed_runs += 1;
+        }
+
+        let fb = by_feature.entry(feature.clone()).or_default();
+        fb.runs += 1;
+        fb.prompt_tokens += p;
+        fb.completion_tokens += c;
+        fb.total_tokens += t;
+        fb.total_cost_usd += run_cost;
+        if status == "completed" || status == "success" {
+            fb.completed_runs += 1;
+        }
+        if ["failed", "error", "cancelled", "expired"].contains(&status.as_str()) {
+            fb.failed_runs += 1;
+        }
+
+        let gb = trend_global.entry(day_bucket.clone()).or_default();
+        gb.runs += 1;
+        gb.prompt_tokens += p;
+        gb.completion_tokens += c;
+        gb.total_tokens += t;
+        gb.total_cost_usd += run_cost;
+        if status == "completed" || status == "success" {
+            gb.completed_runs += 1;
+        }
+        if ["failed", "error", "cancelled", "expired"].contains(&status.as_str()) {
+            gb.failed_runs += 1;
+        }
+
+        let user_trend = trend_by_user.entry(user_key.clone()).or_default();
+        let ub_day = user_trend.entry(day_bucket.clone()).or_default();
+        ub_day.runs += 1;
+        ub_day.prompt_tokens += p;
+        ub_day.completion_tokens += c;
+        ub_day.total_tokens += t;
+        ub_day.total_cost_usd += run_cost;
+        if status == "completed" || status == "success" {
+            ub_day.completed_runs += 1;
+        }
+        if ["failed", "error", "cancelled", "expired"].contains(&status.as_str()) {
+            ub_day.failed_runs += 1;
         }
 
         normalized_runs.push(serde_json::json!({
@@ -660,10 +800,117 @@ pub(crate) async fn api_admin_ai_activity(
         bt.cmp(&at)
     });
 
-    let mut warnings: Vec<String> = Vec::new();
-    if default_rate.input_per_1m_usd == 0.0 && default_rate.output_per_1m_usd == 0.0 && model_overrides.is_empty() {
+    let mut by_feature_rows: Vec<serde_json::Value> = by_feature
+        .into_iter()
+        .map(|(feature, b)| {
+            serde_json::json!({
+                "feature": feature,
+                "runs": b.runs,
+                "promptTokens": b.prompt_tokens,
+                "completionTokens": b.completion_tokens,
+                "totalTokens": b.total_tokens,
+                "totalCostUsd": round6(b.total_cost_usd),
+                "avgTokensPerRun": if b.runs > 0 { b.total_tokens / b.runs } else { 0 },
+            })
+        })
+        .collect();
+    by_feature_rows.sort_by(|a, b| {
+        let at = a.get("totalTokens").and_then(|v| v.as_i64()).unwrap_or(0);
+        let bt = b.get("totalTokens").and_then(|v| v.as_i64()).unwrap_or(0);
+        bt.cmp(&at)
+    });
+
+    let mut trend_global_rows: Vec<serde_json::Value> = trend_global
+        .into_iter()
+        .map(|(day, b)| {
+            serde_json::json!({
+                "day": day,
+                "runs": b.runs,
+                "completedRuns": b.completed_runs,
+                "failedRuns": b.failed_runs,
+                "promptTokens": b.prompt_tokens,
+                "completionTokens": b.completion_tokens,
+                "totalTokens": b.total_tokens,
+                "totalCostUsd": round6(b.total_cost_usd),
+                "successRate": if b.runs > 0 { (b.completed_runs as f64) / (b.runs as f64) } else { 0.0 },
+            })
+        })
+        .collect();
+    trend_global_rows.sort_by(|a, b| {
+        let ad = a.get("day").and_then(|v| v.as_str()).unwrap_or("");
+        let bd = b.get("day").and_then(|v| v.as_str()).unwrap_or("");
+        ad.cmp(bd)
+    });
+
+    let mut trend_by_user_rows: Vec<serde_json::Value> = trend_by_user
+        .into_iter()
+        .map(|(user_id, days_map)| {
+            let mut rows: Vec<serde_json::Value> = days_map
+                .into_iter()
+                .map(|(day, b)| {
+                    serde_json::json!({
+                        "day": day,
+                        "runs": b.runs,
+                        "completedRuns": b.completed_runs,
+                        "failedRuns": b.failed_runs,
+                        "promptTokens": b.prompt_tokens,
+                        "completionTokens": b.completion_tokens,
+                        "totalTokens": b.total_tokens,
+                        "totalCostUsd": round6(b.total_cost_usd),
+                        "successRate": if b.runs > 0 { (b.completed_runs as f64) / (b.runs as f64) } else { 0.0 },
+                    })
+                })
+                .collect();
+            rows.sort_by(|a, b| {
+                let ad = a.get("day").and_then(|v| v.as_str()).unwrap_or("");
+                let bd = b.get("day").and_then(|v| v.as_str()).unwrap_or("");
+                ad.cmp(bd)
+            });
+            serde_json::json!({
+                "userId": user_id,
+                "days": rows,
+            })
+        })
+        .collect();
+    trend_by_user_rows.sort_by(|a, b| {
+        let at = a
+            .get("days")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .map(|v| v.get("totalTokens").and_then(|x| x.as_i64()).unwrap_or(0))
+                    .sum::<i64>()
+            })
+            .unwrap_or(0);
+        let bt = b
+            .get("days")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .map(|v| v.get("totalTokens").and_then(|x| x.as_i64()).unwrap_or(0))
+                    .sum::<i64>()
+            })
+            .unwrap_or(0);
+        bt.cmp(&at)
+    });
+
+    if default_rate.input_per_1m_usd == 0.0
+        && default_rate.output_per_1m_usd == 0.0
+        && model_overrides.is_empty()
+        && openrouter_rates.is_empty()
+    {
         warnings.push("LLM pricing not configured: set LLM_COST_DEFAULT_INPUT_PER_1M_USD / LLM_COST_DEFAULT_OUTPUT_PER_1M_USD or LLM_COST_MODEL_OVERRIDES_JSON".to_string());
     }
+
+    let pricing_source = if !openrouter_rates.is_empty() {
+        "openrouter_live"
+    } else if !model_overrides.is_empty() {
+        "env_model_overrides_only"
+    } else if default_rate.input_per_1m_usd > 0.0 || default_rate.output_per_1m_usd > 0.0 {
+        "env_default_only"
+    } else {
+        "unconfigured"
+    };
 
     HttpResponse::Ok().json(serde_json::json!({
         "generatedAt": Utc::now().to_rfc3339(),
@@ -687,6 +934,19 @@ pub(crate) async fn api_admin_ai_activity(
         },
         "byUser": by_user_rows,
         "byModel": by_model_rows,
+        "byFeature": by_feature_rows,
+        "trends": {
+            "global": trend_global_rows,
+            "byUser": trend_by_user_rows,
+        },
+        "pricing": {
+            "source": pricing_source,
+            "provider": "openrouter",
+            "openRouterRatesCount": openrouter_rates.len(),
+            "envModelOverridesCount": model_overrides.len(),
+            "defaultInputPer1MUsd": round6(default_rate.input_per_1m_usd),
+            "defaultOutputPer1MUsd": round6(default_rate.output_per_1m_usd),
+        },
         "warnings": warnings,
         "runs": normalized_runs,
     }))
