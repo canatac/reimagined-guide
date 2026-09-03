@@ -200,6 +200,48 @@ fn should_update_source_url(previous: &str, candidate: &str) -> bool {
     is_homepage_url(previous) && has_specific_path(candidate)
 }
 
+fn discover_section_urls(base_url: &str) -> Vec<String> {
+    let base = match reqwest::Url::parse(base_url) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    let candidates = [
+        "/blog",
+        "/blogs",
+        "/insights",
+        "/news",
+        "/articles",
+        "/publications",
+        "/technology",
+        "/engineering",
+    ];
+
+    for path in candidates {
+        if let Ok(url) = base.join(path) {
+            let s = url.to_string();
+            if seen.insert(s.clone()) {
+                out.push(s);
+            }
+        }
+    }
+    out
+}
+
+fn merge_links(target: &mut Vec<String>, incoming: Vec<String>, max_links: usize) {
+    let mut seen: HashSet<String> = target.iter().cloned().collect();
+    for link in incoming {
+        if seen.insert(link.clone()) {
+            target.push(link);
+            if target.len() >= max_links {
+                break;
+            }
+        }
+    }
+}
+
 fn extract_completion_content(payload: &serde_json::Value) -> Option<String> {
     let content = payload
         .get("choices")?
@@ -401,11 +443,41 @@ pub(crate) async fn api_newsletter_sources_summarize(
     }
 
     let snippet = truncate_chars(&fetched, 12_000);
-    let discovered_links = if is_html_payload(&source_content_type, &raw_source_body) {
-        extract_html_links(&source_url, &raw_source_body, 12)
+    let mut discovered_links = if is_html_payload(&source_content_type, &raw_source_body) {
+        extract_html_links(&source_url, &raw_source_body, 20)
     } else {
         Vec::new()
     };
+
+    if discovered_links.len() < 8 {
+        for section_url in discover_section_urls(&source_url) {
+            let section_resp = match client.get(&section_url).send().await {
+                Ok(resp) if resp.status().is_success() => resp,
+                _ => continue,
+            };
+            let section_type = section_resp
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            let section_body = match section_resp.text().await {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            if !is_html_payload(&section_type, &section_body) {
+                continue;
+            }
+            merge_links(
+                &mut discovered_links,
+                extract_html_links(&section_url, &section_body, 12),
+                20,
+            );
+            if discovered_links.len() >= 12 {
+                break;
+            }
+        }
+    }
 
     let mut link_contexts: Vec<String> = Vec::new();
     for link in discovered_links.iter().take(4) {
@@ -485,12 +557,12 @@ pub(crate) async fn api_newsletter_sources_summarize(
         "messages": [
             {
                 "role": "system",
-                "content": "Tu es un analyste de veille éditoriale. Réponds en français, factuel, sans invention. Tu dois produire des CTA concrètes et orientées action."
+                "content": "Tu es un analyste de veille éditoriale. Réponds en français, factuel, sans invention. Tu dois sélectionner des liens pertinents toi-même et ne jamais demander à l'utilisateur de fournir une URL plus précise."
             },
             {
                 "role": "user",
                 "content": format!(
-                    "Objectif: générer un item newsletter plus pertinent, même si l'URL initiale pointe vers une homepage.\n\nSource: {}\nURL initiale: {}\nSujet: {}\n\nLiens candidats détectés sur la source:\n{}\n\nExtraits de pages candidates:\n{}\n\nContenu de la page source:\n{}\n\nRéponds UNIQUEMENT en JSON valide (pas de markdown, pas de commentaire) avec ce schéma:\n{{\n  \"title\": \"string\",\n  \"summary\": \"string markdown en français avec exactement 3 CTA numérotées (1..3), chacune avec une URL concrète\",\n  \"signal\": 0-100,\n  \"updatedSourceUrl\": \"url absolue de suivi à préférer pour cette source (ou URL initiale si pas mieux)\",\n  \"recommendedLinks\": [{{\"name\":\"string\",\"url\":\"https://...\",\"reason\":\"string\"}}]\n}}\n\nContraintes:\n- Utilise prioritairement les URLs candidates fournies.\n- Si aucune URL candidate n'est pertinente, conserve l'URL initiale.\n- Les CTA doivent être directement actionnables par un humain et contenir une URL.",
+                    "Objectif: générer un item newsletter pertinent à partir d'une URL généraliste (homepage possible), sans travail supplémentaire demandé à l'utilisateur.\n\nSource: {}\nURL directionnelle initiale: {}\nSujet: {}\n\nLiens candidats détectés sur le site:\n{}\n\nExtraits de pages candidates:\n{}\n\nContenu de la page source:\n{}\n\nRéponds UNIQUEMENT en JSON valide (pas de markdown hors champ summary, pas de commentaire) avec ce schéma:\n{{\n  \"title\": \"string\",\n  \"summary\": \"résumé en français des publications récentes avec exactement 3 actions numérotées (1..3), chaque action contenant déjà une URL cliquable\",\n  \"signal\": 0-100,\n  \"updatedSourceUrl\": \"url absolue de page de veille à suivre automatiquement pour les prochains runs\",\n  \"recommendedLinks\": [{{\"name\":\"string\",\"url\":\"https://...\",\"reason\":\"pourquoi ce lien est pertinent\"}}]\n}}\n\nContraintes strictes:\n- Ne demande jamais à l'utilisateur de fournir une autre URL.\n- Tu choisis toi-même les meilleures URLs depuis les liens candidats/extraits disponibles.\n- Priorité aux contenus tech récents et éditoriaux (articles, blogs, insights, publications).\n- Si aucune page spécifique n'est fiable, garde updatedSourceUrl sur l'URL initiale.",
                     source_name,
                     source_url,
                     topic,
@@ -627,24 +699,37 @@ pub(crate) async fn api_newsletter_sources_summarize(
         .and_then(|v| normalize_url(Some(v)));
 
     let mut final_source_url = source_url.clone();
+    let mut source_set_doc = doc! {};
+    let now_update = Utc::now().to_rfc3339();
+    source_set_doc.insert("updatedAt", now_update);
+
+    let tracked_links_docs: Vec<bson::Document> = curated_links
+        .iter()
+        .take(12)
+        .map(|(name, url)| {
+            doc! {
+                "name": name,
+                "url": url,
+            }
+        })
+        .collect();
+    source_set_doc.insert("trackedLinks", tracked_links_docs);
+
     if let Some(next_source_url) = llm_suggested_url {
         if should_update_source_url(&source_url, &next_source_url) {
-            let now_update = Utc::now().to_rfc3339();
-            if let Err(e) = sources_coll
-                .update_one(
-                    doc! { "user_id": &user_id, "id": id },
-                    doc! { "$set": { "url": &next_source_url, "updatedAt": now_update } },
-                )
-                .await
-            {
-                eprintln!(
-                    "api_newsletter_sources_summarize source url update error: {}",
-                    e
-                );
-            } else {
-                final_source_url = next_source_url;
-            }
+            source_set_doc.insert("url", next_source_url.clone());
+            final_source_url = next_source_url;
         }
+    }
+
+    if let Err(e) = sources_coll
+        .update_one(
+            doc! { "user_id": &user_id, "id": id },
+            doc! { "$set": source_set_doc },
+        )
+        .await
+    {
+        eprintln!("api_newsletter_sources_summarize source update error: {}", e);
     }
 
     let now = Utc::now().to_rfc3339();
@@ -703,7 +788,9 @@ pub(crate) async fn api_newsletter_sources_summarize(
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_html_links, extract_http_urls, should_update_source_url};
+    use super::{
+        discover_section_urls, extract_html_links, extract_http_urls, should_update_source_url,
+    };
 
     #[test]
     fn extract_html_links_resolves_relative_urls() {
@@ -735,5 +822,12 @@ mod tests {
             "https://example.com",
             "https://other.com/post"
         ));
+    }
+
+    #[test]
+    fn discover_section_urls_contains_common_editorial_paths() {
+        let urls = discover_section_urls("https://thoughtworks.com");
+        assert!(urls.contains(&"https://thoughtworks.com/insights".to_string()));
+        assert!(urls.contains(&"https://thoughtworks.com/blog".to_string()));
     }
 }
