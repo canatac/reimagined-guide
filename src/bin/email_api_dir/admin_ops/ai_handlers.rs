@@ -299,6 +299,79 @@ fn doc_i64(doc: &bson::Document, key: &str) -> i64 {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct PricingRate {
+    input_per_1m_usd: f64,
+    output_per_1m_usd: f64,
+}
+
+fn parse_env_f64(key: &str) -> Option<f64> {
+    env::var(key)
+        .ok()
+        .and_then(|v| v.trim().parse::<f64>().ok())
+        .filter(|v| v.is_finite() && *v >= 0.0)
+}
+
+fn parse_pricing_overrides_json() -> HashMap<String, PricingRate> {
+    let raw = match env::var("LLM_COST_MODEL_OVERRIDES_JSON") {
+        Ok(v) => v,
+        Err(_) => return HashMap::new(),
+    };
+    let parsed = match serde_json::from_str::<serde_json::Value>(&raw) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("LLM_COST_MODEL_OVERRIDES_JSON parse error: {}", e);
+            return HashMap::new();
+        }
+    };
+    let mut map = HashMap::new();
+    if let Some(obj) = parsed.as_object() {
+        for (model, node) in obj {
+            let input = node
+                .get("input")
+                .and_then(|v| v.as_f64())
+                .filter(|v| v.is_finite() && *v >= 0.0);
+            let output = node
+                .get("output")
+                .and_then(|v| v.as_f64())
+                .filter(|v| v.is_finite() && *v >= 0.0);
+            if let (Some(i), Some(o)) = (input, output) {
+                map.insert(
+                    model.trim().to_ascii_lowercase(),
+                    PricingRate {
+                        input_per_1m_usd: i,
+                        output_per_1m_usd: o,
+                    },
+                );
+            }
+        }
+    }
+    map
+}
+
+fn default_pricing_rate() -> PricingRate {
+    PricingRate {
+        input_per_1m_usd: parse_env_f64("LLM_COST_DEFAULT_INPUT_PER_1M_USD").unwrap_or(0.0),
+        output_per_1m_usd: parse_env_f64("LLM_COST_DEFAULT_OUTPUT_PER_1M_USD").unwrap_or(0.0),
+    }
+}
+
+fn resolve_pricing_rate(
+    model: &str,
+    overrides: &HashMap<String, PricingRate>,
+    default_rate: PricingRate,
+) -> (PricingRate, &'static str) {
+    let key = model.trim().to_ascii_lowercase();
+    if let Some(rate) = overrides.get(&key) {
+        return (*rate, "model_override");
+    }
+    (default_rate, "default")
+}
+
+fn round6(v: f64) -> f64 {
+    (v * 1_000_000.0).round() / 1_000_000.0
+}
+
 pub(crate) async fn load_ai_activity_runs(
     client: &mongodb::Client,
     limit: u32,
@@ -362,6 +435,24 @@ pub(crate) async fn api_admin_ai_activity(
         }
     };
 
+    #[derive(Default, Clone)]
+    struct Bucket {
+        runs: i64,
+        completed_runs: i64,
+        failed_runs: i64,
+        prompt_tokens: i64,
+        completion_tokens: i64,
+        total_tokens: i64,
+        total_cost_usd: f64,
+    }
+
+    let default_rate = default_pricing_rate();
+    let model_overrides = parse_pricing_overrides_json();
+
+    let mut normalized_runs: Vec<serde_json::Value> = Vec::new();
+    let mut by_user: HashMap<String, Bucket> = HashMap::new();
+    let mut by_model: HashMap<String, Bucket> = HashMap::new();
+
     let total_runs = runs.len() as i64;
     let mut completed_runs = 0_i64;
     let mut failed_runs = 0_i64;
@@ -369,6 +460,9 @@ pub(crate) async fn api_admin_ai_activity(
     let mut completion_tokens = 0_i64;
     let mut total_tokens = 0_i64;
     let mut latencies: Vec<i64> = Vec::new();
+    let mut total_cost_usd = 0.0_f64;
+    let mut priced_runs = 0_i64;
+    let mut unpriced_runs = 0_i64;
 
     for run in &runs {
         let status = run
@@ -376,6 +470,37 @@ pub(crate) async fn api_admin_ai_activity(
             .and_then(|v| v.as_str())
             .unwrap_or("unknown")
             .to_ascii_lowercase();
+        let model = run
+            .get("model")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+            .trim()
+            .to_string();
+        let feature = run
+            .get("feature")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+            .trim()
+            .to_string();
+        let user_id = run
+            .get("user_id")
+            .and_then(|v| v.as_str())
+            .map(|v| v.to_string())
+            .or_else(|| {
+                run.get("userId")
+                    .and_then(|v| v.as_str())
+                    .map(|v| v.to_string())
+            });
+        let session_id = run
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .map(|v| v.to_string())
+            .or_else(|| {
+                run.get("sessionId")
+                    .and_then(|v| v.as_str())
+                    .map(|v| v.to_string())
+            });
+
         if status == "completed" || status == "success" {
             completed_runs += 1;
         }
@@ -384,10 +509,14 @@ pub(crate) async fn api_admin_ai_activity(
         }
 
         let usage = run.get("usage").unwrap_or(&serde_json::Value::Null);
-        let p = as_i64(usage.get("prompt_tokens"));
-        let c = as_i64(usage.get("completion_tokens"));
+        let p = as_i64(usage.get("prompt_tokens").or_else(|| usage.get("promptTokens")));
+        let c = as_i64(
+            usage
+                .get("completion_tokens")
+                .or_else(|| usage.get("completionTokens")),
+        );
         let t = {
-            let explicit = as_i64(usage.get("total_tokens"));
+            let explicit = as_i64(usage.get("total_tokens").or_else(|| usage.get("totalTokens")));
             if explicit > 0 {
                 explicit
             } else {
@@ -403,6 +532,74 @@ pub(crate) async fn api_admin_ai_activity(
         if latency > 0 {
             latencies.push(latency);
         }
+
+        let (pricing_rate, pricing_applied) = resolve_pricing_rate(&model, &model_overrides, default_rate);
+        let input_cost = ((p as f64) / 1_000_000.0) * pricing_rate.input_per_1m_usd;
+        let output_cost = ((c as f64) / 1_000_000.0) * pricing_rate.output_per_1m_usd;
+        let run_cost = round6(input_cost + output_cost);
+        if run_cost > 0.0 {
+            priced_runs += 1;
+        } else {
+            unpriced_runs += 1;
+        }
+        total_cost_usd += run_cost;
+
+        let user_key = user_id
+            .clone()
+            .filter(|v| !v.trim().is_empty())
+            .unwrap_or_else(|| "unknown".to_string());
+        let ub = by_user.entry(user_key).or_default();
+        ub.runs += 1;
+        ub.prompt_tokens += p;
+        ub.completion_tokens += c;
+        ub.total_tokens += t;
+        ub.total_cost_usd += run_cost;
+        if status == "completed" || status == "success" {
+            ub.completed_runs += 1;
+        }
+        if ["failed", "error", "cancelled", "expired"].contains(&status.as_str()) {
+            ub.failed_runs += 1;
+        }
+
+        let mb = by_model.entry(model.clone()).or_default();
+        mb.runs += 1;
+        mb.prompt_tokens += p;
+        mb.completion_tokens += c;
+        mb.total_tokens += t;
+        mb.total_cost_usd += run_cost;
+        if status == "completed" || status == "success" {
+            mb.completed_runs += 1;
+        }
+        if ["failed", "error", "cancelled", "expired"].contains(&status.as_str()) {
+            mb.failed_runs += 1;
+        }
+
+        normalized_runs.push(serde_json::json!({
+            "id": run.get("id").and_then(|v| v.as_str()).unwrap_or_default(),
+            "status": status,
+            "model": model,
+            "feature": feature,
+            "startedAt": run
+                .get("started_at")
+                .and_then(|v| v.as_str())
+                .or_else(|| run.get("startedAt").and_then(|v| v.as_str())),
+            "completedAt": run
+                .get("completed_at")
+                .and_then(|v| v.as_str())
+                .or_else(|| run.get("completedAt").and_then(|v| v.as_str())),
+            "latencyMs": if latency > 0 { Some(latency) } else { None::<i64> },
+            "promptTokens": p,
+            "completionTokens": c,
+            "totalTokens": t,
+            "estimatedCostUsd": run_cost,
+            "pricingApplied": pricing_applied,
+            "sessionId": session_id,
+            "userId": user_id,
+            "error": run
+                .get("last_error")
+                .and_then(|v| v.as_str())
+                .or_else(|| run.get("error").and_then(|v| v.as_str())),
+        }));
     }
 
     latencies.sort_unstable();
@@ -419,6 +616,55 @@ pub(crate) async fn api_admin_ai_activity(
         latencies[idx]
     };
 
+    let mut by_user_rows: Vec<serde_json::Value> = by_user
+        .into_iter()
+        .map(|(user_id, b)| {
+            serde_json::json!({
+                "userId": user_id,
+                "runs": b.runs,
+                "completedRuns": b.completed_runs,
+                "failedRuns": b.failed_runs,
+                "promptTokens": b.prompt_tokens,
+                "completionTokens": b.completion_tokens,
+                "totalTokens": b.total_tokens,
+                "totalCostUsd": round6(b.total_cost_usd),
+                "avgTokensPerRun": if b.runs > 0 { b.total_tokens / b.runs } else { 0 },
+                "avgCostPerRunUsd": if b.runs > 0 { round6(b.total_cost_usd / (b.runs as f64)) } else { 0.0 },
+                "successRate": if b.runs > 0 { (b.completed_runs as f64) / (b.runs as f64) } else { 0.0 },
+            })
+        })
+        .collect();
+    by_user_rows.sort_by(|a, b| {
+        let at = a.get("totalTokens").and_then(|v| v.as_i64()).unwrap_or(0);
+        let bt = b.get("totalTokens").and_then(|v| v.as_i64()).unwrap_or(0);
+        bt.cmp(&at)
+    });
+
+    let mut by_model_rows: Vec<serde_json::Value> = by_model
+        .into_iter()
+        .map(|(model, b)| {
+            serde_json::json!({
+                "model": model,
+                "runs": b.runs,
+                "promptTokens": b.prompt_tokens,
+                "completionTokens": b.completion_tokens,
+                "totalTokens": b.total_tokens,
+                "totalCostUsd": round6(b.total_cost_usd),
+                "avgTokensPerRun": if b.runs > 0 { b.total_tokens / b.runs } else { 0 },
+            })
+        })
+        .collect();
+    by_model_rows.sort_by(|a, b| {
+        let at = a.get("totalTokens").and_then(|v| v.as_i64()).unwrap_or(0);
+        let bt = b.get("totalTokens").and_then(|v| v.as_i64()).unwrap_or(0);
+        bt.cmp(&at)
+    });
+
+    let mut warnings: Vec<String> = Vec::new();
+    if default_rate.input_per_1m_usd == 0.0 && default_rate.output_per_1m_usd == 0.0 && model_overrides.is_empty() {
+        warnings.push("LLM pricing not configured: set LLM_COST_DEFAULT_INPUT_PER_1M_USD / LLM_COST_DEFAULT_OUTPUT_PER_1M_USD or LLM_COST_MODEL_OVERRIDES_JSON".to_string());
+    }
+
     HttpResponse::Ok().json(serde_json::json!({
         "generatedAt": Utc::now().to_rfc3339(),
         "limit": limit,
@@ -433,8 +679,16 @@ pub(crate) async fn api_admin_ai_activity(
             "completionTokens": completion_tokens,
             "totalTokens": total_tokens,
             "avgTokensPerRun": if total_runs > 0 { total_tokens / total_runs } else { 0 },
+            "currency": "USD",
+            "totalCostUsd": round6(total_cost_usd),
+            "avgCostPerRunUsd": if total_runs > 0 { round6(total_cost_usd / (total_runs as f64)) } else { 0.0 },
+            "pricedRuns": priced_runs,
+            "unpricedRuns": unpriced_runs,
         },
-        "runs": runs,
+        "byUser": by_user_rows,
+        "byModel": by_model_rows,
+        "warnings": warnings,
+        "runs": normalized_runs,
     }))
 }
 
