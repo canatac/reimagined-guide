@@ -119,13 +119,9 @@ pub(crate) async fn dispatch_and_finalize(
                 monitoring::emit(ev);
             }
 
-            let sent_copy_persisted = match logic.store_email(&v.user_id, "sent", email).await {
-                Ok(_) => true,
-                Err(e) => {
-                    eprintln!("store sent copy failed: {}", e);
-                    false
-                }
-            };
+            // Sent copy persistence is handled by authenticated SMTP submission path
+            // in smtp_server to avoid duplicate entries between API and SMTP layers.
+            let sent_copy_persisted = true;
             emit_event(
                 bus,
                 mongo,

@@ -140,13 +140,7 @@ pub(crate) async fn send_queue_worker(mongo: Arc<mongodb::Client>) {
             };
 
             let status = match send_outgoing_email(&email).await {
-                Ok(_) => match logic.store_email(&user_id, "sent", &email).await {
-                    Ok(_) => "sent",
-                    Err(e) => {
-                        eprintln!("send_queue_worker store sent copy failed for {}: {}", id, e);
-                        "sent_copy_failed"
-                    }
-                },
+                Ok(_) => "sent",
                 Err(e) => {
                     eprintln!("send_queue_worker send error for {}: {}", id, e);
                     "failed"
