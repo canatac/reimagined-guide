@@ -333,6 +333,81 @@ fn extract_http_urls(text: &str, max_urls: usize) -> Vec<String> {
     out
 }
 
+fn build_summary_from_article_digests(parsed_json: &Option<serde_json::Value>) -> Option<String> {
+    let digests = parsed_json
+        .as_ref()
+        .and_then(|v| v.get("articleDigests"))
+        .and_then(|v| v.as_array())?;
+
+    let rows: Vec<(String, String, String)> = digests
+        .iter()
+        .filter_map(|entry| {
+            let url = entry
+                .get("url")
+                .and_then(|v| v.as_str())
+                .and_then(|v| normalize_url(Some(v)))?;
+            let title = entry
+                .get("title")
+                .and_then(|v| v.as_str())
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+                .unwrap_or_else(|| "Article".to_string());
+            let digest = entry
+                .get("summary")
+                .and_then(|v| v.as_str())
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())?;
+            Some((title, url, digest))
+        })
+        .take(5)
+        .collect();
+
+    if rows.is_empty() {
+        return None;
+    }
+
+    let body = rows
+        .iter()
+        .enumerate()
+        .map(|(idx, (title, _url, digest))| format!("{}. {} — {}", idx + 1, title, digest))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let sources = rows
+        .iter()
+        .enumerate()
+        .map(|(idx, (title, url, _digest))| format!("{}. {} — {}", idx + 1, title, url))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    Some(format!("{}\n\nSources:\n{}", body, sources))
+}
+
+fn ensure_sources_block(summary: &str, curated_links: &[(String, String)]) -> String {
+    let trimmed = summary.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    if curated_links.is_empty() {
+        return trimmed.to_string();
+    }
+
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.contains("\nsources:") || lower.starts_with("sources:") {
+        return trimmed.to_string();
+    }
+
+    let sources = curated_links
+        .iter()
+        .take(6)
+        .enumerate()
+        .map(|(idx, (name, url))| format!("{}. {} — {}", idx + 1, name, url))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    format!("{}\n\nSources:\n{}", trimmed, sources)
+}
+
 pub(crate) async fn api_newsletter_sources_summarize(
     req: actix_web::HttpRequest,
     source_id: web::Path<String>,
@@ -562,7 +637,7 @@ pub(crate) async fn api_newsletter_sources_summarize(
             {
                 "role": "user",
                 "content": format!(
-                    "Objectif: générer un item newsletter pertinent à partir d'une URL généraliste (homepage possible), sans travail supplémentaire demandé à l'utilisateur.\n\nSource: {}\nURL directionnelle initiale: {}\nSujet: {}\n\nLiens candidats détectés sur le site:\n{}\n\nExtraits de pages candidates:\n{}\n\nContenu de la page source:\n{}\n\nRéponds UNIQUEMENT en JSON valide (pas de markdown hors champ summary, pas de commentaire) avec ce schéma:\n{{\n  \"title\": \"string\",\n  \"summary\": \"résumé en français des publications récentes avec exactement 3 actions numérotées (1..3), chaque action contenant déjà une URL cliquable\",\n  \"signal\": 0-100,\n  \"updatedSourceUrl\": \"url absolue de page de veille à suivre automatiquement pour les prochains runs\",\n  \"recommendedLinks\": [{{\"name\":\"string\",\"url\":\"https://...\",\"reason\":\"pourquoi ce lien est pertinent\"}}]\n}}\n\nContraintes strictes:\n- Ne demande jamais à l'utilisateur de fournir une autre URL.\n- Tu choisis toi-même les meilleures URLs depuis les liens candidats/extraits disponibles.\n- Priorité aux contenus tech récents et éditoriaux (articles, blogs, insights, publications).\n- Si aucune page spécifique n'est fiable, garde updatedSourceUrl sur l'URL initiale.",
+                    "Objectif: générer un item newsletter pertinent à partir d'une URL généraliste (homepage possible), sans travail supplémentaire demandé à l'utilisateur.\n\nSource: {}\nURL directionnelle initiale: {}\nSujet: {}\n\nLiens candidats détectés sur le site:\n{}\n\nExtraits de pages candidates:\n{}\n\nContenu de la page source:\n{}\n\nRéponds UNIQUEMENT en JSON valide (pas de markdown hors champ summary, pas de commentaire) avec ce schéma:\n{{\n  \"title\": \"string\",\n  \"summary\": \"synthèse éditoriale en français du contenu des publications (pas de call-to-action). Termine impérativement par une section 'Sources:' avec les URLs utilisées\",\n  \"signal\": 0-100,\n  \"updatedSourceUrl\": \"url absolue de page de veille à suivre automatiquement pour les prochains runs\",\n  \"recommendedLinks\": [{{\"name\":\"string\",\"url\":\"https://...\",\"reason\":\"pourquoi ce lien est pertinent\"}}],\n  \"articleDigests\": [{{\"title\":\"string\",\"url\":\"https://...\",\"summary\":\"3-5 phrases factuelles résumant ce contenu\"}}]\n}}\n\nContraintes strictes:\n- Ne demande jamais à l'utilisateur de fournir une autre URL.\n- Tu choisis toi-même les meilleures URLs depuis les liens candidats/extraits disponibles.\n- Priorité aux contenus tech récents et éditoriaux (articles, blogs, insights, publications).\n- Interdit de répondre avec des actions du type 'lis cet article'. Tu dois résumer le contenu.\n- Termine la sortie avec les sources (URLs) en fin de texte.\n- Si aucune page spécifique n'est fiable, garde updatedSourceUrl sur l'URL initiale.",
                     source_name,
                     source_url,
                     topic,
@@ -636,7 +711,7 @@ pub(crate) async fn api_newsletter_sources_summarize(
         .filter(|v| !v.is_empty())
         .unwrap_or_else(|| format!("Digest {}", source_name));
 
-    let summary = parsed_json
+    let base_summary = parsed_json
         .as_ref()
         .and_then(|v| v.get("summary"))
         .and_then(|v| v.as_str())
@@ -672,7 +747,7 @@ pub(crate) async fn api_newsletter_sources_summarize(
         .unwrap_or_default();
 
     if curated_links.is_empty() {
-        curated_links = extract_http_urls(&summary, 4)
+        curated_links = extract_http_urls(&base_summary, 4)
             .into_iter()
             .enumerate()
             .map(|(idx, url)| (format!("Lien recommandé {}", idx + 1), url))
@@ -691,6 +766,10 @@ pub(crate) async fn api_newsletter_sources_summarize(
     if curated_links.is_empty() {
         curated_links.push((source_name.clone(), source_url.clone()));
     }
+
+    let summary = build_summary_from_article_digests(&parsed_json)
+        .unwrap_or(base_summary);
+    let summary = ensure_sources_block(&summary, &curated_links);
 
     let llm_suggested_url = parsed_json
         .as_ref()
@@ -789,7 +868,8 @@ pub(crate) async fn api_newsletter_sources_summarize(
 #[cfg(test)]
 mod tests {
     use super::{
-        discover_section_urls, extract_html_links, extract_http_urls, should_update_source_url,
+        build_summary_from_article_digests, discover_section_urls, ensure_sources_block,
+        extract_html_links, extract_http_urls, should_update_source_url,
     };
 
     #[test]
@@ -829,5 +909,49 @@ mod tests {
         let urls = discover_section_urls("https://thoughtworks.com");
         assert!(urls.contains(&"https://thoughtworks.com/insights".to_string()));
         assert!(urls.contains(&"https://thoughtworks.com/blog".to_string()));
+    }
+
+    #[test]
+    fn ensure_sources_block_appends_sources_when_missing() {
+        let summary = "Synthèse des tendances cloud et IA.";
+        let links = vec![
+            (
+                "Article A".to_string(),
+                "https://example.com/a".to_string(),
+            ),
+            (
+                "Article B".to_string(),
+                "https://example.com/b".to_string(),
+            ),
+        ];
+
+        let rendered = ensure_sources_block(summary, &links);
+        assert!(rendered.contains("Sources:"));
+        assert!(rendered.contains("https://example.com/a"));
+        assert!(rendered.contains("https://example.com/b"));
+    }
+
+    #[test]
+    fn build_summary_from_article_digests_renders_summary_and_sources() {
+        let payload = serde_json::json!({
+            "articleDigests": [
+                {
+                    "title": "Post 1",
+                    "url": "https://example.com/p1",
+                    "summary": "Contenu orienté architecture distribuée."
+                },
+                {
+                    "title": "Post 2",
+                    "url": "https://example.com/p2",
+                    "summary": "Contenu orienté fiabilité et observabilité."
+                }
+            ]
+        });
+
+        let out = build_summary_from_article_digests(&Some(payload)).unwrap_or_default();
+        assert!(out.contains("1. Post 1 — Contenu orienté architecture distribuée."));
+        assert!(out.contains("2. Post 2 — Contenu orienté fiabilité et observabilité."));
+        assert!(out.contains("Sources:"));
+        assert!(out.contains("https://example.com/p1"));
     }
 }
