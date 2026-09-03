@@ -67,9 +67,71 @@ pub(crate) async fn store_and_forward_mongo(
     current: &CustomEmail,
 ) -> std::io::Result<()> {
     let email_to_store = email_from_current(current);
-    let resolved_route = resolve_route(authenticated_session_id, session_manager, &email_to_store.to);
+    // Authenticated SMTP submission: persist in sender Sent (never Inbox),
+    // then deliver locally or forward externally.
+    if let Some(session_id) = authenticated_session_id {
+        let Some(sender_user) = session_manager.get_username(session_id) else {
+            write_response(stream, "550 5.1.1 User unknown\r\n").await?;
+            return Ok(());
+        };
 
-    let Some((user, mbox)) = resolved_route else {
+        if let Err(e) = logic.store_email(&sender_user, "sent", &email_to_store).await {
+            eprintln!("Failed to store sent email in MongoDB: {}", e);
+            write_response(stream, "554 Transaction failed\r\n").await?;
+            return Ok(());
+        }
+
+        let _ = logic
+            .log_mail_event(
+                "sent",
+                &sender_user,
+                &email_to_store.id,
+                &email_to_store.subject,
+                &email_to_store.from,
+                &email_to_store.to,
+            )
+            .await;
+
+        if is_local_recipient(&email_to_store.to) {
+            if let Some(recipient_user) = recipient_local_part(&email_to_store.to) {
+                if let Err(e) = logic.store_email(&recipient_user, "inbox", &email_to_store).await {
+                    eprintln!("Failed local inbox delivery in MongoDB: {}", e);
+                    write_response(stream, "554 Transaction failed\r\n").await?;
+                    return Ok(());
+                }
+                let _ = logic
+                    .log_mail_event(
+                        "received",
+                        &recipient_user,
+                        &email_to_store.id,
+                        &email_to_store.subject,
+                        &email_to_store.from,
+                        &email_to_store.to,
+                    )
+                    .await;
+            }
+            write_response(stream, "250 OK\r\n").await?;
+            return Ok(());
+        }
+
+        match send_outgoing_email(&email_to_store).await {
+            Ok(_) => {
+                write_response(stream, "250 OK\r\n").await?;
+            }
+            Err(e) => {
+                error!("Failed to forward authenticated email: {}", e);
+                write_response(
+                    stream,
+                    "451 4.4.0 Temporary forwarding failure\r\n",
+                )
+                .await?;
+            }
+        }
+        return Ok(());
+    }
+
+    // Unauthenticated inbound SMTP (MX): route strictly to local inbox.
+    let Some((user, mbox)) = resolve_route(None, session_manager, &email_to_store.to) else {
         eprintln!(
             "No routeable mailbox for recipient {}; refusing",
             email_to_store.to
@@ -84,7 +146,6 @@ pub(crate) async fn store_and_forward_mongo(
         return Ok(());
     }
 
-    println!("Email stored successfully in MongoDB");
     let _ = logic
         .log_mail_event(
             "received",
@@ -95,24 +156,7 @@ pub(crate) async fn store_and_forward_mongo(
             &email_to_store.to,
         )
         .await;
-
-    if is_local_recipient(&email_to_store.to) {
-        write_response(stream, "250 OK\r\n").await?;
-    } else {
-        match send_outgoing_email(&email_to_store).await {
-            Ok(_) => {
-                write_response(stream, "250 OK\r\n").await?;
-            }
-            Err(e) => {
-                error!("Failed to forward authenticated email: {}", e);
-                write_response(
-                    stream,
-                    "451 4.4.0 Temporary forwarding failure\r\n",
-                )
-                .await?;
-            }
-        }
-    }
+    write_response(stream, "250 OK\r\n").await?;
     Ok(())
 }
 
