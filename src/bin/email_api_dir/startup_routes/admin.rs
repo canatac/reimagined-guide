@@ -9,6 +9,7 @@ pub(crate) fn register_admin_routes(cfg: &mut web::ServiceConfig) {
         .route("/api/admin/users", web::post().to(api_admin_user_create))
         .route("/api/admin/whoami", web::get().to(api_admin_whoami))
         .route("/api/admin/audit-log", web::get().to(api_admin_audit_log))
+        .route("/api/admin/ai-activity", web::get().to(api_admin_ai_activity))
         .route(
             "/api/admin/users/{id}/invite",
             web::post().to(api_admin_user_invite),
