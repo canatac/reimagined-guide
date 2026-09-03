@@ -190,3 +190,251 @@ pub(crate) fn resolve_hermes_base_url() -> String {
     normalize_hermes_base_url(&base)
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AdminAiActivityQuery {
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct LlmUsageEvent {
+    pub feature: String,
+    pub status: String,
+    pub model: String,
+    pub prompt_tokens: i64,
+    pub completion_tokens: i64,
+    pub total_tokens: i64,
+    pub latency_ms: Option<i64>,
+    pub session_id: Option<String>,
+    pub user_id: Option<String>,
+    pub source_id: Option<String>,
+    pub source_url: Option<String>,
+    pub error: Option<String>,
+}
+
+fn as_i64(value: Option<&serde_json::Value>) -> i64 {
+    value
+        .and_then(|v| {
+            v.as_i64().or_else(|| {
+                v.as_u64()
+                    .and_then(|n| i64::try_from(n).ok())
+                    .or_else(|| v.as_str().and_then(|s| s.parse::<i64>().ok()))
+            })
+        })
+        .unwrap_or(0)
+}
+
+pub(crate) fn extract_llm_usage_tokens(payload: &serde_json::Value) -> (i64, i64, i64) {
+    let usage = payload.get("usage").unwrap_or(&serde_json::Value::Null);
+    let prompt_tokens = as_i64(usage.get("prompt_tokens").or_else(|| usage.get("promptTokens")));
+    let completion_tokens =
+        as_i64(usage.get("completion_tokens").or_else(|| usage.get("completionTokens")));
+    let total_tokens = {
+        let explicit = as_i64(usage.get("total_tokens").or_else(|| usage.get("totalTokens")));
+        if explicit > 0 {
+            explicit
+        } else {
+            prompt_tokens + completion_tokens
+        }
+    };
+
+    (prompt_tokens, completion_tokens, total_tokens)
+}
+
+fn trim_opt(value: Option<String>) -> Option<String> {
+    value.and_then(|v| {
+        let t = v.trim();
+        if t.is_empty() {
+            None
+        } else {
+            Some(t.to_string())
+        }
+    })
+}
+
+pub(crate) async fn log_llm_usage_event(client: &mongodb::Client, event: LlmUsageEvent) {
+    let coll = client
+        .database(&mongo_db_name())
+        .collection::<bson::Document>("ai_activity_events");
+    let now_iso = Utc::now().to_rfc3339();
+    let total_tokens = if event.total_tokens > 0 {
+        event.total_tokens
+    } else {
+        event.prompt_tokens + event.completion_tokens
+    };
+    let doc = doc! {
+        "id": format!("llm-{}", Uuid::new_v4()),
+        "feature": event.feature,
+        "status": event.status,
+        "model": event.model,
+        "promptTokens": event.prompt_tokens,
+        "completionTokens": event.completion_tokens,
+        "totalTokens": total_tokens,
+        "latencyMs": event.latency_ms.unwrap_or(0),
+        "sessionId": trim_opt(event.session_id),
+        "userId": trim_opt(event.user_id),
+        "sourceId": trim_opt(event.source_id),
+        "sourceUrl": trim_opt(event.source_url),
+        "error": trim_opt(event.error),
+        "createdAt": now_iso,
+    };
+
+    if let Err(e) = coll.insert_one(doc).await {
+        eprintln!("log_llm_usage_event insert error: {}", e);
+    }
+}
+
+fn doc_str(doc: &bson::Document, key: &str) -> Option<String> {
+    doc.get_str(key).ok().map(|v| v.to_string())
+}
+
+fn doc_i64(doc: &bson::Document, key: &str) -> i64 {
+    match doc.get(key) {
+        Some(bson::Bson::Int32(v)) => i64::from(*v),
+        Some(bson::Bson::Int64(v)) => *v,
+        Some(bson::Bson::Double(v)) => *v as i64,
+        Some(bson::Bson::String(s)) => s.parse::<i64>().unwrap_or(0),
+        _ => 0,
+    }
+}
+
+pub(crate) async fn load_ai_activity_runs(
+    client: &mongodb::Client,
+    limit: u32,
+) -> Result<Vec<serde_json::Value>, mongodb::error::Error> {
+    let coll = client
+        .database(&mongo_db_name())
+        .collection::<bson::Document>("ai_activity_events");
+    let mut cursor = coll
+        .find(doc! {})
+        .sort(doc! {"createdAt": -1})
+        .limit(i64::from(limit))
+        .await?;
+
+    let mut runs = Vec::new();
+    while let Some(doc) = cursor.try_next().await? {
+        let prompt_tokens = doc_i64(&doc, "promptTokens");
+        let completion_tokens = doc_i64(&doc, "completionTokens");
+        let total_tokens = {
+            let explicit = doc_i64(&doc, "totalTokens");
+            if explicit > 0 {
+                explicit
+            } else {
+                prompt_tokens + completion_tokens
+            }
+        };
+
+        runs.push(serde_json::json!({
+            "id": doc_str(&doc, "id").unwrap_or_else(|| format!("llm-{}", Uuid::new_v4())),
+            "status": doc_str(&doc, "status").unwrap_or_else(|| "completed".to_string()),
+            "model": doc_str(&doc, "model").unwrap_or_else(|| "unknown".to_string()),
+            "started_at": doc_str(&doc, "createdAt"),
+            "completed_at": doc_str(&doc, "createdAt"),
+            "usage": {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+            },
+            "session_id": doc_str(&doc, "sessionId"),
+            "user_id": doc_str(&doc, "userId"),
+            "feature": doc_str(&doc, "feature"),
+            "latency_ms": doc_i64(&doc, "latencyMs"),
+            "last_error": doc_str(&doc, "error"),
+        }));
+    }
+
+    Ok(runs)
+}
+
+pub(crate) async fn api_admin_ai_activity(
+    query: web::Query<AdminAiActivityQuery>,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    let limit = query.limit.unwrap_or(100).clamp(10, 500);
+    let runs = match load_ai_activity_runs(mongo.get_ref(), limit).await {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("api_admin_ai_activity db read error: {}", e);
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "message": "Failed to read LLM activity",
+            }));
+        }
+    };
+
+    let total_runs = runs.len() as i64;
+    let mut completed_runs = 0_i64;
+    let mut failed_runs = 0_i64;
+    let mut prompt_tokens = 0_i64;
+    let mut completion_tokens = 0_i64;
+    let mut total_tokens = 0_i64;
+    let mut latencies: Vec<i64> = Vec::new();
+
+    for run in &runs {
+        let status = run
+            .get("status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+            .to_ascii_lowercase();
+        if status == "completed" || status == "success" {
+            completed_runs += 1;
+        }
+        if ["failed", "error", "cancelled", "expired"].contains(&status.as_str()) {
+            failed_runs += 1;
+        }
+
+        let usage = run.get("usage").unwrap_or(&serde_json::Value::Null);
+        let p = as_i64(usage.get("prompt_tokens"));
+        let c = as_i64(usage.get("completion_tokens"));
+        let t = {
+            let explicit = as_i64(usage.get("total_tokens"));
+            if explicit > 0 {
+                explicit
+            } else {
+                p + c
+            }
+        };
+
+        prompt_tokens += p;
+        completion_tokens += c;
+        total_tokens += t;
+
+        let latency = as_i64(run.get("latency_ms").or_else(|| run.get("latencyMs")));
+        if latency > 0 {
+            latencies.push(latency);
+        }
+    }
+
+    latencies.sort_unstable();
+    let avg_latency = if latencies.is_empty() {
+        0
+    } else {
+        latencies.iter().sum::<i64>() / i64::try_from(latencies.len()).unwrap_or(1)
+    };
+    let p95_latency = if latencies.is_empty() {
+        0
+    } else {
+        let idx = ((latencies.len() as f64) * 0.95).ceil() as usize;
+        let idx = idx.saturating_sub(1).min(latencies.len() - 1);
+        latencies[idx]
+    };
+
+    HttpResponse::Ok().json(serde_json::json!({
+        "generatedAt": Utc::now().to_rfc3339(),
+        "limit": limit,
+        "metrics": {
+            "totalRuns": total_runs,
+            "completedRuns": completed_runs,
+            "failedRuns": failed_runs,
+            "successRate": if total_runs > 0 { (completed_runs as f64) / (total_runs as f64) } else { 0.0 },
+            "avgLatencyMs": avg_latency,
+            "p95LatencyMs": p95_latency,
+            "promptTokens": prompt_tokens,
+            "completionTokens": completion_tokens,
+            "totalTokens": total_tokens,
+            "avgTokensPerRun": if total_runs > 0 { total_tokens / total_runs } else { 0 },
+        },
+        "runs": runs,
+    }))
+}
+

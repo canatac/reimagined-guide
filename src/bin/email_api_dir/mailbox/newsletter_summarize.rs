@@ -651,10 +651,12 @@ pub(crate) async fn api_newsletter_sources_summarize(
         "max_tokens": 900
     });
 
+    let llm_session_id = format!("newsletter-source-{}", id);
+    let llm_started = std::time::Instant::now();
     let hermes_response = match reqwest::Client::new()
         .post(format!("{}/v1/chat/completions", hermes_base))
         .bearer_auth(hermes_api_key)
-        .header("X-Hermes-Session-Id", format!("newsletter-source-{}", id))
+        .header("X-Hermes-Session-Id", llm_session_id.clone())
         .header("X-Hermes-Session-Key", format!("user-{}", user_id))
         .json(&hermes_payload)
         .send()
@@ -663,6 +665,24 @@ pub(crate) async fn api_newsletter_sources_summarize(
         Ok(r) => r,
         Err(e) => {
             eprintln!("api_newsletter_sources_summarize hermes request error: {}", e);
+            log_llm_usage_event(
+                mongo.get_ref(),
+                LlmUsageEvent {
+                    feature: "newsletter_summarize".to_string(),
+                    status: "failed".to_string(),
+                    model: model.clone(),
+                    prompt_tokens: 0,
+                    completion_tokens: 0,
+                    total_tokens: 0,
+                    latency_ms: Some(i64::try_from(llm_started.elapsed().as_millis()).unwrap_or(0)),
+                    session_id: Some(llm_session_id.clone()),
+                    user_id: Some(user_id.clone()),
+                    source_id: Some(id.to_string()),
+                    source_url: Some(source_url.clone()),
+                    error: Some(format!("request_error: {}", e)),
+                },
+            )
+            .await;
             return HttpResponse::BadGateway().json(serde_json::json!({
                 "message": "Newsletter summarization upstream is unavailable",
             }));
@@ -672,6 +692,24 @@ pub(crate) async fn api_newsletter_sources_summarize(
     if !hermes_response.status().is_success() {
         let status = hermes_response.status();
         let body = hermes_response.text().await.unwrap_or_default();
+        log_llm_usage_event(
+            mongo.get_ref(),
+            LlmUsageEvent {
+                feature: "newsletter_summarize".to_string(),
+                status: "failed".to_string(),
+                model: model.clone(),
+                prompt_tokens: 0,
+                completion_tokens: 0,
+                total_tokens: 0,
+                latency_ms: Some(i64::try_from(llm_started.elapsed().as_millis()).unwrap_or(0)),
+                session_id: Some(llm_session_id.clone()),
+                user_id: Some(user_id.clone()),
+                source_id: Some(id.to_string()),
+                source_url: Some(source_url.clone()),
+                error: Some(format!("status_{}", status.as_u16())),
+            },
+        )
+        .await;
         eprintln!(
             "api_newsletter_sources_summarize hermes upstream status={} body={}",
             status, body
@@ -685,11 +723,49 @@ pub(crate) async fn api_newsletter_sources_summarize(
         Ok(v) => v,
         Err(e) => {
             eprintln!("api_newsletter_sources_summarize hermes json parse error: {}", e);
+            log_llm_usage_event(
+                mongo.get_ref(),
+                LlmUsageEvent {
+                    feature: "newsletter_summarize".to_string(),
+                    status: "failed".to_string(),
+                    model: model.clone(),
+                    prompt_tokens: 0,
+                    completion_tokens: 0,
+                    total_tokens: 0,
+                    latency_ms: Some(i64::try_from(llm_started.elapsed().as_millis()).unwrap_or(0)),
+                    session_id: Some(llm_session_id.clone()),
+                    user_id: Some(user_id.clone()),
+                    source_id: Some(id.to_string()),
+                    source_url: Some(source_url.clone()),
+                    error: Some(format!("invalid_json: {}", e)),
+                },
+            )
+            .await;
             return HttpResponse::BadGateway().json(serde_json::json!({
                 "message": "Invalid summarization upstream response",
             }));
         }
     };
+
+    let (prompt_tokens, completion_tokens, total_tokens) = extract_llm_usage_tokens(&hermes_json);
+    log_llm_usage_event(
+        mongo.get_ref(),
+        LlmUsageEvent {
+            feature: "newsletter_summarize".to_string(),
+            status: "completed".to_string(),
+            model: model.clone(),
+            prompt_tokens,
+            completion_tokens,
+            total_tokens,
+            latency_ms: Some(i64::try_from(llm_started.elapsed().as_millis()).unwrap_or(0)),
+            session_id: Some(llm_session_id.clone()),
+            user_id: Some(user_id.clone()),
+            source_id: Some(id.to_string()),
+            source_url: Some(source_url.clone()),
+            error: None,
+        },
+    )
+    .await;
 
     let summary_payload = match extract_completion_content(&hermes_json) {
         Some(v) if !v.trim().is_empty() => v,

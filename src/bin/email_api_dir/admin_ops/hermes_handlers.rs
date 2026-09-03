@@ -1,9 +1,10 @@
 #![allow(unused_imports, dead_code)]
-use super::*;  // inherit all imports from mod.rs
+use super::*; // inherit all imports from mod.rs
 
 pub(crate) async fn api_hermes_chat(
     req: HttpRequest,
     body: web::Json<HermesChatProxyRequest>,
+    mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
     if body.messages.is_empty() {
         return HttpResponse::BadRequest().json(serde_json::json!({
@@ -64,11 +65,12 @@ pub(crate) async fn api_hermes_chat(
         payload["max_tokens"] = serde_json::json!(max_tokens);
     }
 
+    let started = std::time::Instant::now();
     let client = reqwest::Client::new();
     let response = match client
         .post(url)
         .bearer_auth(api_key)
-        .header("X-Hermes-Session-Id", session_id)
+        .header("X-Hermes-Session-Id", session_id.clone())
         .header("X-Hermes-Session-Key", session_key)
         .json(&payload)
         .send()
@@ -77,6 +79,24 @@ pub(crate) async fn api_hermes_chat(
         Ok(r) => r,
         Err(e) => {
             eprintln!("Hermes upstream request error: {}", e);
+            log_llm_usage_event(
+                mongo.get_ref(),
+                LlmUsageEvent {
+                    feature: "hermes_chat_proxy".to_string(),
+                    status: "failed".to_string(),
+                    model: model.clone(),
+                    prompt_tokens: 0,
+                    completion_tokens: 0,
+                    total_tokens: 0,
+                    latency_ms: Some(i64::try_from(started.elapsed().as_millis()).unwrap_or(0)),
+                    session_id: Some(session_id.clone()),
+                    user_id: Some(user_id.clone()),
+                    source_id: None,
+                    source_url: None,
+                    error: Some(format!("request_error: {}", e)),
+                },
+            )
+            .await;
             return HttpResponse::BadGateway().json(serde_json::json!({
                 "error": "Hermes upstream unavailable"
             }));
@@ -88,11 +108,57 @@ pub(crate) async fn api_hermes_chat(
         Ok(v) => v,
         Err(e) => {
             eprintln!("Hermes upstream JSON parse error: {}", e);
+            log_llm_usage_event(
+                mongo.get_ref(),
+                LlmUsageEvent {
+                    feature: "hermes_chat_proxy".to_string(),
+                    status: "failed".to_string(),
+                    model: model.clone(),
+                    prompt_tokens: 0,
+                    completion_tokens: 0,
+                    total_tokens: 0,
+                    latency_ms: Some(i64::try_from(started.elapsed().as_millis()).unwrap_or(0)),
+                    session_id: Some(session_id.clone()),
+                    user_id: Some(user_id.clone()),
+                    source_id: None,
+                    source_url: None,
+                    error: Some(format!("invalid_json: {}", e)),
+                },
+            )
+            .await;
             return HttpResponse::BadGateway().json(serde_json::json!({
                 "error": "Invalid Hermes upstream response"
             }));
         }
     };
+
+    let (prompt_tokens, completion_tokens, total_tokens) = extract_llm_usage_tokens(&body_json);
+    log_llm_usage_event(
+        mongo.get_ref(),
+        LlmUsageEvent {
+            feature: "hermes_chat_proxy".to_string(),
+            status: if status.is_success() {
+                "completed".to_string()
+            } else {
+                "failed".to_string()
+            },
+            model: model.clone(),
+            prompt_tokens,
+            completion_tokens,
+            total_tokens,
+            latency_ms: Some(i64::try_from(started.elapsed().as_millis()).unwrap_or(0)),
+            session_id: Some(session_id.clone()),
+            user_id: Some(user_id.clone()),
+            source_id: None,
+            source_url: None,
+            error: body_json
+                .get("error")
+                .and_then(|v| v.get("message"))
+                .and_then(|v| v.as_str())
+                .map(|v| v.to_string()),
+        },
+    )
+    .await;
 
     HttpResponse::build(
         actix_web::http::StatusCode::from_u16(status.as_u16())
@@ -101,7 +167,20 @@ pub(crate) async fn api_hermes_chat(
     .json(body_json)
 }
 
-pub(crate) async fn api_hermes_runs_list(query: web::Query<HermesRunsListQuery>) -> impl Responder {
+pub(crate) async fn api_hermes_runs_list(
+    query: web::Query<HermesRunsListQuery>,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    let limit = query.limit.unwrap_or(40).clamp(10, 200);
+
+    match load_ai_activity_runs(mongo.get_ref(), limit).await {
+        Ok(runs) if !runs.is_empty() => {
+            return HttpResponse::Ok().json(serde_json::json!({ "data": runs }));
+        }
+        Ok(_) => {}
+        Err(e) => eprintln!("api_hermes_runs_list local usage read error: {}", e),
+    }
+
     let base = resolve_hermes_base_url();
     let api_key = match env::var("HERMES_API_KEY") {
         Ok(v) if !v.trim().is_empty() => v,
@@ -112,7 +191,6 @@ pub(crate) async fn api_hermes_runs_list(query: web::Query<HermesRunsListQuery>)
         }
     };
 
-    let limit = query.limit.unwrap_or(40).clamp(10, 200);
     let url = format!("{}/v1/runs?limit={}", base, limit);
     let client = reqwest::Client::new();
     let response = match client.get(url).bearer_auth(api_key).send().await {
@@ -238,4 +316,3 @@ pub(crate) async fn api_hermes_runs(
     )
     .json(body_json)
 }
-
