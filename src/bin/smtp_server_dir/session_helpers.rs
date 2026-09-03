@@ -67,6 +67,12 @@ pub(crate) async fn store_and_forward_mongo(
     current: &CustomEmail,
 ) -> std::io::Result<()> {
     let email_to_store = email_from_current(current);
+    let is_email_api_submission = current
+        .raw_content
+        .lines()
+        .take_while(|line| !line.trim().is_empty())
+        .any(|line| line.eq_ignore_ascii_case("X-Source-App: misfits-email-api"));
+
     // Authenticated SMTP submission: persist in sender Sent (never Inbox),
     // then deliver locally or forward externally.
     if let Some(session_id) = authenticated_session_id {
@@ -75,22 +81,24 @@ pub(crate) async fn store_and_forward_mongo(
             return Ok(());
         };
 
-        if let Err(e) = logic.store_email(&sender_user, "sent", &email_to_store).await {
-            eprintln!("Failed to store sent email in MongoDB: {}", e);
-            write_response(stream, "554 Transaction failed\r\n").await?;
-            return Ok(());
-        }
+        if !is_email_api_submission {
+            if let Err(e) = logic.store_email(&sender_user, "sent", &email_to_store).await {
+                eprintln!("Failed to store sent email in MongoDB: {}", e);
+                write_response(stream, "554 Transaction failed\r\n").await?;
+                return Ok(());
+            }
 
-        let _ = logic
-            .log_mail_event(
-                "sent",
-                &sender_user,
-                &email_to_store.id,
-                &email_to_store.subject,
-                &email_to_store.from,
-                &email_to_store.to,
-            )
-            .await;
+            let _ = logic
+                .log_mail_event(
+                    "sent",
+                    &sender_user,
+                    &email_to_store.id,
+                    &email_to_store.subject,
+                    &email_to_store.from,
+                    &email_to_store.to,
+                )
+                .await;
+        }
 
         if is_local_recipient(&email_to_store.to) {
             if let Some(recipient_user) = recipient_local_part(&email_to_store.to) {
