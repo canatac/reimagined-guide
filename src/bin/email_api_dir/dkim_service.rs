@@ -22,7 +22,12 @@ impl DkimService for RealDkimService {
                 "to": email.to,
                 "subject": email.subject,
                 "text": email.body,
-                "html": email.body
+                "html": email.body,
+                "attachments": email.attachments.iter().map(|att| serde_json::json!({
+                    "filename": att.filename,
+                    "contentType": att.content_type,
+                    "dataBase64": att.data_base64,
+                })).collect::<Vec<_>>()
             }))
             .send()
             .await

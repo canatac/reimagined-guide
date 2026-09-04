@@ -132,7 +132,7 @@ use simple_smtp_server::security;
 
 
 mod send_email_handler;
-pub use send_email_handler::{send_email_handler as _sh, EmailRequest};
+pub use send_email_handler::{send_email_handler as _sh, EmailAttachment, EmailRequest};
 use send_email_handler::send_email_handler;
 
 // mailing list → mailing_list.rs

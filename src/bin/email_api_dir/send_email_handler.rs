@@ -9,11 +9,22 @@ use simple_smtp_server::smtp_client::send_outgoing_email;
 use crate::DkimService;
 
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
+pub struct EmailAttachment {
+    pub filename: String,
+    #[serde(rename = "contentType")]
+    pub content_type: String,
+    #[serde(rename = "dataBase64")]
+    pub data_base64: String,
+}
+
+#[derive(Deserialize, Serialize, Debug, PartialEq)]
 pub struct EmailRequest {
     pub from: String,
     pub to: String,
     pub subject: String,
     pub body: String,
+    #[serde(default)]
+    pub attachments: Vec<EmailAttachment>,
 }
 
 pub async fn send_email_handler(
