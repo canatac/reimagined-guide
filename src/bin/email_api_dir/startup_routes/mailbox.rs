@@ -39,6 +39,10 @@ pub(crate) fn register_mailbox_routes(cfg: &mut web::ServiceConfig) {
             web::post().to(api_newsletter_sources_summarize),
         )
         .route(
+            "/api/newsletters/suggestions",
+            web::get().to(api_newsletter_suggestions),
+        )
+        .route(
             "/api/newsletters/items",
             web::get().to(api_newsletter_items_list),
         )
