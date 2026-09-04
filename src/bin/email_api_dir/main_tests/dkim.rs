@@ -31,6 +31,7 @@ async fn test_send_email() {
             to: "recipient@example.com".to_string(),
             subject: "Test Email".to_string(),
             body: "This is a test email.".to_string(),
+            attachments: vec![],
         }))
         .times(1)
         .returning(|_| Ok(serde_json::json!({"status": "success", "messageId": "12345"})));
@@ -49,6 +50,7 @@ async fn test_send_email() {
         to: "recipient@example.com".to_string(),
         subject: "Test Email".to_string(),
         body: "This is a test email.".to_string(),
+        attachments: vec![],
     };
 
     let req = test::TestRequest::post()

@@ -22,6 +22,7 @@ pub(crate) struct ValidatedSendRequest {
     pub content_type_header: String,
     pub in_reply_to: Option<String>,
     pub references: Vec<String>,
+    pub attachments: Vec<ComposeAttachmentInput>,
 }
 
 pub(crate) struct DkimOutcome {
@@ -97,6 +98,7 @@ pub(crate) fn validate_send_request(
         content_type_header,
         in_reply_to,
         references,
+        attachments,
     })
 }
 
@@ -109,6 +111,15 @@ pub(crate) async fn apply_dkim_signature(
         to: v.to.clone(),
         subject: v.subject.clone(),
         body: v.mail_body.clone(),
+        attachments: v
+            .attachments
+            .iter()
+            .map(|att| EmailAttachment {
+                filename: att.filename.clone(),
+                content_type: att.content_type.clone(),
+                data_base64: att.data_base64.clone(),
+            })
+            .collect(),
     };
     let dkim_service: Box<dyn DkimService> = Box::new(RealDkimService);
     match dkim_service.sign_email(&email_req).await {
