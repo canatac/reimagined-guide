@@ -116,6 +116,7 @@ jobs:
     permissions:
       contents: read
     if: >-
+      always() &&
       needs.test.result == 'success' &&
       (
         (
