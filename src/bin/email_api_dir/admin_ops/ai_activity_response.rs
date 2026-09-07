@@ -9,9 +9,9 @@ pub(crate) struct Bucket {
     pub(crate) completion_tokens: i64,
     pub(crate) total_tokens: i64,
     pub(crate) total_cost_usd: f64,
-    }
+}
 
-    pub(crate) fn render_ai_activity_response(
+pub(crate) fn render_ai_activity_response(
     limit: i64,
     total_runs: i64,
     completed_runs: i64,
@@ -33,176 +33,31 @@ pub(crate) struct Bucket {
     openrouter_rates: HashMap<String, PricingRate>,
     mut warnings: Vec<String>,
     normalized_runs: Vec<serde_json::Value>,
-    ) -> HttpResponse {
-    latencies.sort_unstable();
-    let avg_latency = if latencies.is_empty() {
-        0
-    } else {
-        latencies.iter().sum::<i64>() / i64::try_from(latencies.len()).unwrap_or(1)
-    };
-    let p95_latency = if latencies.is_empty() {
-        0
-    } else {
-        let idx = ((latencies.len() as f64) * 0.95).ceil() as usize;
-        let idx = idx.saturating_sub(1).min(latencies.len() - 1);
-        latencies[idx]
-    };
+) -> HttpResponse {
+    let (avg_latency, p95_latency) = latency_stats(&mut latencies);
 
-    let mut by_user_rows: Vec<serde_json::Value> = by_user
-        .into_iter()
-        .map(|(user_id, b)| {
-            serde_json::json!({
-                "userId": user_id,
-                "runs": b.runs,
-                "completedRuns": b.completed_runs,
-                "failedRuns": b.failed_runs,
-                "promptTokens": b.prompt_tokens,
-                "completionTokens": b.completion_tokens,
-                "totalTokens": b.total_tokens,
-                "totalCostUsd": round6(b.total_cost_usd),
-                "avgTokensPerRun": if b.runs > 0 { b.total_tokens / b.runs } else { 0 },
-                "avgCostPerRunUsd": if b.runs > 0 { round6(b.total_cost_usd / (b.runs as f64)) } else { 0.0 },
-                "successRate": if b.runs > 0 { (b.completed_runs as f64) / (b.runs as f64) } else { 0.0 },
-            })
-        })
-        .collect();
-    by_user_rows.sort_by(|a, b| {
-        let at = a.get("totalTokens").and_then(|v| v.as_i64()).unwrap_or(0);
-        let bt = b.get("totalTokens").and_then(|v| v.as_i64()).unwrap_or(0);
-        bt.cmp(&at)
-    });
+    let mut by_user_rows = bucket_rows_with_identity(by_user, "userId");
+    sort_rows_by_total_tokens_desc(&mut by_user_rows);
 
-    let mut by_model_rows: Vec<serde_json::Value> = by_model
-        .into_iter()
-        .map(|(model, b)| {
-            serde_json::json!({
-                "model": model,
-                "runs": b.runs,
-                "promptTokens": b.prompt_tokens,
-                "completionTokens": b.completion_tokens,
-                "totalTokens": b.total_tokens,
-                "totalCostUsd": round6(b.total_cost_usd),
-                "avgTokensPerRun": if b.runs > 0 { b.total_tokens / b.runs } else { 0 },
-            })
-        })
-        .collect();
-    by_model_rows.sort_by(|a, b| {
-        let at = a.get("totalTokens").and_then(|v| v.as_i64()).unwrap_or(0);
-        let bt = b.get("totalTokens").and_then(|v| v.as_i64()).unwrap_or(0);
-        bt.cmp(&at)
-    });
+    let mut by_model_rows = bucket_rows_with_identity(by_model, "model");
+    sort_rows_by_total_tokens_desc(&mut by_model_rows);
 
-    let mut by_feature_rows: Vec<serde_json::Value> = by_feature
-        .into_iter()
-        .map(|(feature, b)| {
-            serde_json::json!({
-                "feature": feature,
-                "runs": b.runs,
-                "promptTokens": b.prompt_tokens,
-                "completionTokens": b.completion_tokens,
-                "totalTokens": b.total_tokens,
-                "totalCostUsd": round6(b.total_cost_usd),
-                "avgTokensPerRun": if b.runs > 0 { b.total_tokens / b.runs } else { 0 },
-            })
-        })
-        .collect();
-    by_feature_rows.sort_by(|a, b| {
-        let at = a.get("totalTokens").and_then(|v| v.as_i64()).unwrap_or(0);
-        let bt = b.get("totalTokens").and_then(|v| v.as_i64()).unwrap_or(0);
-        bt.cmp(&at)
-    });
+    let mut by_feature_rows = bucket_rows_with_identity(by_feature, "feature");
+    sort_rows_by_total_tokens_desc(&mut by_feature_rows);
 
-    let mut trend_global_rows: Vec<serde_json::Value> = trend_global
-        .into_iter()
-        .map(|(day, b)| {
-            serde_json::json!({
-                "day": day,
-                "runs": b.runs,
-                "completedRuns": b.completed_runs,
-                "failedRuns": b.failed_runs,
-                "promptTokens": b.prompt_tokens,
-                "completionTokens": b.completion_tokens,
-                "totalTokens": b.total_tokens,
-                "totalCostUsd": round6(b.total_cost_usd),
-                "successRate": if b.runs > 0 { (b.completed_runs as f64) / (b.runs as f64) } else { 0.0 },
-            })
-        })
-        .collect();
-    trend_global_rows.sort_by(|a, b| {
-        let ad = a.get("day").and_then(|v| v.as_str()).unwrap_or("");
-        let bd = b.get("day").and_then(|v| v.as_str()).unwrap_or("");
-        ad.cmp(bd)
-    });
+    let mut trend_global_rows = trend_rows_from_bucket_map(trend_global);
+    sort_rows_by_day_asc(&mut trend_global_rows);
 
-    let mut trend_by_user_rows: Vec<serde_json::Value> = trend_by_user
-        .into_iter()
-        .map(|(user_id, days_map)| {
-            let mut rows: Vec<serde_json::Value> = days_map
-                .into_iter()
-                .map(|(day, b)| {
-                    serde_json::json!({
-                        "day": day,
-                        "runs": b.runs,
-                        "completedRuns": b.completed_runs,
-                        "failedRuns": b.failed_runs,
-                        "promptTokens": b.prompt_tokens,
-                        "completionTokens": b.completion_tokens,
-                        "totalTokens": b.total_tokens,
-                        "totalCostUsd": round6(b.total_cost_usd),
-                        "successRate": if b.runs > 0 { (b.completed_runs as f64) / (b.runs as f64) } else { 0.0 },
-                    })
-                })
-                .collect();
-            rows.sort_by(|a, b| {
-                let ad = a.get("day").and_then(|v| v.as_str()).unwrap_or("");
-                let bd = b.get("day").and_then(|v| v.as_str()).unwrap_or("");
-                ad.cmp(bd)
-            });
-            serde_json::json!({
-                "userId": user_id,
-                "days": rows,
-            })
-        })
-        .collect();
-    trend_by_user_rows.sort_by(|a, b| {
-        let at = a
-            .get("days")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .map(|v| v.get("totalTokens").and_then(|x| x.as_i64()).unwrap_or(0))
-                    .sum::<i64>()
-            })
-            .unwrap_or(0);
-        let bt = b
-            .get("days")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .map(|v| v.get("totalTokens").and_then(|x| x.as_i64()).unwrap_or(0))
-                    .sum::<i64>()
-            })
-            .unwrap_or(0);
-        bt.cmp(&at)
-    });
+    let mut trend_by_user_rows = trend_by_user_rows(trend_by_user);
+    sort_trend_by_user_rows_by_total_tokens_desc(&mut trend_by_user_rows);
 
-    if default_rate.input_per_1m_usd == 0.0
-        && default_rate.output_per_1m_usd == 0.0
-        && model_overrides.is_empty()
-        && openrouter_rates.is_empty()
-    {
-        warnings.push("LLM pricing not configured: set LLM_COST_DEFAULT_INPUT_PER_1M_USD / LLM_COST_DEFAULT_OUTPUT_PER_1M_USD or LLM_COST_MODEL_OVERRIDES_JSON".to_string());
-    }
-
-    let pricing_source = if !openrouter_rates.is_empty() {
-        "openrouter_live"
-    } else if !model_overrides.is_empty() {
-        "env_model_overrides_only"
-    } else if default_rate.input_per_1m_usd > 0.0 || default_rate.output_per_1m_usd > 0.0 {
-        "env_default_only"
-    } else {
-        "unconfigured"
-    };
+    append_pricing_warnings(
+        &default_rate,
+        &model_overrides,
+        &openrouter_rates,
+        &mut warnings,
+    );
+    let pricing_source = pricing_source_label(&default_rate, &model_overrides, &openrouter_rates);
 
     HttpResponse::Ok().json(serde_json::json!({
         "generatedAt": Utc::now().to_rfc3339(),
@@ -211,16 +66,16 @@ pub(crate) struct Bucket {
             "totalRuns": total_runs,
             "completedRuns": completed_runs,
             "failedRuns": failed_runs,
-            "successRate": if total_runs > 0 { (completed_runs as f64) / (total_runs as f64) } else { 0.0 },
+            "successRate": safe_rate(completed_runs, total_runs),
             "avgLatencyMs": avg_latency,
             "p95LatencyMs": p95_latency,
             "promptTokens": prompt_tokens,
             "completionTokens": completion_tokens,
             "totalTokens": total_tokens,
-            "avgTokensPerRun": if total_runs > 0 { total_tokens / total_runs } else { 0 },
+            "avgTokensPerRun": safe_avg_i64(total_tokens, total_runs),
             "currency": "USD",
             "totalCostUsd": round6(total_cost_usd),
-            "avgCostPerRunUsd": if total_runs > 0 { round6(total_cost_usd / (total_runs as f64)) } else { 0.0 },
+            "avgCostPerRunUsd": safe_avg_f64(total_cost_usd, total_runs),
             "pricedRuns": priced_runs,
             "unpricedRuns": unpriced_runs,
         },
@@ -242,5 +97,159 @@ pub(crate) struct Bucket {
         "warnings": warnings,
         "runs": normalized_runs,
     }))
-    }
+}
 
+fn latency_stats(latencies: &mut [i64]) -> (i64, i64) {
+    if latencies.is_empty() {
+        return (0, 0);
+    }
+    latencies.sort_unstable();
+    let avg = latencies.iter().sum::<i64>() / i64::try_from(latencies.len()).unwrap_or(1);
+    let idx = ((latencies.len() as f64) * 0.95).ceil() as usize;
+    let idx = idx.saturating_sub(1).min(latencies.len() - 1);
+    (avg, latencies[idx])
+}
+
+fn bucket_rows_with_identity(
+    buckets: HashMap<String, Bucket>,
+    identity_key: &str,
+) -> Vec<serde_json::Value> {
+    buckets
+        .into_iter()
+        .map(|(identity, b)| {
+            serde_json::json!({
+                identity_key: identity,
+                "runs": b.runs,
+                "completedRuns": b.completed_runs,
+                "failedRuns": b.failed_runs,
+                "promptTokens": b.prompt_tokens,
+                "completionTokens": b.completion_tokens,
+                "totalTokens": b.total_tokens,
+                "totalCostUsd": round6(b.total_cost_usd),
+                "avgTokensPerRun": safe_avg_i64(b.total_tokens, b.runs),
+                "avgCostPerRunUsd": safe_avg_f64(b.total_cost_usd, b.runs),
+                "successRate": safe_rate(b.completed_runs, b.runs),
+            })
+        })
+        .collect()
+}
+
+fn trend_rows_from_bucket_map(buckets: HashMap<String, Bucket>) -> Vec<serde_json::Value> {
+    buckets
+        .into_iter()
+        .map(|(day, b)| {
+            serde_json::json!({
+                "day": day,
+                "runs": b.runs,
+                "completedRuns": b.completed_runs,
+                "failedRuns": b.failed_runs,
+                "promptTokens": b.prompt_tokens,
+                "completionTokens": b.completion_tokens,
+                "totalTokens": b.total_tokens,
+                "totalCostUsd": round6(b.total_cost_usd),
+                "successRate": safe_rate(b.completed_runs, b.runs),
+            })
+        })
+        .collect()
+}
+
+fn trend_by_user_rows(
+    trend_by_user: HashMap<String, HashMap<String, Bucket>>,
+) -> Vec<serde_json::Value> {
+    trend_by_user
+        .into_iter()
+        .map(|(user_id, days_map)| {
+            let mut rows = trend_rows_from_bucket_map(days_map);
+            sort_rows_by_day_asc(&mut rows);
+            serde_json::json!({
+                "userId": user_id,
+                "days": rows,
+            })
+        })
+        .collect()
+}
+
+fn append_pricing_warnings(
+    default_rate: &PricingRate,
+    model_overrides: &HashMap<String, PricingRate>,
+    openrouter_rates: &HashMap<String, PricingRate>,
+    warnings: &mut Vec<String>,
+) {
+    let has_default = default_rate.input_per_1m_usd > 0.0 || default_rate.output_per_1m_usd > 0.0;
+    if has_default || !model_overrides.is_empty() || !openrouter_rates.is_empty() {
+        return;
+    }
+    warnings.push("LLM pricing not configured: set LLM_COST_DEFAULT_INPUT_PER_1M_USD / LLM_COST_DEFAULT_OUTPUT_PER_1M_USD or LLM_COST_MODEL_OVERRIDES_JSON".to_string());
+}
+
+fn pricing_source_label(
+    default_rate: &PricingRate,
+    model_overrides: &HashMap<String, PricingRate>,
+    openrouter_rates: &HashMap<String, PricingRate>,
+) -> &'static str {
+    if !openrouter_rates.is_empty() {
+        return "openrouter_live";
+    }
+    if !model_overrides.is_empty() {
+        return "env_model_overrides_only";
+    }
+    if default_rate.input_per_1m_usd > 0.0 || default_rate.output_per_1m_usd > 0.0 {
+        return "env_default_only";
+    }
+    "unconfigured"
+}
+
+fn safe_avg_i64(total: i64, count: i64) -> i64 {
+    if count > 0 { total / count } else { 0 }
+}
+
+fn safe_avg_f64(total: f64, count: i64) -> f64 {
+    if count > 0 {
+        round6(total / (count as f64))
+    } else {
+        0.0
+    }
+}
+
+fn safe_rate(success_count: i64, total_count: i64) -> f64 {
+    if total_count > 0 {
+        (success_count as f64) / (total_count as f64)
+    } else {
+        0.0
+    }
+}
+
+fn sort_rows_by_total_tokens_desc(rows: &mut [serde_json::Value]) {
+    rows.sort_by(|a, b| {
+        let at = a.get("totalTokens").and_then(|v| v.as_i64()).unwrap_or(0);
+        let bt = b.get("totalTokens").and_then(|v| v.as_i64()).unwrap_or(0);
+        bt.cmp(&at)
+    });
+}
+
+fn sort_rows_by_day_asc(rows: &mut [serde_json::Value]) {
+    rows.sort_by(|a, b| {
+        let ad = a.get("day").and_then(|v| v.as_str()).unwrap_or("");
+        let bd = b.get("day").and_then(|v| v.as_str()).unwrap_or("");
+        ad.cmp(bd)
+    });
+}
+
+fn sort_trend_by_user_rows_by_total_tokens_desc(rows: &mut [serde_json::Value]) {
+    rows.sort_by(|a, b| {
+        let at = trend_row_total_tokens(a);
+        let bt = trend_row_total_tokens(b);
+        bt.cmp(&at)
+    });
+}
+
+fn trend_row_total_tokens(row: &serde_json::Value) -> i64 {
+    row.get("days")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .map(|v| v.get("totalTokens").and_then(|x| x.as_i64()).unwrap_or(0))
+                .sum::<i64>()
+        })
+        .unwrap_or(0)
+}

@@ -7,6 +7,8 @@ mod ai_activity_api;
 mod ai_activity_data;
 #[path = "ai_activity_response.rs"]
 mod ai_activity_response;
+#[path = "ai_activity_api_helpers.rs"]
+mod ai_activity_api_helpers;
 #[path = "ai_core.rs"]
 mod ai_core;
 
