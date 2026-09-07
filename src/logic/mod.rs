@@ -2,7 +2,6 @@ use crate::entities::{CalendarEvent, Email};
 use chrono::Utc;
 use futures_util::TryStreamExt;
 use mongodb::bson;
-use mongodb::error::Error;
 use mongodb::{bson::doc, error::Result, Client};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
