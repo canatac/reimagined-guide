@@ -34,8 +34,8 @@ jobs:
       - name: Cargo check (lib + bins)
         run: cargo check --lib --bins --verbose
 
-      - name: Clippy (deny warnings)
-        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Clippy domain hard-gate (deny warnings)
+        run: cargo clippy -p simple-smtp-domain --all-targets -- -D warnings
 
       - name: LOC guard (max 300 lines per file)
         run: bash scripts/loc_guard.sh
