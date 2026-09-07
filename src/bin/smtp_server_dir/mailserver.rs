@@ -27,7 +27,9 @@ pub(crate) struct MailServer {
 
 impl MailServer {
     pub(crate) fn new(mail_dir: &str) -> Self {
-        fs::create_dir_all(mail_dir).unwrap();
+        if let Err(err) = fs::create_dir_all(mail_dir) {
+            eprintln!("Failed to create mail dir '{}': {}", mail_dir, err);
+        }
         MailServer {
             mail_dir: mail_dir.to_string(),
         }
