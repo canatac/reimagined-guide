@@ -6,7 +6,7 @@ use mongodb::error::Result;
 #[cfg(test)]
 use mockall::automock;
 
-#[cfg_attr(test, for<'a> automock)]
+#[cfg_attr(test, automock)]
 #[async_trait::async_trait]
 pub trait DatabaseInterface: Send + Sync {
     async fn insert_user(&self, user: User) -> Result<()>;
@@ -160,12 +160,12 @@ pub trait DatabaseInterface: Send + Sync {
     ) -> Result<Vec<String>>;
 
     // Boucle 12 — OAuth (find or create).
-    async fn find_or_create_oauth_user(
-        &self,
-        provider: &str,
-        provider_user_id: &str,
-        email: &str,
-        display_name: Option<&str>,
+    async fn find_or_create_oauth_user<'a>(
+        &'a self,
+        provider: &'a str,
+        provider_user_id: &'a str,
+        email: &'a str,
+        display_name: Option<&'a str>,
     ) -> Result<User>;
 }
 
