@@ -96,7 +96,7 @@ use simple_smtp_server::smtp_client::send_outgoing_email;
 use std::collections::HashMap;
 use std::env;
 use std::fs::{create_dir_all, File};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Error as IoError, ErrorKind, Write};
 use std::net::IpAddr;
 use std::path::Path;
 use std::sync::Arc;
@@ -146,7 +146,7 @@ async fn main() -> std::io::Result<()> {
     // rustls 0.23 requires an explicit process-level CryptoProvider.
     rustls::crypto::aws_lc_rs::default_provider()
         .install_default()
-        .expect("failed to install rustls CryptoProvider");
+        .map_err(|e| IoError::other(format!("failed to install rustls CryptoProvider: {e}")))?;
 
     // Connect to MongoDB for auth (URI build + optional warm-up ping → startup.rs).
     let client_uri = startup::build_mongo_uri();
@@ -155,7 +155,7 @@ async fn main() -> std::io::Result<()> {
     let fallback_client = Arc::new(
         mongodb::Client::with_uri_str("mongodb://localhost:27017")
             .await
-            .unwrap(),
+            .map_err(|e| IoError::other(format!("fallback mongo init failed: {e}")))?,
     );
     let shared_mongo = mongo_client
         .clone()
@@ -190,16 +190,18 @@ async fn main() -> std::io::Result<()> {
     let sq_mongo = shared_mongo.clone();
     tokio::spawn(send_queue_worker(sq_mongo));
 
-    let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
+    let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls())
+        .map_err(|e| IoError::other(format!("openssl acceptor init failed: {e}")))?;
+    let privkey_path = env::var("PRIVKEY_PATH")
+        .map_err(|_| IoError::new(ErrorKind::InvalidInput, "PRIVKEY_PATH must be set"))?;
+    let fullchain_path = env::var("FULLCHAIN_PATH")
+        .map_err(|_| IoError::new(ErrorKind::InvalidInput, "FULLCHAIN_PATH must be set"))?;
     builder
-        .set_private_key_file(
-            env::var("PRIVKEY_PATH").expect("PRIVKEY_PATH must be set"),
-            SslFiletype::PEM,
-        )
-        .unwrap();
+        .set_private_key_file(privkey_path, SslFiletype::PEM)
+        .map_err(|e| IoError::other(format!("invalid private key file: {e}")))?;
     builder
-        .set_certificate_chain_file(env::var("FULLCHAIN_PATH").expect("FULLCHAIN_PATH must be set"))
-        .unwrap();
+        .set_certificate_chain_file(fullchain_path)
+        .map_err(|e| IoError::other(format!("invalid fullchain file: {e}")))?;
 
     // Start HTTP server on 8000 (for frontend proxy, no TLS)
     let http_logic = logic.clone();
@@ -208,7 +210,7 @@ async fn main() -> std::io::Result<()> {
     let http_external_imap = external_imap_service.clone();
     let http_addr = env::var("API_SERVER_ADDR").unwrap_or_else(|_| "0.0.0.0:8000".to_string());
     let http_server = actix_web::rt::spawn(async move {
-        HttpServer::new(move || {
+        let server = HttpServer::new(move || {
             App::new()
                 .wrap(startup::build_cors_layer())
                 .app_data(http_logic.clone())
@@ -217,11 +219,18 @@ async fn main() -> std::io::Result<()> {
                 .app_data(http_external_imap.clone())
                 .configure(startup::register_http_routes)
         })
-        .bind(http_addr)
-        .expect("Failed to bind HTTP on 8000")
-        .run()
-        .await
-        .expect("HTTP server error");
+        .bind(http_addr.clone());
+
+        match server {
+            Ok(srv) => {
+                if let Err(e) = srv.run().await {
+                    eprintln!("HTTP server error on {}: {}", http_addr, e);
+                }
+            }
+            Err(e) => {
+                eprintln!("Failed to bind HTTP on {}: {}", http_addr, e);
+            }
+        }
     });
 
     // Start HTTPS server on 8443 (original API)
