@@ -1,5 +1,7 @@
 use mongodb::bson;
-use mongodb::{error::Result, Client};
+use mongodb::error::Result;
+#[cfg(not(test))]
+use mongodb::Client;
 use crate::entities::{CalendarEvent, Email};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -25,6 +27,7 @@ pub(crate) fn default_mailbox() -> String {
     "inbox".to_string()
 }
 
+#[cfg_attr(test, allow(dead_code))]
 pub(crate) fn user_from_document(doc: &bson::Document, fallback_username: &str) -> User {
     let id = doc.get_object_id("_id").ok();
     let username = doc

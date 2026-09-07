@@ -12,7 +12,7 @@ impl ExternalImapService {
         input: &StartSyncInput,
     ) -> Result<ExternalSyncRun> {
         let now = Utc::now();
-        let since_dt = input.since.as_ref().and_then(parse_rfc3339_as_bson);
+        let since_dt = input.since.as_deref().and_then(parse_rfc3339_as_bson);
 
         let run = ExternalSyncRun {
             id: Uuid::new_v4().to_string(),

@@ -1,5 +1,4 @@
 use super::super::*;
-use crate::entities::Email;
 use crate::logic::Logic;
 use mockall::predicate::eq;
 
@@ -30,7 +29,7 @@ use mockall::predicate::eq;
 
         mock_client
             .expect_find_user()
-            .with(eq("testuser"), eq(test_password.as_str()))
+            .with(eq("testuser"), eq(test_password.clone()))
             .times(1)
             .returning(move |_, _| {
                 Ok(Some(User {

@@ -46,7 +46,7 @@ pub(crate) async fn handle_tls_client(
     let mut stream = StreamType::Tls(tokio::io::BufReader::new(tls_stream));
 
     let greeting = "220 mail.misfits.ai ESMTP\r\n";
-    write_response(&mut stream, &greeting).await?;
+    write_response(&mut stream, greeting).await?;
 
     let mut state = SessionState::new();
     loop {
@@ -113,7 +113,7 @@ pub(crate) async fn handle_plain_client(
 
     let greeting = "220 mail.misfits.ai ESMTP\r\n";
     info!("Sending greeting to {}: {}", peer_addr, greeting.trim());
-    write_response(&mut stream, &greeting).await?;
+    write_response(&mut stream, greeting).await?;
 
     let mut state = SessionState::new();
     loop {

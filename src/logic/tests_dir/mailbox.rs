@@ -1,5 +1,4 @@
 use super::super::*;
-use crate::entities::Email;
 use crate::logic::Logic;
 use mockall::predicate::eq;
 

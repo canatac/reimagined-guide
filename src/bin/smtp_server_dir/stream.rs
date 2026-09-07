@@ -4,6 +4,7 @@ use tokio_rustls::server::TlsStream;
 
 // Enum to represent different types of streams (TLS or Plain)
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum StreamType {
     Tls(tokio::io::BufReader<TlsStream<TcpStream>>),
     Plain(tokio::io::BufReader<TcpStream>),

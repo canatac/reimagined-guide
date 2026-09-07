@@ -1,13 +1,12 @@
 //! Auto-généré par le refacto architecte (rules split par catégorie).
 
-use chrono::{Duration as ChronoDuration, Utc};
 use futures_util::TryStreamExt;
-use mongodb::{bson::doc, Client};
+use mongodb::bson::doc;
 use serde_json::json;
 
-use crate::security::{AuthEventKind, RemediationLevel, SecurityAlert, SecuritySeverity};
+use crate::security::{RemediationLevel, SecurityAlert, SecuritySeverity};
 use super::helpers::RuleContext;
-use super::helpers::{since, env_u64, env_f64, env_list, db_name, count};
+use super::helpers::{since, env_u64, db_name, count};
 
 pub async fn rule_spf_dkim_drift(ctx: &RuleContext<'_>) -> Vec<SecurityAlert> {
     let threshold = env_u64("SEC_DKIM_FAIL_THRESHOLD", 10);

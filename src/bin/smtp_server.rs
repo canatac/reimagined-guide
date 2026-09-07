@@ -1,4 +1,7 @@
 
+#![allow(unused_imports)]
+#![allow(unreachable_code)]
+
 use dotenv::dotenv;
 
 use base64::{engine::general_purpose, Engine as _};

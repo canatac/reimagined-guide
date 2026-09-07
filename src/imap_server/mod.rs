@@ -41,7 +41,7 @@ impl ImapServer {
             let (mut socket, peer_addr) = listener.accept().await?;
             println!("New IMAP client connected from {}", peer_addr);
             // Send initial greeting
-            let greeting = format!("* OK IMAP4rev1 Service Ready\r\n");
+            let greeting = "* OK IMAP4rev1 Service Ready\r\n".to_string();
             if let Err(e) = socket.write_all(greeting.as_bytes()).await {
                 eprintln!("Failed to send greeting; err = {:?}", e);
                 return Ok(());
@@ -54,7 +54,7 @@ impl ImapServer {
                 let mut session_id = None; // Track session ID for this connection
                 loop {
                     let n = match socket.read(&mut buffer).await {
-                        Ok(n) if n == 0 => {
+                        Ok(0) => {
                             println!("Connection closed by client");
                             return;
                         }

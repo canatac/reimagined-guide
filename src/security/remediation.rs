@@ -4,7 +4,7 @@ use mongodb::{bson::{self, doc}, Client};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{RemediationAction, RemediationLevel, SecurityAlert, AlertStatus};
+use super::{RemediationAction, SecurityAlert};
 
 // ---------------------------------------------------------------------------
 // Tenant remediation state persisted in `tenant_state` collection

@@ -174,7 +174,7 @@ pub(crate) fn absorb_data_line(current: &mut CustomEmail, in_body: &mut bool, li
         if line.trim().is_empty() {
             *in_body = true;
         } else {
-            let trimmed = line.trim_end_matches(|c| c == '\r' || c == '\n');
+            let trimmed = line.trim_end_matches(['\r', '\n']);
             if !trimmed.is_empty() {
                 apply_parsed_header(current, trimmed);
             }

@@ -167,7 +167,7 @@ pub(crate) fn redact_account(mut a: ExternalImapAccount) -> ExternalImapAccount 
     a
 }
 
-pub(crate) fn parse_rfc3339_as_bson(s: &String) -> Option<chrono::DateTime<chrono::Utc>> {
+pub(crate) fn parse_rfc3339_as_bson(s: &str) -> Option<chrono::DateTime<chrono::Utc>> {
     chrono::DateTime::parse_from_rfc3339(s)
         .ok()
         .map(|dt| dt.with_timezone(&chrono::Utc))
