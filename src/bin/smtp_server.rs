@@ -100,7 +100,7 @@ async fn main() -> Result<(), MainError> {
     // rustls 0.23 requires an explicit process-level CryptoProvider
     rustls::crypto::aws_lc_rs::default_provider()
         .install_default()
-        .map_err(|e| MainError(format!("failed to install rustls CryptoProvider: {e}")))?;
+        .map_err(|_| MainError("failed to install rustls CryptoProvider".to_string()))?;
 
     // Initialize logger
     env_logger::Builder::new()
