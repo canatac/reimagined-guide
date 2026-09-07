@@ -54,82 +54,96 @@ pub(crate) fn bump_interest(weights: &mut std::collections::HashMap<String, i32>
     *entry += delta;
 }
 
+fn bump_for_matches(
+    weights: &mut std::collections::HashMap<String, i32>,
+    corpus: &str,
+    rules: &[(&str, &[&str], i32)],
+) {
+    for (key, terms, delta) in rules {
+        if terms.iter().any(|term| corpus.contains(term)) {
+            bump_interest(weights, key, *delta);
+        }
+    }
+}
+
+fn bump_for_topic(
+    weights: &mut std::collections::HashMap<String, i32>,
+    topic: &str,
+) {
+    const TOPIC_RULES: &[(&str, &str)] = &[
+        ("tech", "tech"),
+        ("finance", "finance"),
+        ("science", "science"),
+        ("design", "design"),
+        ("lifestyle", "lifestyle"),
+    ];
+
+    if let Some((key, _)) = TOPIC_RULES.iter().find(|(_, candidate)| *candidate == topic) {
+        bump_interest(weights, key, 4);
+    }
+}
+
+fn item_text(item: &bson::Document) -> String {
+    let mut corpus = String::new();
+    if let Ok(title) = item.get_str("title") {
+        corpus.push_str(title);
+        corpus.push(' ');
+    }
+    if let Ok(summary) = item.get_str("summary") {
+        corpus.push_str(summary);
+    }
+    corpus.to_lowercase()
+}
+
+fn source_text(source: &bson::Document) -> String {
+    let name = source
+        .get_str("name")
+        .ok()
+        .map(str::to_lowercase)
+        .unwrap_or_default();
+    let url = source
+        .get_str("url")
+        .ok()
+        .map(str::to_lowercase)
+        .unwrap_or_default();
+    format!("{} {}", name, url)
+}
+
 pub(crate) fn infer_interest_weights(
     sources: &[bson::Document],
     items: &[bson::Document],
 ) -> std::collections::HashMap<String, i32> {
     let mut weights: std::collections::HashMap<String, i32> = std::collections::HashMap::new();
 
+    const ITEM_RULES: &[(&str, &[&str], i32)] = &[
+        ("ai", &["ai", "llm", "machine learning"], 3),
+        ("engineering", &["rust", "engineering", "dev"], 2),
+        ("devops", &["cloud", "kubernetes", "devops"], 2),
+        ("security", &["security", "privacy", "auth"], 2),
+        ("startup", &["startup", "product", "saas"], 2),
+    ];
+
+    const SOURCE_RULES: &[(&str, &[&str], i32)] = &[
+        ("tech", &["tech"], 2),
+        ("ai", &["ai", "openai", "qwen"], 2),
+        ("finance", &["finance", "market"], 2),
+        ("security", &["security"], 2),
+        ("science", &["science"], 2),
+        ("design", &["design", "ux"], 2),
+    ];
+
     for item in items {
         if let Ok(topic) = item.get_str("topic") {
-            match topic.trim().to_lowercase().as_str() {
-                "tech" => bump_interest(&mut weights, "tech", 4),
-                "finance" => bump_interest(&mut weights, "finance", 4),
-                "science" => bump_interest(&mut weights, "science", 4),
-                "design" => bump_interest(&mut weights, "design", 4),
-                "lifestyle" => bump_interest(&mut weights, "lifestyle", 4),
-                _ => {}
-            }
+            bump_for_topic(&mut weights, topic.trim().to_lowercase().as_str());
         }
 
-        let mut corpus = String::new();
-        if let Ok(title) = item.get_str("title") {
-            corpus.push_str(title);
-            corpus.push(' ');
-        }
-        if let Ok(summary) = item.get_str("summary") {
-            corpus.push_str(summary);
-        }
-        let text = corpus.to_lowercase();
-
-        if text.contains("ai") || text.contains("llm") || text.contains("machine learning") {
-            bump_interest(&mut weights, "ai", 3);
-        }
-        if text.contains("rust") || text.contains("engineering") || text.contains("dev") {
-            bump_interest(&mut weights, "engineering", 2);
-        }
-        if text.contains("cloud") || text.contains("kubernetes") || text.contains("devops") {
-            bump_interest(&mut weights, "devops", 2);
-        }
-        if text.contains("security") || text.contains("privacy") || text.contains("auth") {
-            bump_interest(&mut weights, "security", 2);
-        }
-        if text.contains("startup") || text.contains("product") || text.contains("saas") {
-            bump_interest(&mut weights, "startup", 2);
-        }
+        let text = item_text(item);
+        bump_for_matches(&mut weights, &text, ITEM_RULES);
     }
 
     for source in sources {
-        let name = source
-            .get_str("name")
-            .ok()
-            .map(str::to_lowercase)
-            .unwrap_or_default();
-        let url = source
-            .get_str("url")
-            .ok()
-            .map(str::to_lowercase)
-            .unwrap_or_default();
-        let corpus = format!("{} {}", name, url);
-
-        if corpus.contains("tech") {
-            bump_interest(&mut weights, "tech", 2);
-        }
-        if corpus.contains("ai") || corpus.contains("openai") || corpus.contains("qwen") {
-            bump_interest(&mut weights, "ai", 2);
-        }
-        if corpus.contains("finance") || corpus.contains("market") {
-            bump_interest(&mut weights, "finance", 2);
-        }
-        if corpus.contains("security") {
-            bump_interest(&mut weights, "security", 2);
-        }
-        if corpus.contains("science") {
-            bump_interest(&mut weights, "science", 2);
-        }
-        if corpus.contains("design") || corpus.contains("ux") {
-            bump_interest(&mut weights, "design", 2);
-        }
+        let corpus = source_text(source);
+        bump_for_matches(&mut weights, &corpus, SOURCE_RULES);
     }
 
     if weights.is_empty() {
