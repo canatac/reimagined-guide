@@ -1,5 +1,6 @@
 use mongodb::bson;
 use mongodb::{error::Result, Client};
+use crate::entities::{CalendarEvent, Email};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
