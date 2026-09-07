@@ -23,7 +23,7 @@ use mockall::predicate::eq;
 
     #[tokio::test]
     async fn test_authenticate_user() {
-        dotenv().ok();
+        dotenv::dotenv().ok();
         let mut mock_client = Box::new(MockDatabaseInterface::new());
         let test_password = uuid::Uuid::new_v4().to_string();
         let expected_password = test_password.clone();
@@ -39,6 +39,7 @@ use mockall::predicate::eq;
                     password: expected_password.clone(),
                     mailbox: "testmailbox".to_string(),
                     condition_accepted: false,
+                    locale: None,
                 }))
             });
 

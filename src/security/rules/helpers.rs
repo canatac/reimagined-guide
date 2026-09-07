@@ -1,7 +1,6 @@
 //! Helpers partagés par toutes les règles (crate-private).
 
 use chrono::{Duration as ChronoDuration, Utc};
-use futures_util::TryStreamExt;
 use mongodb::{bson::doc, Client};
 
 pub(crate) fn since(minutes: i64) -> String {

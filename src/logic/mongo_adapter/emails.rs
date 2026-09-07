@@ -22,7 +22,7 @@ fn normalize_email_document_for_deser(mut doc: bson::Document) -> bson::Document
 }
 
 fn deserialize_email_document(doc: bson::Document) -> Option<Email> {
-    let mut normalized = normalize_email_document_for_deser(doc);
+    let normalized = normalize_email_document_for_deser(doc);
 
     if let Ok(email) = bson::from_document::<Email>(normalized.clone()) {
         return Some(email);
