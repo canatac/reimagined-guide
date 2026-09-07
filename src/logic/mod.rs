@@ -1,4 +1,3 @@
-use crate::entities::{CalendarEvent, Email};
 use mongodb::bson;
 use mongodb::{error::Result, Client};
 use serde::{Deserialize, Serialize};
