@@ -16,7 +16,17 @@ fi
 
 echo "[audit] Scan CCN Rust src/ + crates/domain/src/ (seuil 8)..."
 # lizard -T seuil sur cyclomatic_complexity (nom correct depuis lizard 1.17+)
-RESULT=$(lizard -l rust -T cyclomatic_complexity=8 src/ crates/domain/src/ --warnings_only 2>&1 || true)
+set +e
+RESULT=$(lizard -l rust -T cyclomatic_complexity=8 src/ crates/domain/src/ --warnings_only 2>&1)
+RC=$?
+set -e
 VIOL=$(echo "$RESULT" | grep -cE "^\s*[0-9]+\s+[0-9]+\s+[0-9]+\s+[0-9]+\s+[0-9]+" || echo 0)
 echo "$RESULT" | tail -20
 echo "[audit] Fonctions CCN > 8 : $VIOL"
+
+if [ "$RC" -ne 0 ] || [ "$VIOL" -gt 0 ]; then
+  echo "[audit] ❌ CCN > 8 détecté"
+  exit 1
+fi
+
+echo "[audit] ✅ CCN conforme (<=8)"
