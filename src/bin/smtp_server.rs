@@ -100,7 +100,7 @@ async fn main() -> Result<(), MainError> {
     // rustls 0.23 requires an explicit process-level CryptoProvider
     rustls::crypto::aws_lc_rs::default_provider()
         .install_default()
-        .expect("failed to install rustls CryptoProvider");
+        .map_err(|e| MainError(format!("failed to install rustls CryptoProvider: {e}")))?;
 
     // Initialize logger
     env_logger::Builder::new()
@@ -142,9 +142,12 @@ async fn main() -> Result<(), MainError> {
     // Client creation is lazy; a dummy URI is enough when USE_MONGODB=false.
     let use_mongodb = env::var("USE_MONGODB").unwrap_or_else(|_| "false".to_string()) == "true";
     let client_uri = if use_mongodb {
-        let cluster_url = env::var("MONGODB_CLUSTER_URL").expect("MONGODB_CLUSTER_URL must be set");
-        let mongodb_username = env::var("MONGODB_USERNAME").expect("MONGODB_USERNAME must be set");
-        let mongodb_password = env::var("MONGODB_PASSWORD").expect("MONGODB_PASSWORD must be set");
+        let cluster_url = env::var("MONGODB_CLUSTER_URL")
+            .map_err(|_| MainError("MONGODB_CLUSTER_URL must be set".to_string()))?;
+        let mongodb_username = env::var("MONGODB_USERNAME")
+            .map_err(|_| MainError("MONGODB_USERNAME must be set".to_string()))?;
+        let mongodb_password = env::var("MONGODB_PASSWORD")
+            .map_err(|_| MainError("MONGODB_PASSWORD must be set".to_string()))?;
         let mongodb_app_name =
             env::var("MONGODB_APP_NAME").unwrap_or_else(|_| "mailserver".to_string());
         if cluster_url.starts_with("mongodb://") || cluster_url.starts_with("mongodb+srv://") {
@@ -168,7 +171,11 @@ async fn main() -> Result<(), MainError> {
         "mongodb://127.0.0.1:27017".to_string()
     };
 
-    let client = Arc::new(mongodb::Client::with_uri_str(&client_uri).await.unwrap());
+    let client = Arc::new(
+        mongodb::Client::with_uri_str(&client_uri)
+            .await
+            .map_err(|e| MainError(format!("MongoDB client initialization failed: {e}")))?,
+    );
     // Warm-up: force DNS resolution + TLS + MongoDB handshake at startup
     // so the first user authentication is not delayed by 10-30s.
     if use_mongodb {
@@ -205,11 +212,20 @@ async fn main() -> Result<(), MainError> {
                     let logic_clone = logic.clone(); // Clone the Arc before moving into the closure
                     let session_manager_clone = session_manager.clone(); // Clone the Arc before moving into the closure
                     tokio::spawn(async move {
-                        let tls_stream = acceptor.accept(stream).await.unwrap();
-                        if let Err(e) = handle_tls_client(tls_stream, logic_clone, session_manager_clone).await {
-                            error!("Error handling plain client {}: {}", peer_addr, e);
-                        } else {
-                            info!("Plain client session completed successfully");
+                        match acceptor.accept(stream).await {
+                            Ok(tls_stream) => {
+                                if let Err(e) =
+                                    handle_tls_client(tls_stream, logic_clone, session_manager_clone)
+                                        .await
+                                {
+                                    error!("Error handling TLS client {}: {}", peer_addr, e);
+                                } else {
+                                    info!("TLS client session completed successfully");
+                                }
+                            }
+                            Err(e) => {
+                                error!("TLS handshake failed for {}: {}", peer_addr, e);
+                            }
                         }
                     });
                 }

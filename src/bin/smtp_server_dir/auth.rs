@@ -3,6 +3,7 @@
 #![allow(dead_code)]
 
 use std::env;
+use std::io::{Error as IoError, ErrorKind};
 use std::sync::Arc;
 
 use base64::{engine::general_purpose, Engine as _};
@@ -15,9 +16,11 @@ use simple_smtp_server::session::SessionManager;
 
 use super::{write_response, StreamType};
 
-pub(crate) fn check_credentials(username: &[u8], password: &[u8]) -> bool {
-    let expected_username = env::var("SMTP_USERNAME").expect("SMTP_USERNAME must be set");
-    let expected_password = env::var("SMTP_PASSWORD").expect("SMTP_PASSWORD must be set");
+pub(crate) fn check_credentials(username: &[u8], password: &[u8]) -> std::io::Result<bool> {
+    let expected_username = env::var("SMTP_USERNAME")
+        .map_err(|_| IoError::new(ErrorKind::InvalidInput, "SMTP_USERNAME must be set"))?;
+    let expected_password = env::var("SMTP_PASSWORD")
+        .map_err(|_| IoError::new(ErrorKind::InvalidInput, "SMTP_PASSWORD must be set"))?;
 
     let username_match = constant_time_eq(username, expected_username.as_bytes());
     let password_match = constant_time_eq(password, expected_password.as_bytes());
@@ -25,7 +28,7 @@ pub(crate) fn check_credentials(username: &[u8], password: &[u8]) -> bool {
     debug!("Username match: {}", username_match);
     debug!("Password match: {}", password_match);
 
-    username_match && password_match
+    Ok(username_match && password_match)
 }
 
 // Handle AUTH LOGIN command
@@ -69,7 +72,10 @@ pub(crate) async fn handle_auth_plain(
     session_manager: Arc<SessionManager>,
 ) -> std::io::Result<String> {
     let auth_data = command.split_whitespace().nth(2).unwrap_or("");
-    let decoded = general_purpose::STANDARD.decode(auth_data).unwrap();
+    let decoded = match general_purpose::STANDARD.decode(auth_data) {
+        Ok(v) => v,
+        Err(_) => return Ok("501 Malformed AUTH PLAIN\r\n".to_string()),
+    };
     let parts: Vec<&[u8]> = decoded.split(|&b| b == 0).collect();
 
     if parts.len() != 3 {
@@ -79,15 +85,20 @@ pub(crate) async fn handle_auth_plain(
     let username = parts[1];
     let password = parts[2];
 
-    if check_credentials(username, password) {
-        let username_str = String::from_utf8_lossy(username).to_string();
-        let session_id = session_manager.create_session(&username_str);
-        session_manager.set_mailbox(&session_id, "inbox");
-        Ok(format!(
-            "235 Authentication successful, session ID: {}\r\n",
-            session_id
-        ))
-    } else {
-        Ok("535 Authentication failed\r\n".to_string())
+    match check_credentials(username, password) {
+        Ok(true) => {
+            let username_str = String::from_utf8_lossy(username).to_string();
+            let session_id = session_manager.create_session(&username_str);
+            session_manager.set_mailbox(&session_id, "inbox");
+            Ok(format!(
+                "235 Authentication successful, session ID: {}\r\n",
+                session_id
+            ))
+        }
+        Ok(false) => Ok("535 Authentication failed\r\n".to_string()),
+        Err(err) => {
+            debug!("AUTH PLAIN credential config error: {}", err);
+            Ok("454 Temporary authentication failure\r\n".to_string())
+        }
     }
 }
