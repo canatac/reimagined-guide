@@ -1,5 +1,33 @@
 use super::*;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct FetchArguments {
+    pub sequence_set: String,
+    pub data_items: String,
+}
+
+pub(super) fn parse_fetch_arguments(command_parts: &[String]) -> Option<FetchArguments> {
+    if command_parts.len() < 4 {
+        return None;
+    }
+
+    if command_parts[1].to_uppercase() != "FETCH" {
+        return None;
+    }
+
+    let sequence_set = command_parts[2].trim().to_string();
+    let data_items = command_parts[3..].join(" ").trim().to_string();
+
+    if sequence_set.is_empty() || data_items.is_empty() {
+        return None;
+    }
+
+    Some(FetchArguments {
+        sequence_set,
+        data_items,
+    })
+}
+
 pub(super) fn parse_email(email_content: &str) -> (HashMap<String, String>, String) {
     let mut headers = HashMap::new();
     let mut body = String::new();
@@ -70,5 +98,39 @@ impl ImapServer {
         } else {
             return format!("NO APPEND failed: User not authenticated\r\n");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_fetch_arguments;
+
+    #[test]
+    fn parse_fetch_arguments_supports_single_data_item() {
+        let parts = vec![
+            "A1".to_string(),
+            "FETCH".to_string(),
+            "1".to_string(),
+            "FLAGS".to_string(),
+        ];
+
+        let args = parse_fetch_arguments(&parts).expect("expected valid FETCH args");
+        assert_eq!(args.sequence_set, "1");
+        assert_eq!(args.data_items, "FLAGS");
+    }
+
+    #[test]
+    fn parse_fetch_arguments_supports_parenthesized_data_items() {
+        let parts = vec![
+            "A2".to_string(),
+            "FETCH".to_string(),
+            "1:*".to_string(),
+            "(FLAGS".to_string(),
+            "BODY.PEEK[HEADER])".to_string(),
+        ];
+
+        let args = parse_fetch_arguments(&parts).expect("expected valid FETCH args");
+        assert_eq!(args.sequence_set, "1:*");
+        assert_eq!(args.data_items, "(FLAGS BODY.PEEK[HEADER])");
     }
 }
