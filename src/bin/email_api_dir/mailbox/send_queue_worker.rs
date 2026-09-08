@@ -265,6 +265,7 @@ pub(crate) async fn send_queue_worker(mongo: Arc<mongodb::Client>) {
 #[cfg(test)]
 mod tests {
     use super::{backoff_delay_ms, deterministic_jitter_ms};
+    use std::io::{Error, ErrorKind};
 
     #[test]
     fn backoff_grows_and_is_bounded() {
@@ -302,6 +303,18 @@ mod tests {
         let d2 = backoff_delay_ms("msg-3", 2, 250, 5_000, 0);
         let d3 = backoff_delay_ms("msg-3", 3, 250, 5_000, 0);
         assert!(d3 >= d2);
+    }
+
+    #[test]
+    fn retryable_error_classification_handles_kind_and_message() {
+        let timeout_err = Error::new(ErrorKind::TimedOut, "network timeout");
+        assert!(super::is_retryable_error(&timeout_err));
+
+        let smtp_451 = Error::other("451 4.4.0 Temporary forwarding failure");
+        assert!(super::is_retryable_error(&smtp_451));
+
+        let hard_fail = Error::other("550 5.1.1 unknown user");
+        assert!(!super::is_retryable_error(&hard_fail));
     }
 }
 
