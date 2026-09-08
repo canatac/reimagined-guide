@@ -2,6 +2,7 @@
 // Extracted from monitoring_handlers.rs in cycle 26 (LOC split).
 
 use actix_web::{web, HttpResponse};
+use chrono::Utc;
 use futures_util::stream;
 use mongodb::bson::doc;
 use simple_smtp_server::monitoring;
@@ -65,6 +66,24 @@ pub(crate) async fn api_monitoring_summary(
     .await;
     let avg_risk = risk_docs.first().and_then(|d| d.get_f64("avg_risk").ok()).unwrap_or(0.0);
 
+    let queue_filter = doc! { "status": { "$in": ["pending", "scheduled", "sending"] } };
+    let queue_coll = mongo
+        .database(&std::env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string()))
+        .collection::<mongodb::bson::Document>("send_queue");
+    let queue_depth = queue_coll
+        .count_documents(queue_filter.clone())
+        .await
+        .unwrap_or(0);
+    let queue_latency_ms = queue_coll
+        .find_one(queue_filter)
+        .sort(doc! { "created_at": 1 })
+        .await
+        .ok()
+        .flatten()
+        .and_then(|d| d.get_datetime("created_at").ok().map(|dt| dt.timestamp_millis()))
+        .map(|created_at_ms| (Utc::now().timestamp_millis() - created_at_ms).max(0) as u64)
+        .unwrap_or(0);
+
     HttpResponse::Ok().json(serde_json::json!({
         "window": query.window,
         "since": since,
@@ -75,6 +94,17 @@ pub(crate) async fn api_monitoring_summary(
         "avgTotalMs": avg_total_ms.round(),
         "p95TotalMs": p95,
         "avgRiskScore": (avg_risk * 10.0).round() / 10.0,
+        "queueDepth": queue_depth,
+        "queueLatencyMs": queue_latency_ms,
+        "prometheus": {
+            "smtp_queue_depth": queue_depth,
+            "smtp_queue_latency_ms": queue_latency_ms,
+            "labels": ["instance", "queue", "status"],
+            "units": {
+                "smtp_queue_depth": "messages",
+                "smtp_queue_latency_ms": "milliseconds"
+            }
+        }
     }))
 }
 

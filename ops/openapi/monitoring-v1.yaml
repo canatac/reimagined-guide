@@ -194,6 +194,29 @@ components:
           type: object
           additionalProperties:
             type: integer
+        queueDepth:
+          type: integer
+          description: Current SMTP send queue depth (pending|scheduled|sending)
+        queueLatencyMs:
+          type: integer
+          description: Age in milliseconds of the oldest queued SMTP message
+        prometheus:
+          type: object
+          properties:
+            smtp_queue_depth:
+              type: integer
+              description: Prometheus metric value for queue depth
+            smtp_queue_latency_ms:
+              type: integer
+              description: Prometheus metric value for oldest queued latency
+            labels:
+              type: array
+              items:
+                type: string
+            units:
+              type: object
+              additionalProperties:
+                type: string
 
     MailEvent:
       type: object
