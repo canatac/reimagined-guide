@@ -81,8 +81,10 @@ pub(crate) fn parse_header_line(raw_line: &str) -> Result<(String, String), Head
 
     let (name, value) = raw_line
         .split_once(':')
-        .ok_or(HeaderParseReject::MissingSeparator)
-        .or_else(reject)?;
+        .ok_or_else(|| {
+            HEADER_REJECT_COUNT.fetch_add(1, Ordering::Relaxed);
+            HeaderParseReject::MissingSeparator
+        })?;
     let name = name.trim();
     if name.is_empty() {
         return reject(HeaderParseReject::EmptyName);
