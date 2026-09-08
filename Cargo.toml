@@ -30,8 +30,8 @@ path = "src/lib.rs"
 
 [dependencies]
 simple-smtp-domain = { path = "crates/domain" }
-actix-web = { version = "4.11.0", features = ["openssl"] }
-openssl = "0.10.66"
+actix-web = { version = "4.11.0", features = ["rust-tls"] }
+rust-tls = { version = "0.23.12", default-features = false, features = ["std", "aws-lc-rs"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 tokio = { version = "1.53.1", features = ["full", "tracing"] }
