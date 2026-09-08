@@ -48,12 +48,15 @@ impl SendContext {
             return;
         }
         let mut ev = self.emit(crate::monitoring::SmtpEventType::Bounced);
+        let taxonomy = crate::monitoring::classify_smtp_reject(None, &reason);
         ev.mx_host = mx_host;
         ev.remote_ip = remote_ip;
         ev.total_ms = total_ms;
         ev.dns_ms = dns_ms;
         ev.status = crate::monitoring::SmtpStatus::Failed;
         ev.bounce_type = Some(crate::monitoring::BounceType::Soft);
+        ev.reject_reason_code = Some(taxonomy.reason_code.to_string());
+        ev.reject_action = Some(taxonomy.action.to_string());
         ev.bounce_reason = Some(reason);
         crate::monitoring::emit(ev);
     }
@@ -119,6 +122,7 @@ pub(super) fn emit_final_event(
         Err(e) => {
             let err_msg = e.to_string();
             let smtp_code = crate::monitoring::parse_smtp_code(&err_msg);
+            let taxonomy = crate::monitoring::classify_smtp_reject(smtp_code, &err_msg);
             let bounce_type = match smtp_code {
                 Some(c) if c >= 550 => crate::monitoring::BounceType::Hard,
                 Some(421) | Some(450) => crate::monitoring::BounceType::Soft,
@@ -130,6 +134,8 @@ pub(super) fn emit_final_event(
             ev.total_ms = Some(total_ms);
             ev.smtp_code = smtp_code;
             ev.smtp_reply = Some(err_msg.clone());
+            ev.reject_reason_code = Some(taxonomy.reason_code.to_string());
+            ev.reject_action = Some(taxonomy.action.to_string());
             ev.status = crate::monitoring::SmtpStatus::Bounced;
             ev.bounce_type = Some(bounce_type);
             ev.bounce_reason = Some(err_msg);

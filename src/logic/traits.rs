@@ -4,7 +4,7 @@ use mongodb::bson;
 use mongodb::error::Result;
 
 #[cfg(test)]
-use mockall::{automock, predicate::*};
+use mockall::automock;
 
 #[cfg_attr(test, automock)]
 #[async_trait::async_trait]
@@ -160,12 +160,12 @@ pub trait DatabaseInterface: Send + Sync {
     ) -> Result<Vec<String>>;
 
     // Boucle 12 — OAuth (find or create).
-    async fn find_or_create_oauth_user(
-        &self,
-        provider: &str,
-        provider_user_id: &str,
-        email: &str,
-        display_name: Option<&str>,
+    async fn find_or_create_oauth_user<'a>(
+        &'a self,
+        provider: &'a str,
+        provider_user_id: &'a str,
+        email: &'a str,
+        display_name: Option<&'a str>,
     ) -> Result<User>;
 }
 
@@ -181,47 +181,9 @@ impl LogicTrait for Logic {
     }
 }
 
-// Cycle 22 hexagonal — ré-export du port migré vers `crates/domain`.
-// Les nouveaux use-cases doivent dépendre de `simple_smtp_domain::ports::LogicPort`
-// (exprimé en `DomainResult`) plutôt que du `LogicTrait` historique lié à mongodb.
-pub use simple_smtp_domain::ports::LogicPort;
-
-// Cycle 23 hexagonal — 2ème port migré : `MailboxSessionPort` couvre
-// NOOP / CLOSE / CHECK, entièrement autonome (pas de dépendances mongodb).
-pub use simple_smtp_domain::ports::MailboxSessionPort;
-
-// Cycle 24 hexagonal — 3ème port migré : `MailboxSubscriptionPort`
-// couvre IMAP SUBSCRIBE / UNSUBSCRIBE (signatures primitives, aucun
-// type infrastructure).
-pub use simple_smtp_domain::ports::MailboxSubscriptionPort;
-
-// Cycle 25 hexagonal — 4ème port migré : `EmailMutationPort` couvre
-// update_email_flag / delete_email / archive_email (signatures &str,
-// aucun type mongodb/bson).
-pub use simple_smtp_domain::ports::EmailMutationPort;
-
-// Cycle 26 hexagonal — 5ème port migré : `MailboxCrudPort` couvre
-// IMAP CREATE / DELETE / RENAME (variantes non user-scopées).
-// Signatures 100 % primitives (`&str`), aucun type infrastructure.
-pub use simple_smtp_domain::ports::MailboxCrudPort;
-
-// Cycle 27 hexagonal — 6ème port migré : `MessageStoreFlagsPort` couvre
-// IMAP SEARCH / EXPUNGE / COPY / STORE (signatures primitives : &str,
-// Vec<String>, Vec<u32>). Aucun type infrastructure.
-pub use simple_smtp_domain::ports::MessageStoreFlagsPort;
-
-/// Re-export du port autonome `ExternalImapAccountQueryPort` (cycle 29 hexagonal, 8ème port).
-pub use simple_smtp_domain::ports::ExternalImapAccountQueryPort;
-
-// Cycle 30 hexagonal — 10ème port migré : `UserAliasPort` (primitives &str).
-pub use simple_smtp_domain::ports::UserAliasPort;
-
-// Cycle 34 hexagonal — 13ème port : CalendarPort (CRUD calendar_events).
-pub use simple_smtp_domain::ports::CalendarPort;
-
-// Cycle 34 hexagonal — 14ème port : EmailStorePort.
-pub use simple_smtp_domain::ports::EmailStorePort;
-
-// Cycle 35 hexagonal — 15ème port : MailEventLoggingPort.
-// Cycle 36 hexagonal — 16ème port : EmailDeliveryPort.
-pub use simple_smtp_domain::ports::{EmailDeliveryPort, MailEventLoggingPort};
+#[allow(unused_imports)]
+pub use simple_smtp_domain::ports::{
+    CalendarPort, EmailDeliveryPort, EmailMutationPort, EmailStorePort,
+    ExternalImapAccountQueryPort, LogicPort, MailEventLoggingPort, MailboxCrudPort,
+    MailboxSessionPort, MailboxSubscriptionPort, MessageStoreFlagsPort, UserAliasPort,
+};

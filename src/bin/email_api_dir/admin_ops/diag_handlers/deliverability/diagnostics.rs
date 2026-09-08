@@ -33,6 +33,7 @@ pub(crate) async fn api_admin_deliverability_diagnostics(
     .await;
 
     let mut bounce_reasons: HashMap<String, u32> = HashMap::new();
+    let mut bounce_taxonomy: HashMap<String, u32> = HashMap::new();
     for evt in &bounces {
         let key = evt
             .bounce_reason
@@ -40,10 +41,18 @@ pub(crate) async fn api_admin_deliverability_diagnostics(
             .or_else(|| evt.smtp_reply.clone())
             .unwrap_or_else(|| "unknown".to_string());
         *bounce_reasons.entry(key).or_insert(0) += 1;
+
+        let taxonomy_code = evt
+            .reject_reason_code
+            .clone()
+            .unwrap_or_else(|| "SMTP_REJECT_UNKNOWN".to_string());
+        *bounce_taxonomy.entry(taxonomy_code).or_insert(0) += 1;
     }
 
     let mut top_reasons: Vec<(String, u32)> = bounce_reasons.into_iter().collect();
     top_reasons.sort_by(|a, b| b.1.cmp(&a.1));
+    let mut top_taxonomy: Vec<(String, u32)> = bounce_taxonomy.into_iter().collect();
+    top_taxonomy.sort_by(|a, b| b.1.cmp(&a.1));
 
     let active_security_alerts = audit::query_active_alerts(&mongo, 300).await;
     let spf_failures = active_security_alerts
@@ -123,6 +132,18 @@ pub(crate) async fn api_admin_deliverability_diagnostics(
             "high_risk_events": high_risk_events,
             "ip_domain_status": if high_risk_events > 0 { "degraded" } else { "normal" }
         },
+        "reject_taxonomy_catalog": monitoring::SMTP_REJECT_TAXONOMY_CATALOG
+            .iter()
+            .map(|entry| serde_json::json!({
+                "reason_code": entry.reason_code,
+                "action": entry.action,
+            }))
+            .collect::<Vec<_>>(),
+        "top_reject_taxonomy": top_taxonomy
+            .into_iter()
+            .take(12)
+            .map(|(reason_code, count)| serde_json::json!({"reason_code": reason_code, "count": count}))
+            .collect::<Vec<_>>(),
         "top_bounce_reasons": top_reasons.into_iter().take(10).map(|(reason, count)| serde_json::json!({"reason": reason, "count": count})).collect::<Vec<_>>(),
         "recent_delivery_failures": bounces.into_iter().take(15).map(|e| serde_json::json!({
             "ts": e.ts,
@@ -130,6 +151,8 @@ pub(crate) async fn api_admin_deliverability_diagnostics(
             "mx_host": e.mx_host,
             "smtp_code": e.smtp_code,
             "smtp_reply": e.smtp_reply,
+            "reject_reason_code": e.reject_reason_code,
+            "reject_action": e.reject_action,
             "bounce_reason": e.bounce_reason,
             "risk_score": e.risk_score
         })).collect::<Vec<_>>(),

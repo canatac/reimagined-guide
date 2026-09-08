@@ -45,7 +45,7 @@ pub(super) fn parse_email(email_content: &str) -> (HashMap<String, String>, Stri
             }
         } else {
             body.push_str(line);
-            body.push_str("\n");
+            body.push('\n');
         }
     }
 
@@ -60,7 +60,7 @@ impl ImapServer {
         sessions: &Arc<Mutex<HashMap<String, String>>>,
         session_id: &mut Option<String>,
     ) -> String {
-        let message_str = String::from_utf8_lossy(&command);
+        let message_str = String::from_utf8_lossy(command);
         println!("Received message content: {}", message_str);
 
         let (headers, body) = parse_email(&message_str);
@@ -88,15 +88,15 @@ impl ImapServer {
                 match self.logic.store_email(&user, &self.mailbox, &message).await {
                     Ok(_) => {
                         self.expecting_message = false;
-                        return format!("{} OK APPEND completed\r\n", self.tag);
+                        format!("{} OK APPEND completed\r\n", self.tag)
                     }
-                    Err(_) => return format!("NO APPEND failed: Internal error\r\n"),
+                    Err(_) => "NO APPEND failed: Internal error\r\n".to_string(),
                 }
             } else {
-                return format!("NO APPEND failed: User not authenticated\r\n");
+                "NO APPEND failed: User not authenticated\r\n".to_string()
             }
         } else {
-            return format!("NO APPEND failed: User not authenticated\r\n");
+            "NO APPEND failed: User not authenticated\r\n".to_string()
         }
     }
 }

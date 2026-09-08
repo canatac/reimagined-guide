@@ -1,9 +1,8 @@
-use crate::entities::{CalendarEvent, Email};
-use chrono::Utc;
-use futures_util::TryStreamExt;
 use mongodb::bson;
-use mongodb::error::Error;
-use mongodb::{bson::doc, error::Result, Client};
+use mongodb::error::Result;
+#[cfg(not(test))]
+use mongodb::Client;
+use crate::entities::{CalendarEvent, Email};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -28,6 +27,7 @@ pub(crate) fn default_mailbox() -> String {
     "inbox".to_string()
 }
 
+#[cfg_attr(test, allow(dead_code))]
 pub(crate) fn user_from_document(doc: &bson::Document, fallback_username: &str) -> User {
     let id = doc.get_object_id("_id").ok();
     let username = doc
@@ -70,13 +70,11 @@ pub struct Logic {
     /// Client MongoDB brut — utilisé par les méthodes non-encore-migrées.
     /// TODO(hex): à retirer une fois toutes les méthodes passent par `repo`.
     #[cfg(not(test))]
+    #[allow(dead_code)]
     client: Arc<Client>,
-    #[cfg(test)]
-    client: Box<dyn DatabaseInterface + Send + Sync>,
     /// Port du domaine (hexagonal). En prod : MongoDatabaseAdapter.
     /// En test : mock injecté. Utilisé par create_user, authenticate_user,
     /// find_user, find_emails, find_email (Boucle A — port honnête).
-    #[cfg(not(test))]
     repo: Arc<dyn DatabaseInterface + Send + Sync>,
 }
 
@@ -91,7 +89,9 @@ impl Logic {
 
     #[cfg(test)]
     pub fn new_with_mock(client: Box<dyn DatabaseInterface + Send + Sync>) -> Self {
-        Logic { client }
+        Logic {
+            repo: Arc::from(client),
+        }
     }
 
     pub async fn update_user_locale(&self, username: &str, locale: &str) -> Result<()> {

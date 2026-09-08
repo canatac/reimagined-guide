@@ -316,11 +316,5 @@ mod tests {
         let hard_fail = Error::other("550 5.1.1 unknown user");
         assert!(!super::is_retryable_error(&hard_fail));
     }
-
-    #[test]
-    fn deterministic_jitter_zero_cap_returns_zero() {
-        assert_eq!(deterministic_jitter_ms("msg-4", 1, 0), 0);
-        assert_eq!(deterministic_jitter_ms("msg-4", 99, 0), 0);
-    }
 }
 

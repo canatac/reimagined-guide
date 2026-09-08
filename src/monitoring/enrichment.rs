@@ -64,25 +64,11 @@ fn http() -> &'static reqwest::Client {
 
 pub async fn enrich_ip(ip: &str) -> GeoInfo {
     if ip.is_empty() || is_private(ip) {
-        return GeoInfo {
-            ip: Some(ip.to_string()),
-            country: "private".into(),
-            city: "private".into(),
-            asn: "private".into(),
-            company: "private".into(),
-            datacenter: None,
-        };
+        return private_geo(ip);
     }
 
-    // Serve from cache if fresh
-    {
-        if let Ok(c) = cache().lock() {
-            if let Some(entry) = c.get(ip) {
-                if entry.fetched_at.elapsed() < CACHE_TTL {
-                    return entry.geo.clone();
-                }
-            }
-        }
+    if let Some(geo) = cached_geo(ip) {
+        return geo;
     }
 
     let url = format!("https://ipapi.co/{}/json/", ip);
@@ -108,32 +94,51 @@ pub async fn enrich_ip(ip: &str) -> GeoInfo {
     geo
 }
 
+fn private_geo(ip: &str) -> GeoInfo {
+    GeoInfo {
+        ip: Some(ip.to_string()),
+        country: "private".into(),
+        city: "private".into(),
+        asn: "private".into(),
+        company: "private".into(),
+        datacenter: None,
+    }
+}
+
+fn cached_geo(ip: &str) -> Option<GeoInfo> {
+    let Ok(cache) = cache().lock() else {
+        return None;
+    };
+    let entry = cache.get(ip)?;
+    (entry.fetched_at.elapsed() < CACHE_TTL).then(|| entry.geo.clone())
+}
+
 fn non_empty(s: String) -> String {
     if s.is_empty() { "unknown".into() } else { s }
 }
 
 fn infer_datacenter(org: &str) -> Option<String> {
     let o = org.to_lowercase();
-    if o.contains("amazon") || o.contains("aws") { Some("AWS".into()) }
-    else if o.contains("google") { Some("GCP".into()) }
-    else if o.contains("microsoft") || o.contains("azure") { Some("Azure".into()) }
-    else if o.contains("cloudflare") { Some("Cloudflare".into()) }
-    else if o.contains("ovh") { Some("OVH".into()) }
-    else if o.contains("hetzner") { Some("Hetzner".into()) }
-    else if o.contains("digitalocean") { Some("DigitalOcean".into()) }
-    else if o.contains("linode") || o.contains("akamai") { Some("Akamai/Linode".into()) }
-    else if o.contains("vultr") { Some("Vultr".into()) }
-    else { None }
+    const RULES: &[(&[&str], &str)] = &[
+        (&["amazon", "aws"], "AWS"),
+        (&["google"], "GCP"),
+        (&["microsoft", "azure"], "Azure"),
+        (&["cloudflare"], "Cloudflare"),
+        (&["ovh"], "OVH"),
+        (&["hetzner"], "Hetzner"),
+        (&["digitalocean"], "DigitalOcean"),
+        (&["linode", "akamai"], "Akamai/Linode"),
+        (&["vultr"], "Vultr"),
+    ];
+
+    RULES
+        .iter()
+        .find_map(|(needles, provider)| needles.iter().any(|needle| o.contains(needle)).then(|| (*provider).to_string()))
 }
 
 fn is_private(ip: &str) -> bool {
-    ip.starts_with("127.")
-        || ip.starts_with("10.")
-        || ip.starts_with("192.168.")
-        || ip.starts_with("172.1") // 172.16–31
-        || ip.starts_with("172.2")
-        || ip.starts_with("172.3")
-        || ip == "::1"
-        || ip == "localhost"
-        || ip == "0.0.0.0"
+    const PREFIXES: &[&str] = &["127.", "10.", "192.168.", "172.1", "172.2", "172.3"];
+    const EXACT_VALUES: &[&str] = &["::1", "localhost", "0.0.0.0"];
+
+    PREFIXES.iter().any(|prefix| ip.starts_with(prefix)) || EXACT_VALUES.contains(&ip)
 }

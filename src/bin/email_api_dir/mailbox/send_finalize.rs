@@ -116,6 +116,12 @@ pub(crate) async fn dispatch_and_finalize(
                         .to_string(),
                     )
                 });
+                if matches!(ev.status, monitoring::SmtpStatus::Bounced) {
+                    let reply = ev.smtp_reply.clone().unwrap_or_else(|| "unknown".to_string());
+                    let taxonomy = monitoring::classify_smtp_reject(None, &reply);
+                    ev.reject_reason_code = Some(taxonomy.reason_code.to_string());
+                    ev.reject_action = Some(taxonomy.action.to_string());
+                }
                 monitoring::emit(ev);
             }
 

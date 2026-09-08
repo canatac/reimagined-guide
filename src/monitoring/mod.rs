@@ -5,7 +5,11 @@ pub mod storage;
 
 pub use alerts::{ActiveAlert, AlertConfig};
 pub use enrichment::GeoInfo;
-pub use parse::parse_smtp_code;
+pub use parse::{
+    parse_smtp_code,
+    classify_smtp_reject,
+    SMTP_REJECT_TAXONOMY_CATALOG,
+};
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -112,6 +116,8 @@ pub struct SmtpEvent {
     // SMTP
     pub smtp_code: Option<u16>,
     pub smtp_reply: Option<String>,
+    pub reject_reason_code: Option<String>,
+    pub reject_action: Option<String>,
     // Status
     pub attempt: u32,
     pub status: SmtpStatus,
@@ -147,6 +153,8 @@ impl SmtpEvent {
             total_ms: None,
             smtp_code: None,
             smtp_reply: None,
+            reject_reason_code: None,
+            reject_action: None,
             attempt: 1,
             status: SmtpStatus::Pending,
             bounce_type: None,
@@ -173,73 +181,96 @@ impl SmtpEvent {
     /// Relevant risks: data exfiltration via untrusted relay, policy bypass,
     /// confidential email stored on hostile infrastructure (MITRE ATT&CK T1048).
     pub fn compute_risk_score(&mut self) {
-        let mut score: f32 = 0.0;
-
-        let forbidden_countries: Vec<String> =
-            std::env::var("MONITORING_FORBIDDEN_COUNTRIES")
-                .unwrap_or_default()
-                .split(',')
-                .map(|s| s.trim().to_uppercase())
-                .filter(|s| !s.is_empty())
-                .collect();
-
-        if let Some(ref c) = self.country {
-            if forbidden_countries.iter().any(|f| f == &c.to_uppercase()) {
-                score += 50.0;
-            }
-        }
-
-        // Known mass-surveillance or high-risk jurisdictions (Five Eyes + declared hostile)
-        let high_risk_countries = ["CN", "RU", "IR", "KP", "BY"];
-        if let Some(ref c) = self.country {
-            let cu = c.to_uppercase();
-            if high_risk_countries.iter().any(|h| cu.contains(*h)) && score < 40.0 {
-                score += 25.0;
-            }
-        }
-
-        let risky_companies: Vec<String> =
-            std::env::var("MONITORING_RISKY_COMPANIES")
-                .unwrap_or_default()
-                .split(',')
-                .map(|s| s.trim().to_lowercase())
-                .filter(|s| !s.is_empty())
-                .collect();
-
-        if let Some(ref co) = self.company {
-            let col = co.to_lowercase();
-            if risky_companies.iter().any(|r| col.contains(r.as_str())) {
-                score += 30.0;
-            }
-        }
-
-        // Unknown routing infrastructure — higher risk than named providers
-        if self.company.as_deref().map(|c| c == "unknown").unwrap_or(true) {
-            score += 15.0;
-        }
-
-        // High latency may indicate relay/proxy
-        if let Some(ms) = self.total_ms {
-            if ms > 10_000 {
-                score += 10.0;
-            } else if ms > 5_000 {
-                score += 5.0;
-            }
-        }
-
-        if matches!(self.status, SmtpStatus::Bounced) {
-            score += 10.0;
-        }
-
-        if let Some(code) = self.smtp_code {
-            match code {
-                550 | 554 => score += 15.0,
-                421 | 450 => score += 5.0,
-                _ => {}
-            }
-        }
-
+        let mut score = 0.0;
+        score += country_risk(self.country.as_deref(), &forbidden_countries());
+        score += company_risk(self.company.as_deref(), &risky_companies());
+        score += latency_risk(self.total_ms);
+        score += status_risk(&self.status);
+        score += smtp_code_risk(self.smtp_code);
         self.risk_score = Some(score.min(100.0));
+    }
+}
+
+fn parse_env_list_upper(key: &str) -> Vec<String> {
+    std::env::var(key)
+        .unwrap_or_default()
+        .split(',')
+        .map(|s| s.trim().to_uppercase())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+fn parse_env_list_lower(key: &str) -> Vec<String> {
+    std::env::var(key)
+        .unwrap_or_default()
+        .split(',')
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+fn forbidden_countries() -> Vec<String> {
+    parse_env_list_upper("MONITORING_FORBIDDEN_COUNTRIES")
+}
+
+fn risky_companies() -> Vec<String> {
+    parse_env_list_lower("MONITORING_RISKY_COMPANIES")
+}
+
+fn country_risk(country: Option<&str>, forbidden: &[String]) -> f32 {
+    let Some(country) = country else {
+        return 0.0;
+    };
+
+    let upper = country.to_uppercase();
+    let mut score = 0.0;
+    if forbidden.iter().any(|item| item == &upper) {
+        score += 50.0;
+    }
+
+    let high_risk = ["CN", "RU", "IR", "KP", "BY"];
+    if high_risk.iter().any(|code| upper.contains(code)) && score < 40.0 {
+        score += 25.0;
+    }
+
+    score
+}
+
+fn company_risk(company: Option<&str>, risky_companies: &[String]) -> f32 {
+    let mut score = 0.0;
+    if let Some(company) = company {
+        let lower = company.to_lowercase();
+        if risky_companies.iter().any(|needle| lower.contains(needle)) {
+            score += 30.0;
+        }
+    }
+    if company.map(|c| c == "unknown").unwrap_or(true) {
+        score += 15.0;
+    }
+    score
+}
+
+fn latency_risk(total_ms: Option<u64>) -> f32 {
+    match total_ms {
+        Some(ms) if ms > 10_000 => 10.0,
+        Some(ms) if ms > 5_000 => 5.0,
+        _ => 0.0,
+    }
+}
+
+fn status_risk(status: &SmtpStatus) -> f32 {
+    if matches!(status, SmtpStatus::Bounced) {
+        10.0
+    } else {
+        0.0
+    }
+}
+
+fn smtp_code_risk(code: Option<u16>) -> f32 {
+    match code {
+        Some(550 | 554) => 15.0,
+        Some(421 | 450) => 5.0,
+        _ => 0.0,
     }
 }
 

@@ -1,11 +1,10 @@
 use super::super::*;
-use crate::entities::Email;
 use crate::logic::Logic;
 use mockall::predicate::eq;
 
     #[tokio::test]
     async fn test_select_mailbox() {
-        dotenv().ok();
+        dotenv::dotenv().ok();
         let mut mock_client = Box::new(MockDatabaseInterface::new());
 
         mock_client
@@ -36,7 +35,7 @@ use mockall::predicate::eq;
 
     #[tokio::test]
     async fn test_search_messages() {
-        dotenv().ok();
+        dotenv::dotenv().ok();
         let mut mock_client = Box::new(MockDatabaseInterface::new());
 
         mock_client
@@ -52,7 +51,7 @@ use mockall::predicate::eq;
 
     #[tokio::test]
     async fn test_expunge_mailbox() {
-        dotenv().ok();
+        dotenv::dotenv().ok();
         let mut mock_client = Box::new(MockDatabaseInterface::new());
 
         mock_client
@@ -67,7 +66,7 @@ use mockall::predicate::eq;
 
     #[tokio::test]
     async fn test_copy_messages() {
-        dotenv().ok();
+        dotenv::dotenv().ok();
         let mut mock_client = Box::new(MockDatabaseInterface::new());
 
         mock_client
@@ -83,7 +82,7 @@ use mockall::predicate::eq;
 
     #[tokio::test]
     async fn test_store_flags() {
-        dotenv().ok();
+        dotenv::dotenv().ok();
         let mut mock_client = Box::new(MockDatabaseInterface::new());
 
         mock_client
@@ -101,7 +100,7 @@ use mockall::predicate::eq;
 
     #[tokio::test]
     async fn test_noop() {
-        dotenv().ok();
+        dotenv::dotenv().ok();
         let mock_client = Box::new(MockDatabaseInterface::new());
         let logic = Logic::new_with_mock(mock_client);
         let result = logic.noop().await;
@@ -110,7 +109,7 @@ use mockall::predicate::eq;
 
     #[tokio::test]
     async fn test_get_mailbox_status() {
-        dotenv().ok();
+        dotenv::dotenv().ok();
         let mut mock_client = Box::new(MockDatabaseInterface::new());
 
         mock_client
@@ -141,7 +140,7 @@ use mockall::predicate::eq;
 
     #[tokio::test]
     async fn test_get_mailbox_status_items() {
-        dotenv().ok();
+        dotenv::dotenv().ok();
         let mut mock_client = Box::new(MockDatabaseInterface::new());
 
         mock_client

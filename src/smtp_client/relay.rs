@@ -2,6 +2,7 @@ use super::*;
 
 pub(super) async fn send_via_relay(email: &Email, relay_host: &str) -> std::io::Result<()> {
     use base64::{engine::general_purpose, Engine as _};
+    let budget = smtp_timeout_budget();
 
     let relay_port: u16 = env::var("SMTP_RELAY_PORT")
         .ok()
@@ -15,21 +16,21 @@ pub(super) async fn send_via_relay(email: &Email, relay_host: &str) -> std::io::
     let ehlo_hostname = ehlo_hostname();
 
     let mut stream = timeout(
-        Duration::from_secs(10),
+        Duration::from_millis(budget.connect_ms),
         TcpStream::connect((relay_host, relay_port)),
     )
     .await
     .map_err(|_| IoError::new(ErrorKind::TimedOut, "Relay connection timed out"))?
     .map_err(|e| IoError::new(e.kind(), format!("Relay connect failed: {}", e)))?;
 
-    expect_code(&mut stream, "220").await?;
+    expect_code_for_phase(&mut stream, "220", "relay_banner", budget.banner_ms).await?;
     stream.write_all(format!("EHLO {}\r\n", ehlo_hostname).as_bytes()).await?;
-    expect_code(&mut stream, "250").await?;
+    expect_code_for_phase(&mut stream, "250", "relay_ehlo", budget.ehlo_ms).await?;
 
     // STARTTLS on port 587; skip on 465 (implicit TLS not yet supported for relay)
     let mut stream_type = if relay_port != 465 {
         stream.write_all(b"STARTTLS\r\n").await?;
-        expect_code(&mut stream, "220").await?;
+        expect_code_for_phase(&mut stream, "220", "relay_starttls_ack", budget.starttls_ms).await?;
 
         let mut root_store = RootCertStore::empty();
         for cert in load_native_certs().certs {
@@ -44,10 +45,20 @@ pub(super) async fn send_via_relay(email: &Email, relay_host: &str) -> std::io::
         let connector = TlsConnector::from(Arc::new(config));
         let server_name = ServerName::try_from(relay_host.to_string())
             .map_err(|_| IoError::new(ErrorKind::InvalidInput, "Invalid relay hostname"))?;
-        let tls_stream = connector.connect(server_name, stream).await?;
+        let tls_stream = timeout(
+            Duration::from_millis(budget.tls_handshake_ms),
+            connector.connect(server_name, stream),
+        )
+        .await
+        .map_err(|_| {
+            IoError::new(
+                ErrorKind::TimedOut,
+                format!("SMTP phase timeout [relay_tls_handshake]: {}ms", budget.tls_handshake_ms),
+            )
+        })??;
         let mut s = tls_stream;
         s.write_all(format!("EHLO {}\r\n", ehlo_hostname).as_bytes()).await?;
-        expect_code(&mut s, "250").await?;
+        expect_code_for_phase(&mut s, "250", "relay_tls_ehlo", budget.ehlo_ms).await?;
         StreamType::Tls(s)
     } else {
         StreamType::Plain(stream)
@@ -59,10 +70,10 @@ pub(super) async fn send_via_relay(email: &Email, relay_host: &str) -> std::io::
             .encode(format!("\0{}\0{}", relay_user, relay_pass));
         let auth_cmd = format!("AUTH PLAIN {}\r\n", cred);
         match &mut stream_type {
-            StreamType::Plain(ref mut s) => { s.write_all(auth_cmd.as_bytes()).await?; expect_code(s, "235").await?; }
-            StreamType::Tls(ref mut s)   => { s.write_all(auth_cmd.as_bytes()).await?; expect_code(s, "235").await?; }
+            StreamType::Plain(ref mut s) => { s.write_all(auth_cmd.as_bytes()).await?; expect_code_for_phase(s, "235", "relay_auth", budget.auth_ms).await?; }
+            StreamType::Tls(ref mut s)   => { s.write_all(auth_cmd.as_bytes()).await?; expect_code_for_phase(s, "235", "relay_auth", budget.auth_ms).await?; }
         }
     }
 
-    send_email_content(&mut stream_type, &email_content).await
+    send_email_content(&mut stream_type, &email_content, &budget).await
 }
