@@ -104,6 +104,14 @@ mod timeout_budget_tests {
         assert!(b.connect_ms > 0);
         assert!(b.tls_handshake_ms > 0);
     }
+
+    #[test]
+    fn timeout_budget_reads_env_override() {
+        std::env::set_var("SMTP_TIMEOUT_CONNECT_MS", "4242");
+        let b = smtp_timeout_budget();
+        assert_eq!(b.connect_ms, 4242);
+        std::env::remove_var("SMTP_TIMEOUT_CONNECT_MS");
+    }
 }
 
 use crate::entities::Email;
@@ -121,7 +129,7 @@ mod mx;
 mod session;
 
 use body_utils::compose_smtp_payload;
-use discovery::{find_smtp_port, expect_code_for_phase, ehlo_hostname};
+use discovery::{find_smtp_port, ehlo_hostname};
 use relay::send_via_relay;
 use mx::send_via_mx;
 use session::send_email_content;
