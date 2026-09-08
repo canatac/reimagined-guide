@@ -17,6 +17,7 @@ use std::env;
 use super::{
     CustomEmail, StreamType, MailServer,
     apply_parsed_header, write_response,
+    headers_helpers::HeaderParseReject,
     recipient_helpers::{is_local_recipient, recipient_local_part},
 };
 
@@ -169,17 +170,23 @@ pub(crate) async fn store_and_forward_mongo(
 }
 
 /// Traite une ligne de données entrantes (headers puis corps).
-pub(crate) fn absorb_data_line(current: &mut CustomEmail, in_body: &mut bool, line: &str) {
+pub(crate) fn absorb_data_line(
+    current: &mut CustomEmail,
+    in_body: &mut bool,
+    line: &str,
+) -> Result<(), HeaderParseReject> {
     if !*in_body {
         if line.trim().is_empty() {
             *in_body = true;
         } else {
             let trimmed = line.trim_end_matches(['\r', '\n']);
             if !trimmed.is_empty() {
-                apply_parsed_header(current, trimmed);
+                apply_parsed_header(current, trimmed)?;
             }
         }
     } else {
         current.email.body.push_str(line);
     }
+
+    Ok(())
 }

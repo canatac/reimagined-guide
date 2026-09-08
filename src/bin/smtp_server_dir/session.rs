@@ -72,7 +72,17 @@ pub(crate) async fn handle_tls_client(
                     if line.trim() == "." {
                         finish_data(&mut state, &mut stream, &logic, &session_manager, false).await?;
                     } else {
-                        absorb_data_line(&mut state.current_email, &mut state.in_body, &line);
+                        if let Err(reject) = absorb_data_line(&mut state.current_email, &mut state.in_body, &line) {
+                            warn!("Rejected malformed inbound header (reason={}): {}", reject.reason_code(), line.trim_end());
+                            write_response(&mut stream, "550 5.6.0 Invalid header\r\n").await?;
+                            state.in_data_mode = false;
+                            state.in_body = false;
+                            state.current_email = CustomEmail {
+                                email: Email::new("", "", "", "", ""),
+                                raw_content: String::new(),
+                                dkim_signature: None,
+                            };
+                        }
                     }
                 } else {
                     let should_break = handle_command_line(
@@ -148,7 +158,17 @@ pub(crate) async fn handle_plain_client(
                     if buffer.trim() == "." {
                         finish_data(&mut state, &mut stream, &logic, &session_manager, true).await?;
                     } else {
-                        absorb_data_line(&mut state.current_email, &mut state.in_body, &buffer);
+                        if let Err(reject) = absorb_data_line(&mut state.current_email, &mut state.in_body, &buffer) {
+                            warn!("Rejected malformed inbound header (reason={}): {}", reject.reason_code(), buffer.trim_end());
+                            write_response(&mut stream, "550 5.6.0 Invalid header\r\n").await?;
+                            state.in_data_mode = false;
+                            state.in_body = false;
+                            state.current_email = CustomEmail {
+                                email: Email::new("", "", "", "", ""),
+                                raw_content: String::new(),
+                                dkim_signature: None,
+                            };
+                        }
                     }
                 } else {
                     let should_break = handle_command_line(
