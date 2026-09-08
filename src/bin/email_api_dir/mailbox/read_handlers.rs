@@ -127,3 +127,99 @@ pub(crate) async fn api_tags() -> impl Responder {
     HttpResponse::Ok().json(serde_json::json!({"tags": []}))
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NotificationPreferences {
+    pub push_enabled: bool,
+    pub ai_filter_enabled: bool,
+    pub mute_newsletters: bool,
+    pub dnd_enabled: bool,
+    pub dnd_start_hour: u8,
+    pub dnd_end_hour: u8,
+    pub daily_digest_enabled: bool,
+    pub daily_digest_hour: u8,
+    pub priority_reply_enabled: bool,
+    #[serde(default)]
+    pub whitelist_senders: Vec<String>,
+}
+
+impl Default for NotificationPreferences {
+    fn default() -> Self {
+        Self {
+            push_enabled: true,
+            ai_filter_enabled: true,
+            mute_newsletters: true,
+            dnd_enabled: false,
+            dnd_start_hour: 22,
+            dnd_end_hour: 7,
+            daily_digest_enabled: true,
+            daily_digest_hour: 8,
+            priority_reply_enabled: true,
+            whitelist_senders: vec![],
+        }
+    }
+}
+
+fn notifications_coll(mongo: &Arc<mongodb::Client>) -> mongodb::Collection<bson::Document> {
+    let db = env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
+    mongo.database(&db).collection::<bson::Document>("notification_preferences")
+}
+
+pub(crate) async fn api_notifications_preferences_get(
+    req: actix_web::HttpRequest,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    let user_id = resolve_user_id(&req);
+    let coll = notifications_coll(&mongo);
+    match coll.find_one(doc! { "user_id": &user_id }).await {
+        Ok(Some(doc)) => {
+            let prefs: NotificationPreferences = bson::from_document(doc).unwrap_or_default();
+            HttpResponse::Ok().json(serde_json::json!({ "userId": user_id, "preferences": prefs }))
+        }
+        Ok(None) => HttpResponse::Ok().json(serde_json::json!({
+            "userId": user_id,
+            "preferences": NotificationPreferences::default()
+        })),
+        Err(e) => {
+            eprintln!("api_notifications_preferences_get error: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({ "message": "Failed to read notification preferences" }))
+        }
+    }
+}
+
+pub(crate) async fn api_notifications_preferences_put(
+    body: web::Json<NotificationPreferences>,
+    req: actix_web::HttpRequest,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    let user_id = resolve_user_id(&req);
+    if body.dnd_start_hour > 23 || body.dnd_end_hour > 23 || body.daily_digest_hour > 23 {
+        return HttpResponse::BadRequest().json(serde_json::json!({
+            "message": "Hour fields must be between 0 and 23"
+        }));
+    }
+
+    let coll = notifications_coll(&mongo);
+    let mut payload = match bson::to_document(&body.into_inner()) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("api_notifications_preferences_put serialize error: {}", e);
+            return HttpResponse::InternalServerError().json(serde_json::json!({ "message": "Failed to save notification preferences" }));
+        }
+    };
+    payload.insert("user_id", user_id.clone());
+    payload.insert("updated_at", bson::DateTime::from_millis(Utc::now().timestamp_millis()));
+
+    match coll
+        .replace_one(doc! { "user_id": &user_id }, payload)
+        .upsert(true)
+        .await
+    {
+        Ok(_) => HttpResponse::Ok().json(serde_json::json!({ "ok": true, "userId": user_id })),
+        Err(e) => {
+            eprintln!("api_notifications_preferences_put error: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({ "message": "Failed to save notification preferences" }))
+        }
+    }
+}
+

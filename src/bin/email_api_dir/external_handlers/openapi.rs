@@ -27,6 +27,10 @@ pub(crate) async fn api_openapi_json() -> impl Responder {
             "/api/tags": { "get": { "tags": ["Emails"], "summary": "List tags", "responses": { "200": { "description": "OK" } } } },
             "/api/send": { "post": { "tags": ["Send"], "summary": "Send an email", "responses": { "200": { "description": "OK" } } } },
             "/api/send/{id}/status": { "get": { "tags": ["Send"], "summary": "Get send status", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" } } } },
+            "/api/notifications/preferences": {
+                "get": { "tags": ["Notifications"], "summary": "Get notification preferences", "responses": { "200": { "description": "OK" } } },
+                "put": { "tags": ["Notifications"], "summary": "Update notification preferences", "responses": { "200": { "description": "OK" } } }
+            },
             "/api/drafts": {
                 "get": { "tags": ["Drafts"], "summary": "List drafts", "responses": { "200": { "description": "OK" } } },
                 "post": { "tags": ["Drafts"], "summary": "Create or update draft", "responses": { "200": { "description": "OK" } } }
