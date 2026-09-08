@@ -287,5 +287,14 @@ mod tests {
         assert!(a <= 250);
         assert!(c <= 250);
     }
+
+    #[test]
+    fn backoff_respects_zero_jitter_and_hard_cap() {
+        let no_jitter = backoff_delay_ms("msg-2", 2, 500, 30_000, 0);
+        assert_eq!(no_jitter, 1_000);
+
+        let capped = backoff_delay_ms("msg-2", 10, 500, 1_200, 500);
+        assert_eq!(capped, 1_200);
+    }
 }
 
