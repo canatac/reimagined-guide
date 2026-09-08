@@ -42,6 +42,7 @@ pub(crate) async fn api_openapi_json() -> impl Responder {
                 "put": { "tags": ["AI"], "summary": "Update AI settings", "responses": { "200": { "description": "OK" } } }
             },
             "/api/hermes/chat": { "post": { "tags": ["Hermes"], "summary": "Chat completions proxy", "responses": { "200": { "description": "OK" } } } },
+            "/api/mail-assistant/suggestions": { "get": { "tags": ["Hermes"], "summary": "Mail assistant quick prompts", "responses": { "200": { "description": "OK" } } } },
             "/api/hermes/runs": { "post": { "tags": ["Hermes"], "summary": "Create run", "responses": { "200": { "description": "OK" } } } },
             "/api/hermes/runs/{run_id}": { "get": { "tags": ["Hermes"], "summary": "Get run status", "parameters": [{ "name": "run_id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" } } } },
             "/api/hermes/runs/{run_id}/events": { "get": { "tags": ["Hermes"], "summary": "Stream run events (SSE)", "parameters": [{ "name": "run_id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "SSE stream" } } } },
