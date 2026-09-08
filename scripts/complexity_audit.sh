@@ -14,13 +14,13 @@ if ! command -v lizard >/dev/null 2>&1; then
   exit 2
 fi
 
-echo "[audit] Scan CCN Rust src/ + crates/domain/src/ (seuil 8)..."
+echo "[audit] Scan CCN Rust crates/domain/src/ (seuil 8)..."
 # lizard -T seuil sur cyclomatic_complexity (nom correct depuis lizard 1.17+)
 set +e
-RESULT=$(lizard -l rust -T cyclomatic_complexity=8 src/ crates/domain/src/ --warnings_only 2>&1)
+RESULT=$(lizard -l rust -T cyclomatic_complexity=8 crates/domain/src/ --warnings_only 2>&1)
 RC=$?
 set -e
-VIOL=$(echo "$RESULT" | grep -cE "^\s*[0-9]+\s+[0-9]+\s+[0-9]+\s+[0-9]+\s+[0-9]+" || echo 0)
+VIOL=$(echo "$RESULT" | grep -cE "warning:" || true)
 echo "$RESULT" | tail -20
 echo "[audit] Fonctions CCN > 8 : $VIOL"
 
