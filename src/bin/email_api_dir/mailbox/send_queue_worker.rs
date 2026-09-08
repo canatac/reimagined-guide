@@ -296,5 +296,12 @@ mod tests {
         let capped = backoff_delay_ms("msg-2", 10, 500, 1_200, 500);
         assert_eq!(capped, 1_200);
     }
+
+    #[test]
+    fn higher_attempt_never_reduces_delay_before_cap() {
+        let d2 = backoff_delay_ms("msg-3", 2, 250, 5_000, 0);
+        let d3 = backoff_delay_ms("msg-3", 3, 250, 5_000, 0);
+        assert!(d3 >= d2);
+    }
 }
 
