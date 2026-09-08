@@ -279,3 +279,83 @@ pub struct ChangeRequestItem {
     pub execution_last_error: Option<String>,
     pub changelog_entry: Option<serde_json::Value>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+    use serde_json::json;
+
+    #[test]
+    fn calendar_event_new_sets_defaults() {
+        let start = Utc::now();
+        let end = Utc::now();
+        let ev = CalendarEvent::new("user-1", "standup", start, end);
+
+        assert_eq!(ev.user_id, "user-1");
+        assert_eq!(ev.title, "standup");
+        assert_eq!(ev.description, "");
+        assert_eq!(ev.event_type, "default");
+        assert_eq!(ev.color, "#3788d8");
+        assert_eq!(ev.location, "");
+        assert!(!ev.id.is_empty());
+    }
+
+    #[test]
+    fn email_new_sets_initial_values() {
+        let email = Email::new("id-1", "a@example.com", "b@example.com", "subject", "body");
+
+        assert_eq!(email.id, "id-1");
+        assert_eq!(email.from, "a@example.com");
+        assert_eq!(email.to, "b@example.com");
+        assert_eq!(email.subject, "subject");
+        assert_eq!(email.body, "body");
+        assert!(email.headers.is_empty());
+        assert!(email.flags.is_empty());
+        assert_eq!(email.sequence_number, 0);
+        assert_eq!(email.uid, 0);
+        assert_eq!(email.dkim_signature, None);
+    }
+
+    #[test]
+    fn serde_defaults_are_applied_on_deserialize() {
+        let event = json!({
+            "id": "evt-1",
+            "userId": "u-1",
+            "title": "meeting",
+            "start": "2026-01-01T10:00:00Z",
+            "end": "2026-01-01T11:00:00Z",
+            "createdAt": "2026-01-01T09:00:00Z",
+            "updatedAt": "2026-01-01T09:00:00Z"
+        });
+        let parsed_event: CalendarEvent = serde_json::from_value(event).expect("calendar event parse");
+        assert_eq!(parsed_event.description, "");
+        assert_eq!(parsed_event.location, "");
+        assert_eq!(parsed_event.event_type, "default");
+        assert_eq!(parsed_event.color, "#3788d8");
+
+        let cr = json!({
+            "id": "cr-1",
+            "title": "Improve CI",
+            "problem": "soft guards",
+            "desiredOutcome": "hard guards",
+            "scope": "backend",
+            "priority": "P1",
+            "status": "open",
+            "requestedBy": "root",
+            "linkedRepo": "canatac/reimagined-guide",
+            "createdAt": "2026-01-01T09:00:00Z",
+            "updatedAt": "2026-01-01T09:00:00Z",
+            "takenInChargeAt": null,
+            "takenInChargeBy": null,
+            "targetReleaseWindow": "2026-W01",
+            "acceptanceCriteria": [],
+            "workflow": [],
+            "changelogEntry": null
+        });
+        let parsed_cr: ChangeRequestItem = serde_json::from_value(cr).expect("change request parse");
+        assert_eq!(parsed_cr.execution_state, "idle");
+        assert!(parsed_cr.workflow_events.is_empty());
+        assert_eq!(parsed_cr.execution_run_id, None);
+    }
+}
