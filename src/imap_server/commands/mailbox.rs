@@ -317,4 +317,94 @@ mod tests {
 
         assert_eq!(response, "A2 OK DELETE completed\r\n");
     }
+
+    #[tokio::test]
+    async fn handle_list_coverage_matrix_9_cases() {
+        let mut mock_client = Box::new(MockDatabaseInterface::new());
+        mock_client
+            .expect_list_mailboxes()
+            .times(9)
+            .returning(|_, reference, mailbox| {
+                Ok(vec![
+                    format!("{}:{}", reference, mailbox),
+                    "INBOX".to_string(),
+                ])
+            });
+
+        let logic = Arc::new(Logic::new_with_mock(mock_client));
+        let mut server = ImapServer::new(logic);
+        let sessions: Sessions = Arc::new(Mutex::new(HashMap::new()));
+        sessions
+            .lock()
+            .unwrap()
+            .insert("sess-matrix".to_string(), "testuser".to_string());
+        let session_id = Some("sess-matrix".to_string());
+
+        let cases = vec![
+            ("", "*"),
+            ("", "%"),
+            ("INBOX", "*"),
+            ("Archive", "*"),
+            ("", "INBOX"),
+            ("", "Sent"),
+            ("Projects", "*"),
+            ("", "Trash"),
+            ("", "Drafts"),
+        ];
+
+        for (idx, (reference, mailbox)) in cases.iter().enumerate() {
+            let tag = format!("A{}", idx + 10);
+            let command_parts = [tag.as_str(), "LIST", *reference, *mailbox];
+            let response = server
+                .handle_list(tag.as_str(), &command_parts, &sessions, &session_id)
+                .await;
+
+            assert!(response.contains("* LIST (\\HasNoChildren) \"/\" \"INBOX\"\r\n"));
+            assert!(response.contains(&format!("* LIST (\\HasNoChildren) \"/\" \"{}:{}\"\r\n", reference, mailbox)));
+            assert!(response.ends_with(&format!("{} OK LIST completed\r\n", tag)));
+        }
+    }
+
+    #[tokio::test]
+    async fn handle_status_coverage_matrix_9_cases() {
+        let mut mock_client = Box::new(MockDatabaseInterface::new());
+        mock_client
+            .expect_get_mailbox_status_items()
+            .times(9)
+            .returning(|_, mailbox, data_items| {
+                Ok(format!("MAILBOX {} ITEMS {}", mailbox, data_items))
+            });
+
+        let logic = Arc::new(Logic::new_with_mock(mock_client));
+        let mut server = ImapServer::new(logic);
+        let sessions: Sessions = Arc::new(Mutex::new(HashMap::new()));
+        sessions
+            .lock()
+            .unwrap()
+            .insert("sess-status".to_string(), "testuser".to_string());
+        let session_id = Some("sess-status".to_string());
+
+        let cases = vec![
+            ("INBOX", "MESSAGES"),
+            ("INBOX", "RECENT"),
+            ("INBOX", "UNSEEN"),
+            ("INBOX", "UIDNEXT"),
+            ("INBOX", "UIDVALIDITY"),
+            ("Archive", "MESSAGES RECENT"),
+            ("Sent", "MESSAGES UNSEEN"),
+            ("Drafts", "MESSAGES UIDNEXT UIDVALIDITY"),
+            ("Trash", "MESSAGES RECENT UNSEEN UIDNEXT UIDVALIDITY"),
+        ];
+
+        for (idx, (mailbox, data_items)) in cases.iter().enumerate() {
+            let tag = format!("B{}", idx + 10);
+            let command_parts = [tag.as_str(), "STATUS", *mailbox, *data_items];
+            let response = server
+                .handle_status(tag.as_str(), &command_parts, &sessions, &session_id)
+                .await;
+
+            assert!(response.contains(&format!("* STATUS {} (MAILBOX {} ITEMS {})\r\n", mailbox, mailbox, data_items)));
+            assert!(response.ends_with(&format!("{} OK STATUS completed\r\n", tag)));
+        }
+    }
 }
