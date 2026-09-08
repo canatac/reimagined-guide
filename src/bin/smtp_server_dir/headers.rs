@@ -4,8 +4,56 @@
 
 use mailparse::parse_mail;
 use simple_smtp_server::smtp_client::extract_email_address;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::CustomEmail;
+
+const MAX_HEADER_LINE_LEN: usize = 8 * 1024;
+const MAX_HEADER_NAME_LEN: usize = 128;
+const MAX_HEADER_VALUE_LEN: usize = 16 * 1024;
+
+static HEADER_REJECT_COUNT: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HeaderParseReject {
+    MissingSeparator,
+    EmptyName,
+    InvalidName,
+    AmbiguousValue,
+    HeaderLineTooLong,
+    HeaderValueTooLong,
+    FoldedWithoutPrevious,
+}
+
+impl HeaderParseReject {
+    pub(crate) fn reason_code(self) -> &'static str {
+        match self {
+            Self::MissingSeparator => "missing_separator",
+            Self::EmptyName => "empty_name",
+            Self::InvalidName => "invalid_name",
+            Self::AmbiguousValue => "ambiguous_value",
+            Self::HeaderLineTooLong => "header_line_too_long",
+            Self::HeaderValueTooLong => "header_value_too_long",
+            Self::FoldedWithoutPrevious => "folded_without_previous",
+        }
+    }
+}
+
+fn reject(reason: HeaderParseReject) -> Result<(String, String), HeaderParseReject> {
+    HEADER_REJECT_COUNT.fetch_add(1, Ordering::Relaxed);
+    Err(reason)
+}
+
+pub(crate) fn security_header_reject_count() -> u64 {
+    HEADER_REJECT_COUNT.load(Ordering::Relaxed)
+}
+
+fn is_valid_header_name(name: &str) -> bool {
+    if name.is_empty() || name.len() > MAX_HEADER_NAME_LEN {
+        return false;
+    }
+    name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+}
 
 pub(crate) fn extract_session_id_from_response(response: &str) -> Option<String> {
     let marker = "session ID:";
@@ -22,13 +70,36 @@ pub(crate) fn extract_session_id_from_response(response: &str) -> Option<String>
     }
 }
 
-pub(crate) fn parse_header_line(raw_line: &str) -> Option<(String, String)> {
-    let (name, value) = raw_line.split_once(':')?;
+pub(crate) fn parse_header_line(raw_line: &str) -> Result<(String, String), HeaderParseReject> {
+    if raw_line.len() > MAX_HEADER_LINE_LEN {
+        return reject(HeaderParseReject::HeaderLineTooLong);
+    }
+
+    if raw_line.as_bytes().iter().any(|b| *b == b'\0' || *b == b'\r' || *b == b'\n') {
+        return reject(HeaderParseReject::AmbiguousValue);
+    }
+
+    let (name, value) = raw_line
+        .split_once(':')
+        .ok_or_else(|| {
+            HEADER_REJECT_COUNT.fetch_add(1, Ordering::Relaxed);
+            HeaderParseReject::MissingSeparator
+        })?;
     let name = name.trim();
     if name.is_empty() {
-        return None;
+        return reject(HeaderParseReject::EmptyName);
     }
-    Some((name.to_string(), value.trim().to_string()))
+
+    if !is_valid_header_name(name) {
+        return reject(HeaderParseReject::InvalidName);
+    }
+
+    let value = value.trim();
+    if value.len() > MAX_HEADER_VALUE_LEN {
+        return reject(HeaderParseReject::HeaderValueTooLong);
+    }
+
+    Ok((name.to_string(), value.to_string()))
 }
 
 pub(crate) fn parse_message_id_header(value: &str) -> Option<String> {
@@ -43,7 +114,10 @@ pub(crate) fn parse_message_id_header(value: &str) -> Option<String> {
     }
 }
 
-pub(crate) fn apply_parsed_header(current_email: &mut CustomEmail, raw_line: &str) {
+pub(crate) fn apply_parsed_header(
+    current_email: &mut CustomEmail,
+    raw_line: &str,
+) -> Result<(), HeaderParseReject> {
     if raw_line.starts_with(' ') || raw_line.starts_with('\t') {
         if let Some((last_name, last_value)) = current_email.email.headers.last_mut() {
             let continuation = raw_line.trim();
@@ -63,33 +137,37 @@ pub(crate) fn apply_parsed_header(current_email: &mut CustomEmail, raw_line: &st
                     }
                 }
             }
+        } else {
+            HEADER_REJECT_COUNT.fetch_add(1, Ordering::Relaxed);
+            return Err(HeaderParseReject::FoldedWithoutPrevious);
         }
-        return;
+        return Ok(());
     }
 
-    if let Some((name, value)) = parse_header_line(raw_line) {
-        current_email
-            .email
-            .headers
-            .push((name.clone(), value.clone()));
+    let (name, value) = parse_header_line(raw_line)?;
+    current_email
+        .email
+        .headers
+        .push((name.clone(), value.clone()));
 
-        if name.eq_ignore_ascii_case("DKIM-Signature") {
-            current_email.dkim_signature = Some(value.clone());
-        } else if name.eq_ignore_ascii_case("From") {
-            let canonical = format!("From: {}", value);
-            current_email.email.from =
-                extract_email_address(&canonical, "From:").unwrap_or_default();
-        } else if name.eq_ignore_ascii_case("To") {
-            let canonical = format!("To: {}", value);
-            current_email.email.to = extract_email_address(&canonical, "To:").unwrap_or_default();
-        } else if name.eq_ignore_ascii_case("Subject") {
-            current_email.email.subject = value;
-        } else if name.eq_ignore_ascii_case("Message-ID") {
-            if let Some(mid) = parse_message_id_header(&value) {
-                current_email.email.id = mid;
-            }
+    if name.eq_ignore_ascii_case("DKIM-Signature") {
+        current_email.dkim_signature = Some(value.clone());
+    } else if name.eq_ignore_ascii_case("From") {
+        let canonical = format!("From: {}", value);
+        current_email.email.from =
+            extract_email_address(&canonical, "From:").unwrap_or_default();
+    } else if name.eq_ignore_ascii_case("To") {
+        let canonical = format!("To: {}", value);
+        current_email.email.to = extract_email_address(&canonical, "To:").unwrap_or_default();
+    } else if name.eq_ignore_ascii_case("Subject") {
+        current_email.email.subject = value;
+    } else if name.eq_ignore_ascii_case("Message-ID") {
+        if let Some(mid) = parse_message_id_header(&value) {
+            current_email.email.id = mid;
         }
     }
+
+    Ok(())
 }
 
 pub(crate) fn extract_email_content(
@@ -147,5 +225,26 @@ mod tests {
             "From: sender@example.com\r\nTo: recipient@example.com\r\nSubject: Test\r\n";
         let result = extract_email_content(email_content).unwrap();
         assert_eq!(result, "");
+    }
+
+    #[test]
+    fn test_parse_header_line_rejects_ambiguous() {
+        let start = security_header_reject_count();
+        let err = parse_header_line("Subject\0: x").unwrap_err();
+        assert_eq!(err, HeaderParseReject::AmbiguousValue);
+        assert!(security_header_reject_count() >= start + 1);
+    }
+
+    #[test]
+    fn test_parse_header_line_rejects_invalid_name() {
+        let err = parse_header_line("Bad Name: x").unwrap_err();
+        assert_eq!(err, HeaderParseReject::InvalidName);
+    }
+
+    #[test]
+    fn test_parse_header_line_accepts_standard_name() {
+        let (name, value) = parse_header_line("Message-ID: <abc>").unwrap();
+        assert_eq!(name, "Message-ID");
+        assert_eq!(value, "<abc>");
     }
 }
