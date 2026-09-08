@@ -23,9 +23,10 @@ impl ImapServer {
 
         match command_name.as_str() {
             "APPEND" => self.handle_append(tag, command_parts),
-            "CAPABILITY" => format!("* CAPABILITY IMAP4rev1 AUTH=PLAIN LOGIN IDLE UIDPLUS MULTIAPPEND\r\n{} OK CAPABILITY completed\r\n", tag),
+            "CAPABILITY" => format!("* CAPABILITY IMAP4rev1 AUTH=PLAIN LOGIN NAMESPACE\r\n{} OK CAPABILITY completed\r\n", tag),
             "NOOP" => format!("{} OK NOOP completed\r\n", tag),
             "LOGOUT" => Self::handle_logout(tag, sessions, session_id),
+            "NAMESPACE" => format!("* NAMESPACE ((\"\" \"/\")) NIL NIL\r\n{} OK NAMESPACE completed\r\n", tag),
             "LOGIN" => self.handle_login(tag, command_parts, sessions, session_id).await,
             "LIST" => self.handle_list(tag, command_parts, sessions, session_id).await,
             "SELECT" => self.handle_select(tag, command_parts, sessions, session_id).await,
