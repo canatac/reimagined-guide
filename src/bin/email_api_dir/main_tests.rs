@@ -6,4 +6,5 @@ mod tests {
     #[path = "main_tests/auth.rs"] mod auth;
     #[path = "main_tests/emails_send.rs"] mod emails_send;
     #[path = "main_tests/monitoring_admin.rs"] mod monitoring_admin;
+    #[path = "main_tests/tags.rs"] mod tags;
 }

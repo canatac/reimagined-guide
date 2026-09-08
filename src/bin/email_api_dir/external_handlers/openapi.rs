@@ -24,7 +24,14 @@ pub(crate) async fn api_openapi_json() -> impl Responder {
             "/api/emails/{id}/action": {
                 "post": { "tags": ["Emails"], "summary": "Perform action on email (move, delete, read, unread, star, unstar)", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" } } }
             },
-            "/api/tags": { "get": { "tags": ["Emails"], "summary": "List tags", "responses": { "200": { "description": "OK" } } } },
+            "/api/tags": {
+                "get": { "tags": ["Emails"], "summary": "List tags", "responses": { "200": { "description": "OK" } } },
+                "post": { "tags": ["Emails"], "summary": "Create tag", "responses": { "201": { "description": "Created" } } }
+            },
+            "/api/tags/{id}": {
+                "patch": { "tags": ["Emails"], "summary": "Update tag", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" } } },
+                "delete": { "tags": ["Emails"], "summary": "Delete tag", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" } } }
+            },
             "/api/send": { "post": { "tags": ["Send"], "summary": "Send an email", "responses": { "200": { "description": "OK" } } } },
             "/api/send/{id}/status": { "get": { "tags": ["Send"], "summary": "Get send status", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" } } } },
             "/api/notifications/preferences": {
