@@ -11,6 +11,33 @@ use uuid::Uuid;
 mod commands;
 mod parser;
 
+fn parse_imap_command_line(command: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+
+    for ch in command.trim().chars() {
+        match ch {
+            '"' => {
+                in_quotes = !in_quotes;
+                current.push(ch);
+            }
+            c if c.is_whitespace() && !in_quotes => {
+                if !current.is_empty() {
+                    parts.push(std::mem::take(&mut current));
+                }
+            }
+            _ => current.push(ch),
+        }
+    }
+
+    if !current.is_empty() {
+        parts.push(current);
+    }
+
+    parts
+}
+
 #[derive(Clone)]
 pub struct ImapServer {
     logic: Arc<Logic>,
@@ -99,10 +126,11 @@ impl ImapServer {
             return self.handle_append_data(command, sessions, session_id).await;
         }
 
-        let command_parts: Vec<&str> = command_str.split_whitespace().collect();
-        if command_parts.is_empty() {
+        let command_parts_owned = parse_imap_command_line(&command_str);
+        if command_parts_owned.is_empty() {
             return "BAD Command not recognized\r\n".to_string();
         }
+        let command_parts: Vec<&str> = command_parts_owned.iter().map(|s| s.as_str()).collect();
         if command_parts.len() < 2 {
             return "BAD Command not recognized\r\n".to_string();
         }
