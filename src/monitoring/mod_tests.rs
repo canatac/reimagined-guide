@@ -30,6 +30,25 @@
     }
 
     #[test]
+    fn test_reject_taxonomy_catalog_size() {
+        assert!(SMTP_REJECT_TAXONOMY_CATALOG.len() >= 12);
+    }
+
+    #[test]
+    fn test_classify_smtp_reject_policy_block() {
+        let tax = classify_smtp_reject(Some(550), "550 5.7.1 NotAuthorizedError: policy reject");
+        assert_eq!(tax.reason_code, "SMTP_REJECT_POLICY_BLOCK");
+        assert_eq!(tax.action, "review_provider_policy");
+    }
+
+    #[test]
+    fn test_classify_smtp_reject_dkim_fail() {
+        let tax = classify_smtp_reject(Some(550), "550 dkim fail bad signature");
+        assert_eq!(tax.reason_code, "SMTP_REJECT_DKIM_FAIL");
+        assert_eq!(tax.action, "fix_dkim");
+    }
+
+    #[test]
     fn test_event_with_geo() {
         let ev = SmtpEvent::new("mid3", SmtpEventType::SmtpConnect, "a@b.com", "c@d.com");
         let geo = GeoInfo {
