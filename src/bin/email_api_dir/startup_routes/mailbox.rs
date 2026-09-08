@@ -6,6 +6,7 @@ use super::super::*;
 
 pub(crate) fn register_mailbox_routes(cfg: &mut web::ServiceConfig) {
     cfg.route("/api/emails", web::get().to(api_emails))
+        .route("/api/analytics/personal", web::get().to(api_personal_analytics))
         .route("/api/emails/{id}", web::get().to(api_email_by_id))
         .route(
             "/api/emails/{id}/attachments/{attachment_id}",
@@ -15,6 +16,14 @@ pub(crate) fn register_mailbox_routes(cfg: &mut web::ServiceConfig) {
         .route("/api/tags", web::get().to(api_tags))
         .route("/api/send", web::post().to(api_send))
         .route("/api/send/{id}/status", web::get().to(api_send_status))
+        .route(
+            "/api/notifications/preferences",
+            web::get().to(api_notifications_preferences_get),
+        )
+        .route(
+            "/api/notifications/preferences",
+            web::put().to(api_notifications_preferences_put),
+        )
         .route("/api/drafts", web::get().to(api_drafts_list))
         .route("/api/drafts", web::post().to(api_drafts_upsert))
         .route("/api/drafts/{id}", web::delete().to(api_drafts_delete))

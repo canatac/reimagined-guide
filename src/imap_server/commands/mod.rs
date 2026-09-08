@@ -23,10 +23,9 @@ impl ImapServer {
 
         match command_name.as_str() {
             "APPEND" => self.handle_append(tag, command_parts),
-            "CAPABILITY" => format!("* CAPABILITY IMAP4rev1 AUTH=PLAIN LOGIN ID NAMESPACE IDLE UIDPLUS MULTIAPPEND\r\n{} OK CAPABILITY completed\r\n", tag),
+            "CAPABILITY" => format!("* CAPABILITY IMAP4rev1 AUTH=PLAIN LOGIN NAMESPACE\r\n{} OK CAPABILITY completed\r\n", tag),
             "NOOP" => format!("{} OK NOOP completed\r\n", tag),
             "LOGOUT" => Self::handle_logout(tag, sessions, session_id),
-            "ID" => format!("* ID (\"name\" \"reimagined-guide-imap\" \"version\" \"1.0\" \"vendor\" \"misfits\")\r\n{} OK ID completed\r\n", tag),
             "NAMESPACE" => format!("* NAMESPACE ((\"\" \"/\")) NIL NIL\r\n{} OK NAMESPACE completed\r\n", tag),
             "LOGIN" => self.handle_login(tag, command_parts, sessions, session_id).await,
             "LIST" => self.handle_list(tag, command_parts, sessions, session_id).await,
