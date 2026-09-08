@@ -2,6 +2,7 @@
 //! Extraits de mod.rs (refactor architecte).
 
 use std::env;
+use std::time::Duration;
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
 use tokio::time::timeout;
@@ -9,8 +10,13 @@ use tokio::time::timeout;
 use super::{smtp_timeout_budget, SMTP_PORTS};
 
 pub(crate) async fn test_smtp_port(host: &str, port: u16) -> bool {
+    let budget = smtp_timeout_budget();
     matches!(
-        timeout(CONNECTION_TIMEOUT, TcpStream::connect((host, port))).await,
+        timeout(
+            Duration::from_millis(budget.port_probe_ms),
+            TcpStream::connect((host, port)),
+        )
+        .await,
         Ok(Ok(_))
     )
 }
