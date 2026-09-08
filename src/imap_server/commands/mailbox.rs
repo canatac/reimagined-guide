@@ -183,3 +183,52 @@ impl ImapServer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::logic::{Logic, MockDatabaseInterface};
+    use mockall::predicate::eq;
+
+    #[tokio::test]
+    async fn handle_create_returns_no_when_user_not_authenticated() {
+        let mock_client = Box::new(MockDatabaseInterface::new());
+        let logic = Arc::new(Logic::new_with_mock(mock_client));
+        let mut server = ImapServer::new(logic);
+        let sessions: Sessions = Arc::new(Mutex::new(HashMap::new()));
+        let session_id = None;
+        let command_parts = ["A1", "CREATE", "NewFolder"];
+
+        let response = server
+            .handle_create("A1", &command_parts, &sessions, &session_id)
+            .await;
+
+        assert_eq!(response, "A1 NO CREATE failed: User not authenticated\r\n");
+    }
+
+    #[tokio::test]
+    async fn handle_create_returns_ok_for_authenticated_user() {
+        let mut mock_client = Box::new(MockDatabaseInterface::new());
+        mock_client
+            .expect_create_mailbox()
+            .with(eq("testuser"), eq("Projects"))
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        let logic = Arc::new(Logic::new_with_mock(mock_client));
+        let mut server = ImapServer::new(logic);
+        let sessions: Sessions = Arc::new(Mutex::new(HashMap::new()));
+        sessions
+            .lock()
+            .unwrap()
+            .insert("sess-1".to_string(), "testuser".to_string());
+        let session_id = Some("sess-1".to_string());
+        let command_parts = ["A2", "CREATE", "Projects"];
+
+        let response = server
+            .handle_create("A2", &command_parts, &sessions, &session_id)
+            .await;
+
+        assert_eq!(response, "A2 OK CREATE completed\r\n");
+    }
+}
