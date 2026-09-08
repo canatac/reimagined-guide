@@ -14,7 +14,7 @@ pub(crate) fn load_certs(path: &Path) -> std::io::Result<Vec<CertificateDer<'sta
 // Load SSL private key
 pub(crate) fn load_key(path: &Path) -> std::io::Result<PrivateKeyDer<'static>> {
     let key = private_key(&mut BufReader::new(File::open(path)?))?.ok_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::Other, "no private key found")
+        std::io::Error::other("no private key found")
     })?;
     Ok(key)
 }

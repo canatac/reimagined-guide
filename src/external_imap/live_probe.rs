@@ -12,13 +12,13 @@
  * - The sender is a tokio mpsc; we push via blocking_send() because we live
  *   on a std::thread::spawn worker.
  * - Frames follow SSE grammar:
- *       event: line
- *       data: {"dir":">"|"<","text":"…"}
- *       \n
+ *   event: line
+ *   data: {"dir":">"|"<","text":"…"}
+ *   \n
  *   And a terminal frame:
- *       event: done
- *       data: {"ok":true|false,"error":"…"}
- *       \n
+ *   event: done
+ *   data: {"ok":true|false,"error":"…"}
+ *   \n
  */
 
 use openssl::ssl::{SslConnector, SslMethod};
@@ -40,6 +40,7 @@ pub struct ProbeParams<'a> {
 }
 
 /// Public entry: called from the SSE handler on a worker thread.
+#[allow(clippy::too_many_arguments)]
 pub fn run_probe_stream(
     host: String,
     port: u16,

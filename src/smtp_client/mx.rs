@@ -38,14 +38,14 @@ async fn resolve_mx_target(
             Some(t_total.elapsed().as_millis() as u64),
             Some(dns_ms),
         );
-        IoError::new(ErrorKind::Other, format!("MX lookup failed: {}", e))
+        IoError::other(format!("MX lookup failed: {}", e))
     })?;
     let dns_ms = t_dns.elapsed().as_millis() as u64;
 
     let mx_records: Vec<_> = mx_lookup.iter().collect();
     if mx_records.is_empty() {
         ctx.emit_bounce_soft("No MX records found".into(), None, None, None, Some(dns_ms));
-        return Err(IoError::new(ErrorKind::Other, "No MX records found"));
+        return Err(IoError::other("No MX records found"));
     }
 
     if ctx.mon {
@@ -84,7 +84,7 @@ async fn resolve_mx_target(
                 Some(t_total.elapsed().as_millis() as u64),
                 Some(dns_ms),
             );
-            return Err(IoError::new(ErrorKind::Other, "No open SMTP ports found"));
+            return Err(IoError::other("No open SMTP ports found"));
         }
     };
 

@@ -1,13 +1,11 @@
 //! Auto-généré par le refacto architecte (rules split par catégorie).
 
-use chrono::{Duration as ChronoDuration, Utc};
-use futures_util::TryStreamExt;
-use mongodb::{bson::doc, Client};
+use mongodb::bson::doc;
 use serde_json::json;
 
-use crate::security::{AuthEventKind, RemediationLevel, SecurityAlert, SecuritySeverity};
+use crate::security::{RemediationLevel, SecurityAlert, SecuritySeverity};
 use super::helpers::RuleContext;
-use super::helpers::{since, env_u64, env_f64, env_list, db_name, count};
+use super::helpers::{since, env_u64, env_list, db_name, count};
 
 pub async fn rule_new_destination_country(ctx: &RuleContext<'_>) -> Vec<SecurityAlert> {
     let s_1h = since(60);

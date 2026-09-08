@@ -34,35 +34,32 @@ jobs:
       - name: Cargo check (lib + bins)
         run: cargo check --lib --bins --verbose
 
-      - name: Clippy (deny warnings, soft during cycle 15)
-        run: cargo clippy --workspace --all-targets -- -D warnings || echo "::warning::clippy failed (soft during cycle 15 — baseline 74 warnings to clean incrementally)"
+      - name: Clippy domain hard-gate (deny warnings)
+        run: cargo clippy -p simple-smtp-domain --all-targets -- -D warnings
 
-      - name: LOC guard (max 300 lines per file, soft during cycle 15)
-        run: bash scripts/loc_guard.sh || echo "::warning::LOC guard failed (soft during cycle 15)"
+      - name: LOC guard (max 300 lines per file)
+        run: bash scripts/loc_guard.sh
 
-      - name: Cyclomatic complexity check (lizard, soft)
+      - name: Cyclomatic complexity check (lizard, hard)
         run: |
           pip install lizard
-          lizard src -x '*/tests/*' -C 8 -T cyclomatic_complexity=8 --warnings_only || true
+          lizard crates/domain/src -C 8 -T cyclomatic_complexity=8 --warnings_only
 
       - name: Architecture guard (hexagonal port discipline)
         run: bash scripts/arch_guard.sh
 
-      - name: Domain purity audit (cycle 18, soft)
+      - name: Domain purity audit (cycle 18, hard)
         run: bash scripts/domain_purity_audit.sh
 
-      - name: KPI - Complexity CCN audit (cycle 21, soft)
-        continue-on-error: true
+      - name: KPI - Complexity CCN audit (cycle 21, hard)
         run: bash scripts/complexity_audit.sh
 
-      - name: KPI - Domain coverage audit (cycle 21, soft)
-        continue-on-error: true
+      - name: KPI - Domain coverage audit (cycle 21, hard)
         run: |
           rustup component add llvm-tools-preview || true
           bash scripts/domain_coverage_audit.sh
 
-      - name: KPI - Ports migration audit (cycle 21, soft)
-        continue-on-error: true
+      - name: KPI - Ports migration audit (cycle 21, hard)
         run: bash scripts/ports_migration_audit.sh
 
   # ============================================================

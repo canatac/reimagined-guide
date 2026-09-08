@@ -2,7 +2,6 @@
 //! Extraits de mod.rs (refactor architecte).
 
 use std::env;
-use std::time::Duration;
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
 use tokio::time::timeout;
@@ -10,11 +9,10 @@ use tokio::time::timeout;
 use super::{smtp_timeout_budget, SMTP_PORTS};
 
 pub(crate) async fn test_smtp_port(host: &str, port: u16) -> bool {
-    let budget = smtp_timeout_budget();
-    match timeout(Duration::from_millis(budget.port_probe_ms), TcpStream::connect((host, port))).await {
-        Ok(Ok(_)) => true,
-        _ => false,
-    }
+    matches!(
+        timeout(CONNECTION_TIMEOUT, TcpStream::connect((host, port))).await,
+        Ok(Ok(_))
+    )
 }
 
 pub(crate) async fn find_smtp_port(host: &str) -> Option<u16> {
@@ -79,10 +77,10 @@ pub(crate) async fn expect_code_for_phase<T: AsyncReadExt + Unpin>(
             }
 
             if sep == ' ' && prefix != expected {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("Unexpected response: {}", acc),
-                ));
+                return Err(std::io::Error::other(format!(
+                    "Unexpected response: {}",
+                    acc
+                )));
             }
         }
     }

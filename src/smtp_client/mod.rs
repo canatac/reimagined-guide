@@ -26,9 +26,8 @@ Make sure you have set the necessary environment variables in your .env file:
 The client will attempt to connect to the SMTP server, send the email, and report the result.
 */
 
-use rustls::pki_types::{CertificateDer, ServerName};
+use rustls::pki_types::ServerName;
 use rustls::{ClientConfig, RootCertStore};
-use chrono::Utc;
 use std::io::{Error as IoError, ErrorKind};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -43,9 +42,6 @@ use trust_dns_resolver::TokioAsyncResolver;
 use rustls_native_certs::load_native_certs;
 use std::convert::TryFrom;
 use std::env;
-use std::fs::File;
-use std::io::BufReader;
-use uuid::Uuid;
 use webpki_roots::TLS_SERVER_ROOTS;
 pub(crate) const SMTP_PORTS: [u16; 3] = [25, 587, 465];
 pub(crate) const CONNECTION_TIMEOUT: Duration = Duration::from_secs(3);
@@ -116,6 +112,7 @@ mod timeout_budget_tests {
 
 use crate::entities::Email;
 
+#[allow(clippy::large_enum_variant)]
 enum StreamType {
     Plain(TcpStream),
     Tls(TlsStream<TcpStream>),

@@ -22,7 +22,8 @@ pub(super) async fn send_email_content(
 
 pub fn extract_email_address(content: &str, header: &str) -> Option<String> {
     let line = content.lines().find(|line| line.starts_with(header))?;
-    let value = line.splitn(2, ':').nth(1)?.trim();
+    let value = line.split_once(':')?.1.trim();
+    // Handle "Display Name <email@example.com>" format
     if let (Some(start), Some(end)) = (value.rfind('<'), value.rfind('>')) {
         if start < end {
             return Some(value[start + 1..end].trim().to_string());

@@ -12,6 +12,12 @@ pub struct SessionManager {
     sessions: Arc<Mutex<HashMap<String, SessionData>>>,
 }
 
+impl Default for SessionManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SessionManager {
     pub fn new() -> Self {
         SessionManager {
