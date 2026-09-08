@@ -80,6 +80,7 @@ pub(crate) fn register_mailbox_routes(cfg: &mut web::ServiceConfig) {
             web::post().to(calendar_create_event),
         )
         .route("/api/calendar/events", web::get().to(calendar_list_events))
+        .route("/api/calendar/agenda", web::get().to(calendar_agenda))
         .route(
             "/api/calendar/events/{id}",
             web::get().to(calendar_get_event),
