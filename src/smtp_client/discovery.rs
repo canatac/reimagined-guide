@@ -7,10 +7,11 @@ use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 
-use super::{SMTP_PORTS, CONNECTION_TIMEOUT};
+use super::{smtp_timeout_budget, SMTP_PORTS};
 
 pub(crate) async fn test_smtp_port(host: &str, port: u16) -> bool {
-    match timeout(CONNECTION_TIMEOUT, TcpStream::connect((host, port))).await {
+    let budget = smtp_timeout_budget();
+    match timeout(Duration::from_millis(budget.port_probe_ms), TcpStream::connect((host, port))).await {
         Ok(Ok(_)) => true,
         _ => false,
     }
@@ -29,11 +30,28 @@ pub(crate) async fn expect_code<T: AsyncReadExt + Unpin>(
     stream: &mut T,
     expected: &str,
 ) -> std::io::Result<()> {
+    let budget = smtp_timeout_budget();
+    expect_code_for_phase(stream, expected, "smtp_response", budget.data_ms).await
+}
+
+pub(crate) async fn expect_code_for_phase<T: AsyncReadExt + Unpin>(
+    stream: &mut T,
+    expected: &str,
+    phase: &str,
+    timeout_ms: u64,
+) -> std::io::Result<()> {
     let mut response = [0; 1024];
     let mut acc = String::new();
 
     for _ in 0..16 {
-        let n = stream.read(&mut response).await?;
+        let n = timeout(Duration::from_millis(timeout_ms), stream.read(&mut response))
+            .await
+            .map_err(|_| {
+                std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    format!("SMTP phase timeout [{}]: waited {}ms for code {}", phase, timeout_ms, expected),
+                )
+            })??;
         if n == 0 {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::UnexpectedEof,
@@ -71,7 +89,7 @@ pub(crate) async fn expect_code<T: AsyncReadExt + Unpin>(
 
     Err(std::io::Error::new(
         std::io::ErrorKind::TimedOut,
-        format!("Timed out waiting for SMTP {} response: {}", expected, acc),
+        format!("SMTP phase timeout [{}]: waiting code {} response after {}ms: {}", phase, expected, timeout_ms, acc),
     ))
 }
 pub(crate) fn ehlo_hostname() -> String {
