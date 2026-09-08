@@ -29,6 +29,10 @@ async fn test_monitoring_summary_shape() {
     assert!(body["deliveryRate"].is_number(), "Expected deliveryRate field");
     assert!(body["bounceRate"].is_number(), "Expected bounceRate field");
     assert!(body["byStatus"].is_object(), "Expected byStatus object");
+    assert!(body["queueDepth"].is_number(), "Expected queueDepth field");
+    assert!(body["queueLatencyMs"].is_number(), "Expected queueLatencyMs field");
+    assert!(body["prometheus"]["smtp_queue_depth"].is_number(), "Expected prometheus smtp_queue_depth field");
+    assert!(body["prometheus"]["smtp_queue_latency_ms"].is_number(), "Expected prometheus smtp_queue_latency_ms field");
 }
 
 #[actix_web::test]
