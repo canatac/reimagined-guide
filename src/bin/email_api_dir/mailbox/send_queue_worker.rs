@@ -2,12 +2,84 @@
 use super::super::*;
 use super::send_pipeline::*;
 use super::send_endpoints::*;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
 // --- Send queue background worker ---
+
+fn retry_policy() -> (u32, u64, u64, u64) {
+    let max_attempts = std::env::var("SMTP_RETRY_MAX_ATTEMPTS")
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(3)
+        .max(1);
+    let base_ms = std::env::var("SMTP_RETRY_BASE_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(500)
+        .max(1);
+    let max_ms = std::env::var("SMTP_RETRY_MAX_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(30_000)
+        .max(base_ms);
+    let jitter_ms = std::env::var("SMTP_RETRY_JITTER_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(250);
+    (max_attempts, base_ms, max_ms, jitter_ms)
+}
+
+fn deterministic_jitter_ms(message_id: &str, attempt: u32, jitter_cap_ms: u64) -> u64 {
+    if jitter_cap_ms == 0 {
+        return 0;
+    }
+    let mut hasher = DefaultHasher::new();
+    message_id.hash(&mut hasher);
+    attempt.hash(&mut hasher);
+    hasher.finish() % (jitter_cap_ms + 1)
+}
+
+fn backoff_delay_ms(
+    message_id: &str,
+    attempt: u32,
+    base_ms: u64,
+    max_ms: u64,
+    jitter_cap_ms: u64,
+) -> u64 {
+    let exponent = attempt.saturating_sub(1).min(16);
+    let exp = base_ms.saturating_mul(1u64 << exponent);
+    let jitter = deterministic_jitter_ms(message_id, attempt, jitter_cap_ms);
+    exp.saturating_add(jitter).min(max_ms)
+}
+
+fn is_retryable_error(err: &std::io::Error) -> bool {
+    use std::io::ErrorKind;
+    match err.kind() {
+        ErrorKind::TimedOut
+        | ErrorKind::ConnectionRefused
+        | ErrorKind::ConnectionReset
+        | ErrorKind::ConnectionAborted
+        | ErrorKind::NotConnected
+        | ErrorKind::WouldBlock
+        | ErrorKind::Interrupted => true,
+        _ => {
+            let msg = err.to_string().to_ascii_lowercase();
+            msg.contains("temporary")
+                || msg.contains("timed out")
+                || msg.contains("timeout")
+                || msg.contains("4.2.")
+                || msg.contains("4.3.")
+                || msg.contains("4.4.")
+                || msg.contains("4.5.")
+        }
+    }
+}
 
 pub(crate) async fn send_queue_worker(mongo: Arc<mongodb::Client>) {
     let db_name = std::env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
     let logic = Arc::new(Logic::new(mongo.clone()));
+    let (max_attempts, base_ms, max_ms, jitter_ms) = retry_policy();
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
@@ -139,18 +211,110 @@ pub(crate) async fn send_queue_worker(mongo: Arc<mongodb::Client>) {
                 },
             };
 
-            let status = match send_outgoing_email(&email).await {
-                Ok(_) => "sent",
-                Err(e) => {
-                    eprintln!("send_queue_worker send error for {}: {}", id, e);
-                    "failed"
+            let mut final_status = "failed";
+            let mut retry_outcome = "final_fail";
+            let mut retry_count: i64 = 0;
+            let mut last_error: Option<String> = None;
+
+            for attempt in 1..=max_attempts {
+                match send_outgoing_email(&email).await {
+                    Ok(_) => {
+                        retry_count = i64::from(attempt.saturating_sub(1));
+                        final_status = "sent";
+                        retry_outcome = if attempt > 1 {
+                            "success_after_retry"
+                        } else {
+                            "sent_first_try"
+                        };
+                        break;
+                    }
+                    Err(e) => {
+                        let retryable = is_retryable_error(&e);
+                        let err_msg = e.to_string();
+                        last_error = Some(err_msg.clone());
+                        eprintln!(
+                            "send_queue_worker send error for {} (attempt {}/{}): {}",
+                            id, attempt, max_attempts, err_msg
+                        );
+                        if !retryable || attempt >= max_attempts {
+                            retry_count = i64::from(attempt.saturating_sub(1));
+                            break;
+                        }
+                        let delay_ms = backoff_delay_ms(&id, attempt, base_ms, max_ms, jitter_ms);
+                        tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+                    }
                 }
-            };
+            }
 
             let _ = coll
-                .update_one(doc! { "id": &id }, doc! { "$set": { "status": status } })
+                .update_one(
+                    doc! { "id": &id },
+                    doc! { "$set": {
+                        "status": final_status,
+                        "retry_count": retry_count,
+                        "retry_outcome": retry_outcome,
+                        "last_error": last_error,
+                        "updated_at": Utc::now(),
+                    } },
+                )
                 .await;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{backoff_delay_ms, deterministic_jitter_ms};
+    use std::io::{Error, ErrorKind};
+
+    #[test]
+    fn backoff_grows_and_is_bounded() {
+        let d1 = backoff_delay_ms("m1", 1, 100, 5_000, 0);
+        let d2 = backoff_delay_ms("m1", 2, 100, 5_000, 0);
+        let d3 = backoff_delay_ms("m1", 3, 100, 5_000, 0);
+        assert_eq!(d1, 100);
+        assert_eq!(d2, 200);
+        assert_eq!(d3, 400);
+        let capped = backoff_delay_ms("m1", 20, 100, 5_000, 250);
+        assert!(capped <= 5_000);
+    }
+
+    #[test]
+    fn jitter_is_deterministic_per_message_and_attempt() {
+        let a = deterministic_jitter_ms("msg-1", 2, 250);
+        let b = deterministic_jitter_ms("msg-1", 2, 250);
+        let c = deterministic_jitter_ms("msg-1", 3, 250);
+        assert_eq!(a, b);
+        assert!(a <= 250);
+        assert!(c <= 250);
+    }
+
+    #[test]
+    fn backoff_respects_zero_jitter_and_hard_cap() {
+        let no_jitter = backoff_delay_ms("msg-2", 2, 500, 30_000, 0);
+        assert_eq!(no_jitter, 1_000);
+
+        let capped = backoff_delay_ms("msg-2", 10, 500, 1_200, 500);
+        assert_eq!(capped, 1_200);
+    }
+
+    #[test]
+    fn higher_attempt_never_reduces_delay_before_cap() {
+        let d2 = backoff_delay_ms("msg-3", 2, 250, 5_000, 0);
+        let d3 = backoff_delay_ms("msg-3", 3, 250, 5_000, 0);
+        assert!(d3 >= d2);
+    }
+
+    #[test]
+    fn retryable_error_classification_handles_kind_and_message() {
+        let timeout_err = Error::new(ErrorKind::TimedOut, "network timeout");
+        assert!(super::is_retryable_error(&timeout_err));
+
+        let smtp_451 = Error::other("451 4.4.0 Temporary forwarding failure");
+        assert!(super::is_retryable_error(&smtp_451));
+
+        let hard_fail = Error::other("550 5.1.1 unknown user");
+        assert!(!super::is_retryable_error(&hard_fail));
     }
 }
 
