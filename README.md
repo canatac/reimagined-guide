@@ -135,7 +135,18 @@ HERMES_MODEL=hermes-agent
 
 # Logging
 RUST_LOG=debug
+
+# SMTP retry/backoff policy (send_queue_worker)
+SMTP_RETRY_MAX_ATTEMPTS=3
+SMTP_RETRY_BASE_MS=500
+SMTP_RETRY_MAX_MS=30000
+SMTP_RETRY_JITTER_MS=250
 ```
+
+Retry policy notes:
+- Exponential backoff per attempt (`base * 2^(attempt-1)`) with bounded deterministic jitter.
+- Retry is limited by `SMTP_RETRY_MAX_ATTEMPTS` and capped by `SMTP_RETRY_MAX_MS`.
+- Queue records now expose `retry_outcome` (`sent_first_try`, `success_after_retry`, `final_fail`) and `retry_count`.
 
 ### 5.2 TLS Configuration
 - **Recommended**: Use `stunnel` for TLS termination in production.
