@@ -234,8 +234,206 @@ pub(crate) async fn api_personal_analytics(
     }))
 }
 
-pub(crate) async fn api_tags() -> impl Responder {
-    HttpResponse::Ok().json(serde_json::json!({"tags": []}))
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MailLabel {
+    pub id: String,
+    pub user_id: String,
+    pub name: String,
+    pub color: String,
+    pub icon: Option<String>,
+    pub parent_id: Option<String>,
+    pub created_at: bson::DateTime,
+    pub updated_at: bson::DateTime,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MailLabelCreateRequest {
+    pub name: String,
+    pub color: Option<String>,
+    pub icon: Option<String>,
+    pub parent_id: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MailLabelUpdateRequest {
+    pub name: Option<String>,
+    pub color: Option<String>,
+    pub icon: Option<String>,
+    pub parent_id: Option<String>,
+}
+
+fn labels_coll(mongo: &Arc<mongodb::Client>) -> mongodb::Collection<bson::Document> {
+    let db = env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
+    mongo.database(&db).collection::<bson::Document>("mail_labels")
+}
+
+fn normalize_label_name(raw: &str) -> String {
+    raw.trim().to_string()
+}
+
+fn normalize_label_color(raw: Option<String>) -> String {
+    raw.map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| "#64748b".to_string())
+}
+
+pub(crate) async fn api_tags(
+    req: actix_web::HttpRequest,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    let user_id = resolve_user_id(&req);
+    let coll = labels_coll(&mongo);
+    match coll
+        .find(doc! { "user_id": &user_id })
+        .sort(doc! { "name": 1 })
+        .await
+    {
+        Ok(cursor) => {
+            let docs: Vec<bson::Document> = cursor.try_collect().await.unwrap_or_default();
+            let tags: Vec<MailLabel> = docs
+                .into_iter()
+                .filter_map(|doc| bson::from_document::<MailLabel>(doc).ok())
+                .collect();
+            HttpResponse::Ok().json(serde_json::json!({ "tags": tags }))
+        }
+        Err(e) => {
+            eprintln!("api_tags error: {}", e);
+            HttpResponse::InternalServerError()
+                .json(serde_json::json!({ "message": "Failed to list tags" }))
+        }
+    }
+}
+
+pub(crate) async fn api_tags_create(
+    body: web::Json<MailLabelCreateRequest>,
+    req: actix_web::HttpRequest,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    let user_id = resolve_user_id(&req);
+    let name = normalize_label_name(&body.name);
+    if name.is_empty() {
+        return HttpResponse::BadRequest().json(serde_json::json!({
+            "message": "name is required"
+        }));
+    }
+
+    let now = bson::DateTime::from_millis(Utc::now().timestamp_millis());
+    let tag = MailLabel {
+        id: Uuid::new_v4().to_string(),
+        user_id: user_id.clone(),
+        name,
+        color: normalize_label_color(body.color.clone()),
+        icon: body.icon.clone().filter(|v| !v.trim().is_empty()),
+        parent_id: body.parent_id.clone().filter(|v| !v.trim().is_empty()),
+        created_at: now,
+        updated_at: now,
+    };
+
+    let coll = labels_coll(&mongo);
+    let payload = match bson::to_document(&tag) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("api_tags_create serialize error: {}", e);
+            return HttpResponse::InternalServerError()
+                .json(serde_json::json!({ "message": "Failed to create tag" }));
+        }
+    };
+
+    match coll.insert_one(payload).await {
+        Ok(_) => HttpResponse::Created().json(serde_json::json!({ "tag": tag })),
+        Err(e) => {
+            eprintln!("api_tags_create error: {}", e);
+            HttpResponse::InternalServerError()
+                .json(serde_json::json!({ "message": "Failed to create tag" }))
+        }
+    }
+}
+
+pub(crate) async fn api_tags_update(
+    path: web::Path<String>,
+    body: web::Json<MailLabelUpdateRequest>,
+    req: actix_web::HttpRequest,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    let user_id = resolve_user_id(&req);
+    let id = path.into_inner();
+    let mut set_doc = doc! {};
+
+    if let Some(name) = body.name.as_ref() {
+        let normalized = normalize_label_name(name);
+        if normalized.is_empty() {
+            return HttpResponse::BadRequest().json(serde_json::json!({
+                "message": "name must not be empty"
+            }));
+        }
+        set_doc.insert("name", normalized);
+    }
+    if let Some(color) = body.color.as_ref() {
+        set_doc.insert("color", normalize_label_color(Some(color.clone())));
+    }
+    if let Some(icon) = body.icon.as_ref() {
+        let value = icon.trim();
+        if value.is_empty() {
+            set_doc.insert("icon", bson::Bson::Null);
+        } else {
+            set_doc.insert("icon", value.to_string());
+        }
+    }
+    if let Some(parent_id) = body.parent_id.as_ref() {
+        let value = parent_id.trim();
+        if value.is_empty() {
+            set_doc.insert("parent_id", bson::Bson::Null);
+        } else {
+            set_doc.insert("parent_id", value.to_string());
+        }
+    }
+
+    if set_doc.is_empty() {
+        return HttpResponse::BadRequest().json(serde_json::json!({
+            "message": "No fields to update"
+        }));
+    }
+    set_doc.insert("updated_at", bson::DateTime::from_millis(Utc::now().timestamp_millis()));
+
+    let coll = labels_coll(&mongo);
+    match coll
+        .update_one(doc! { "user_id": &user_id, "id": &id }, doc! { "$set": set_doc })
+        .await
+    {
+        Ok(result) if result.matched_count == 0 => {
+            HttpResponse::NotFound().json(serde_json::json!({ "message": "Tag not found" }))
+        }
+        Ok(_) => HttpResponse::Ok().json(serde_json::json!({ "ok": true, "id": id })),
+        Err(e) => {
+            eprintln!("api_tags_update error: {}", e);
+            HttpResponse::InternalServerError()
+                .json(serde_json::json!({ "message": "Failed to update tag" }))
+        }
+    }
+}
+
+pub(crate) async fn api_tags_delete(
+    path: web::Path<String>,
+    req: actix_web::HttpRequest,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    let user_id = resolve_user_id(&req);
+    let id = path.into_inner();
+    let coll = labels_coll(&mongo);
+    match coll.delete_one(doc! { "user_id": &user_id, "id": &id }).await {
+        Ok(result) if result.deleted_count == 0 => {
+            HttpResponse::NotFound().json(serde_json::json!({ "message": "Tag not found" }))
+        }
+        Ok(_) => HttpResponse::Ok().json(serde_json::json!({ "ok": true, "id": id })),
+        Err(e) => {
+            eprintln!("api_tags_delete error: {}", e);
+            HttpResponse::InternalServerError()
+                .json(serde_json::json!({ "message": "Failed to delete tag" }))
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

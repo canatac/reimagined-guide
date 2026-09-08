@@ -14,6 +14,9 @@ pub(crate) fn register_mailbox_routes(cfg: &mut web::ServiceConfig) {
         )
         .route("/api/emails/{id}/action", web::post().to(api_email_action))
         .route("/api/tags", web::get().to(api_tags))
+        .route("/api/tags", web::post().to(api_tags_create))
+        .route("/api/tags/{id}", web::patch().to(api_tags_update))
+        .route("/api/tags/{id}", web::delete().to(api_tags_delete))
         .route("/api/send", web::post().to(api_send))
         .route("/api/send/{id}/status", web::get().to(api_send_status))
         .route(
