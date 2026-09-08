@@ -9,9 +9,28 @@ echo "[audit] Coverage crates/domain (seuil ${THRESHOLD}%)..."
 OUT=$(cargo llvm-cov -p simple-smtp-domain --summary-only 2>&1)
 echo "$OUT" | tail -20
 
-PCT=$(echo "$OUT" | awk '/TOTAL/ {gsub("%","",$NF); v=$NF} END {print v}')
+PCT=$(echo "$OUT" | awk '
+  /TOTAL/ {
+    n=0
+    for (i=1; i<=NF; i++) {
+      if ($i ~ /^[0-9]+(\.[0-9]+)?%$/) {
+        n++
+        pct[n]=$i
+      }
+    }
+    if (n >= 3) {
+      v=pct[3]
+    } else if (n >= 1) {
+      v=pct[n]
+    }
+  }
+  END {
+    gsub("%", "", v)
+    print v
+  }
+')
 
-if [ -z "${PCT}" ]; then
+if [ -z "${PCT}" ] || ! printf '%s' "$PCT" | grep -Eq '^[0-9]+(\.[0-9]+)?$'; then
   echo "[audit] ❌ Impossible d'extraire la couverture Domain"
   exit 1
 fi
