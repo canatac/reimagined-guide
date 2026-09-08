@@ -112,7 +112,7 @@ pub(crate) fn extract_email_content(
     {
         let html_content = html.get_body()?;
         return Ok(html_content
-            .replace(|c: char| c == '<' || c == '>', "")
+            .replace(['<', '>'], "")
             .trim()
             .to_string());
     }

@@ -35,12 +35,12 @@ impl DatabaseInterface for MongoDatabaseAdapter {
     async fn update_user_locale(&self, username: &str, locale: &str) -> Result<()> {
         self.update_user_locale_impl(username, locale).await
     }
-    async fn find_or_create_oauth_user(
-        &self,
-        provider: &str,
-        provider_user_id: &str,
-        email: &str,
-        display_name: Option<&str>,
+    async fn find_or_create_oauth_user<'a>(
+        &'a self,
+        provider: &'a str,
+        provider_user_id: &'a str,
+        email: &'a str,
+        display_name: Option<&'a str>,
     ) -> Result<User> {
         self.find_or_create_oauth_user_impl(provider, provider_user_id, email, display_name).await
     }

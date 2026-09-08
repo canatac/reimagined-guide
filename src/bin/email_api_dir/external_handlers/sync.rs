@@ -1,6 +1,17 @@
 #![allow(unused_imports, dead_code)]
 use super::super::*;
 
+#[derive(Debug, Deserialize)]
+pub(crate) struct ExternalMessagesQuery {
+    pub(crate) account_id: String,
+    #[serde(default)]
+    pub(crate) folder: Option<String>,
+    #[serde(default)]
+    pub(crate) page: Option<u64>,
+    #[serde(default)]
+    pub(crate) page_size: Option<u64>,
+}
+
 pub(crate) async fn api_external_sync_start(
     req: HttpRequest,
     path: web::Path<String>,

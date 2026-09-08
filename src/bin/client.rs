@@ -16,7 +16,7 @@ fn validate_email_content(content: &str) -> Result<(), String> {
     if !lines[2].starts_with("Subject: ") {
         return Err("Invalid Subject header".to_string());
     }
-    if lines[3] != "" {
+    if !lines[3].is_empty() {
         return Err("Missing blank line after headers".to_string());
     }
     Ok(())

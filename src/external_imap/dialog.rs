@@ -2,7 +2,6 @@
 
 use chrono::Utc;
 use openssl::ssl::{SslConnector, SslMethod, SslStream};
-use std::io::Write;
 use std::net::{TcpStream, ToSocketAddrs};
 use std::time::Duration;
 
@@ -12,84 +11,47 @@ use super::parser::{
 };
 
 pub(crate) fn run_imap_dialog_plain(
-    mut stream: TcpStream,
+    stream: TcpStream,
     username: &str,
     password: &str,
     include_list: bool,
 ) -> std::result::Result<(String, Vec<String>, Vec<String>), String> {
-    let greeting = read_line_from_stream(&mut stream)?;
-
-    stream
-        .write_all(b"a1 CAPABILITY\r\n")
-        .map_err(|e| format!("write CAPABILITY failed: {e}"))?;
-    stream.flush().map_err(|e| format!("flush failed: {e}"))?;
-    let cap_lines = read_until_tag_from_stream(&mut stream, "a1")?;
-    let capabilities = parse_capabilities(&cap_lines);
-
-    let login = format!("a2 LOGIN \"{}\" \"{}\"\r\n", escape_imap(username), escape_imap(password));
-    stream
-        .write_all(login.as_bytes())
-        .map_err(|e| format!("write LOGIN failed: {e}"))?;
-    stream.flush().map_err(|e| format!("flush failed: {e}"))?;
-    let login_lines = read_until_tag_from_stream(&mut stream, "a2")?;
-    if !tag_status_ok(&login_lines, "a2") {
-        return Err(format!("IMAP login failed: {}", login_lines.join(" | ")));
-    }
-
-    let mut folders = vec![];
-    if include_list {
-        stream
-            .write_all(b"a3 LIST \"\" \"*\"\r\n")
-            .map_err(|e| format!("write LIST failed: {e}"))?;
-        stream.flush().map_err(|e| format!("flush failed: {e}"))?;
-        let list_lines = read_until_tag_from_stream(&mut stream, "a3")?;
-        folders = parse_list_folders(&list_lines);
-    }
-
-    let _ = stream.write_all(b"a9 LOGOUT\r\n");
-    let _ = stream.flush();
-
-    Ok((greeting, capabilities, folders))
+    run_imap_dialog(stream, username, password, include_list)
 }
 
 pub(crate) fn run_imap_dialog_ssl(
-    mut stream: SslStream<TcpStream>,
+    stream: SslStream<TcpStream>,
+    username: &str,
+    password: &str,
+    include_list: bool,
+) -> std::result::Result<(String, Vec<String>, Vec<String>), String> {
+    run_imap_dialog(stream, username, password, include_list)
+}
+
+fn run_imap_dialog<S: std::io::Read + std::io::Write>(
+    mut stream: S,
     username: &str,
     password: &str,
     include_list: bool,
 ) -> std::result::Result<(String, Vec<String>, Vec<String>), String> {
     let greeting = read_line_from_stream(&mut stream)?;
 
-    stream
-        .write_all(b"a1 CAPABILITY\r\n")
-        .map_err(|e| format!("write CAPABILITY failed: {e}"))?;
-    stream.flush().map_err(|e| format!("flush failed: {e}"))?;
+    write_command(&mut stream, "a1 CAPABILITY\r\n", "CAPABILITY")?;
     let cap_lines = read_until_tag_from_stream(&mut stream, "a1")?;
     let capabilities = parse_capabilities(&cap_lines);
 
-    let login = format!("a2 LOGIN \"{}\" \"{}\"\r\n", escape_imap(username), escape_imap(password));
-    stream
-        .write_all(login.as_bytes())
-        .map_err(|e| format!("write LOGIN failed: {e}"))?;
-    stream.flush().map_err(|e| format!("flush failed: {e}"))?;
+    let login = format!(
+        "a2 LOGIN \"{}\" \"{}\"\r\n",
+        escape_imap(username),
+        escape_imap(password)
+    );
+    write_command(&mut stream, &login, "LOGIN")?;
     let login_lines = read_until_tag_from_stream(&mut stream, "a2")?;
-    if !tag_status_ok(&login_lines, "a2") {
-        return Err(format!("IMAP login failed: {}", login_lines.join(" | ")));
-    }
+    ensure_ok(&login_lines, "a2", "IMAP login failed")?;
 
-    let mut folders = vec![];
-    if include_list {
-        stream
-            .write_all(b"a3 LIST \"\" \"*\"\r\n")
-            .map_err(|e| format!("write LIST failed: {e}"))?;
-        stream.flush().map_err(|e| format!("flush failed: {e}"))?;
-        let list_lines = read_until_tag_from_stream(&mut stream, "a3")?;
-        folders = parse_list_folders(&list_lines);
-    }
+    let folders = fetch_folders_if_requested(&mut stream, include_list)?;
 
-    let _ = stream.write_all(b"a9 LOGOUT\r\n");
-    let _ = stream.flush();
-
+    logout_best_effort(&mut stream);
     Ok((greeting, capabilities, folders))
 }
 
@@ -102,20 +64,9 @@ pub(crate) fn imap_fetch_headers_since(
     folder: &str,
     since_imap: &str,
 ) -> std::result::Result<Vec<ImapFetchedHeader>, String> {
-    if password.is_empty() {
-        return Err("Missing credential secretValue on external account".to_string());
-    }
-
-    let addr = (host, port)
-        .to_socket_addrs()
-        .map_err(|e| format!("resolve failed: {e}"))?
-        .next()
-        .ok_or_else(|| "resolve failed: no address".to_string())?;
-
-    let tcp = TcpStream::connect_timeout(&addr, Duration::from_secs(10))
-        .map_err(|e| format!("tcp connect failed: {e}"))?;
-    tcp.set_read_timeout(Some(Duration::from_secs(30))).ok();
-    tcp.set_write_timeout(Some(Duration::from_secs(30))).ok();
+    ensure_password(password)?;
+    let addr = resolve_addr(host, port)?;
+    let tcp = connect_tcp_with_timeouts(&addr)?;
 
     if use_tls {
         let connector = SslConnector::builder(SslMethod::tls())
@@ -128,6 +79,30 @@ pub(crate) fn imap_fetch_headers_since(
     } else {
         imap_fetch_dialog(tcp, username, password, folder, since_imap)
     }
+}
+
+fn ensure_password(password: &str) -> std::result::Result<(), String> {
+    if password.is_empty() {
+        Err("Missing credential secretValue on external account".to_string())
+    } else {
+        Ok(())
+    }
+}
+
+fn resolve_addr(host: &str, port: u16) -> std::result::Result<std::net::SocketAddr, String> {
+    (host, port)
+        .to_socket_addrs()
+        .map_err(|e| format!("resolve failed: {e}"))?
+        .next()
+        .ok_or_else(|| "resolve failed: no address".to_string())
+}
+
+fn connect_tcp_with_timeouts(addr: &std::net::SocketAddr) -> std::result::Result<TcpStream, String> {
+    let tcp = TcpStream::connect_timeout(addr, Duration::from_secs(10))
+        .map_err(|e| format!("tcp connect failed: {e}"))?;
+    tcp.set_read_timeout(Some(Duration::from_secs(30))).ok();
+    tcp.set_write_timeout(Some(Duration::from_secs(30))).ok();
+    Ok(tcp)
 }
 
 fn imap_fetch_dialog<S: std::io::Read + std::io::Write>(
@@ -144,45 +119,29 @@ fn imap_fetch_dialog<S: std::io::Read + std::io::Write>(
         escape_imap(username),
         escape_imap(password)
     );
-    stream
-        .write_all(login.as_bytes())
-        .map_err(|e| format!("write LOGIN failed: {e}"))?;
-    stream.flush().map_err(|e| format!("flush failed: {e}"))?;
-    let login_lines = read_until_tag_from_stream(&mut stream, "a1")?;
-    if !tag_status_ok(&login_lines, "a1") {
-        return Err(format!("IMAP login failed: {}", login_lines.join(" | ")));
-    }
+    send_and_expect_ok(&mut stream, &login, "LOGIN", "a1", "IMAP login failed")?;
 
-    let sel = format!("a2 SELECT \"{}\"\r\n", escape_imap(folder));
-    stream
-        .write_all(sel.as_bytes())
-        .map_err(|e| format!("write SELECT failed: {e}"))?;
-    stream.flush().map_err(|e| format!("flush failed: {e}"))?;
-    let sel_lines = read_until_tag_from_stream(&mut stream, "a2")?;
-    if !tag_status_ok(&sel_lines, "a2") {
-        return Err(format!(
-            "IMAP select {} failed: {}",
-            folder,
-            sel_lines.join(" | ")
-        ));
-    }
+    let select = format!("a2 SELECT \"{}\"\r\n", escape_imap(folder));
+    send_and_expect_ok(
+        &mut stream,
+        &select,
+        "SELECT",
+        "a2",
+        &format!("IMAP select {} failed", folder),
+    )?;
 
     let search = format!("a3 UID SEARCH SINCE {}\r\n", since_imap);
-    stream
-        .write_all(search.as_bytes())
-        .map_err(|e| format!("write SEARCH failed: {e}"))?;
-    stream.flush().map_err(|e| format!("flush failed: {e}"))?;
-    let search_lines = read_until_tag_from_stream(&mut stream, "a3")?;
-    if !tag_status_ok(&search_lines, "a3") {
-        return Err(format!(
-            "IMAP UID SEARCH failed: {}",
-            search_lines.join(" | ")
-        ));
-    }
+    let search_lines = send_and_expect_ok_collect(
+        &mut stream,
+        &search,
+        "SEARCH",
+        "a3",
+        "IMAP UID SEARCH failed",
+    )?;
+
     let uids = parse_uid_search(&search_lines);
     if uids.is_empty() {
-        let _ = stream.write_all(b"a9 LOGOUT\r\n");
-        let _ = stream.flush();
+        logout_best_effort(&mut stream);
         return Ok(vec![]);
     }
 
@@ -197,24 +156,76 @@ fn imap_fetch_dialog<S: std::io::Read + std::io::Write>(
             "a4 UID FETCH {} (UID INTERNALDATE FLAGS BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)])\r\n",
             set
         );
-        stream
-            .write_all(fetch_cmd.as_bytes())
-            .map_err(|e| format!("write FETCH failed: {e}"))?;
-        stream.flush().map_err(|e| format!("flush failed: {e}"))?;
-        let fetch_lines = read_until_tag_from_stream(&mut stream, "a4")?;
-        if !tag_status_ok(&fetch_lines, "a4") {
-            return Err(format!(
-                "IMAP UID FETCH failed: {}",
-                fetch_lines.join(" | ")
-            ));
-        }
+        let fetch_lines = send_and_expect_ok_collect(
+            &mut stream,
+            &fetch_cmd,
+            "FETCH",
+            "a4",
+            "IMAP UID FETCH failed",
+        )?;
         let mut parsed = parse_fetch_headers(&fetch_lines);
         result.append(&mut parsed);
     }
 
+    logout_best_effort(&mut stream);
+    Ok(result)
+}
+
+fn fetch_folders_if_requested<S: std::io::Read + std::io::Write>(
+    stream: &mut S,
+    include_list: bool,
+) -> std::result::Result<Vec<String>, String> {
+    if !include_list {
+        return Ok(vec![]);
+    }
+
+    write_command(stream, "a3 LIST \"\" \"*\"\r\n", "LIST")?;
+    let list_lines = read_until_tag_from_stream(stream, "a3")?;
+    Ok(parse_list_folders(&list_lines))
+}
+
+fn write_command<S: std::io::Write>(stream: &mut S, cmd: &str, label: &str) -> std::result::Result<(), String> {
+    stream
+        .write_all(cmd.as_bytes())
+        .map_err(|e| format!("write {label} failed: {e}"))?;
+    stream.flush().map_err(|e| format!("flush failed: {e}"))
+}
+
+fn ensure_ok(lines: &[String], tag: &str, err_prefix: &str) -> std::result::Result<(), String> {
+    if tag_status_ok(lines, tag) {
+        Ok(())
+    } else {
+        Err(format!("{}: {}", err_prefix, lines.join(" | ")))
+    }
+}
+
+fn send_and_expect_ok<S: std::io::Read + std::io::Write>(
+    stream: &mut S,
+    cmd: &str,
+    label: &str,
+    tag: &str,
+    err_prefix: &str,
+) -> std::result::Result<(), String> {
+    let lines = send_and_expect_ok_collect(stream, cmd, label, tag, err_prefix)?;
+    ensure_ok(&lines, tag, err_prefix)
+}
+
+fn send_and_expect_ok_collect<S: std::io::Read + std::io::Write>(
+    stream: &mut S,
+    cmd: &str,
+    label: &str,
+    tag: &str,
+    err_prefix: &str,
+) -> std::result::Result<Vec<String>, String> {
+    write_command(stream, cmd, label)?;
+    let lines = read_until_tag_from_stream(stream, tag)?;
+    ensure_ok(&lines, tag, err_prefix)?;
+    Ok(lines)
+}
+
+fn logout_best_effort<S: std::io::Write>(stream: &mut S) {
     let _ = stream.write_all(b"a9 LOGOUT\r\n");
     let _ = stream.flush();
-    Ok(result)
 }
 
 // Force Utc use to be referenced by the module for downstream re-exports

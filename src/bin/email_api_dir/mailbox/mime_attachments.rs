@@ -6,43 +6,45 @@ fn infer_attachment_kind(content_type: &str, filename: &str) -> &'static str {
     let ct = content_type.to_ascii_lowercase();
     let lower_name = filename.to_ascii_lowercase();
     if ct.starts_with("image/") {
-        "image"
-    } else if ct == "application/pdf" || lower_name.ends_with(".pdf") {
-        "pdf"
-    } else if ct.contains("word")
-        || lower_name.ends_with(".doc")
-        || lower_name.ends_with(".docx")
-        || lower_name.ends_with(".odt")
-    {
-        "doc"
-    } else if ct.contains("sheet")
-        || lower_name.ends_with(".xls")
-        || lower_name.ends_with(".xlsx")
-        || lower_name.ends_with(".csv")
-    {
-        "spreadsheet"
-    } else if ct.contains("presentation")
-        || lower_name.ends_with(".ppt")
-        || lower_name.ends_with(".pptx")
-    {
-        "presentation"
-    } else if ct.starts_with("audio/") {
-        "audio"
-    } else if ct.starts_with("video/") {
-        "video"
-    } else if ct.contains("zip")
-        || ct.contains("gzip")
-        || ct.contains("tar")
-        || ct.contains("7z")
-        || lower_name.ends_with(".zip")
-        || lower_name.ends_with(".tar")
-        || lower_name.ends_with(".gz")
-        || lower_name.ends_with(".7z")
-    {
-        "archive"
-    } else {
-        "other"
+        return "image";
     }
+
+    if let Some(kind) = media_kind(&ct) {
+        return kind;
+    }
+
+    const KIND_RULES: &[(&str, &[&str], &[&str])] = &[
+        ("pdf", &["application/pdf"], &[".pdf"]),
+        ("doc", &["word"], &[".doc", ".docx", ".odt"]),
+        ("spreadsheet", &["sheet"], &[".xls", ".xlsx", ".csv"]),
+        ("presentation", &["presentation"], &[".ppt", ".pptx"]),
+        ("archive", &["zip", "gzip", "tar", "7z"], &[".zip", ".tar", ".gz", ".7z"]),
+    ];
+
+    for (kind, content_type_hints, extension_hints) in KIND_RULES {
+        if kind_matches(&ct, &lower_name, content_type_hints, extension_hints) {
+            return kind;
+        }
+    }
+
+    "other"
+}
+
+fn media_kind(content_type: &str) -> Option<&'static str> {
+    if content_type.starts_with("audio/") {
+        Some("audio")
+    } else if content_type.starts_with("video/") {
+        Some("video")
+    } else {
+        None
+    }
+}
+
+fn kind_matches(content_type: &str, filename: &str, content_type_hints: &[&str], extension_hints: &[&str]) -> bool {
+    content_type_hints.iter().any(|hint| content_type.contains(hint))
+        || extension_hints
+            .iter()
+            .any(|extension| filename.ends_with(extension))
 }
 
 #[derive(Clone)]
@@ -69,21 +71,8 @@ fn walk_mime_attachments(
 
     let content_type = part.ctype.mimetype.to_ascii_lowercase();
     let disp = part.get_content_disposition();
-    let disp_kind = format!("{:?}", disp.disposition).to_ascii_lowercase();
-    let filename = disp
-        .params
-        .get("filename")
-        .cloned()
-        .or_else(|| part.ctype.params.get("name").cloned())
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| format!("attachment-{}", *index + 1));
-
-    let is_attachment = disp_kind == "attachment"
-        || disp.params.contains_key("filename")
-        || part.ctype.params.contains_key("name")
-        || (!content_type.starts_with("text/") && content_type != "application/pgp-signature");
-
-    if !is_attachment {
+    let filename = attachment_filename(part, &disp, *index + 1);
+    if !is_attachment_part(&content_type, part, &disp) {
         return;
     }
 
@@ -100,6 +89,32 @@ fn walk_mime_attachments(
         kind,
         data: bytes,
     });
+}
+
+fn attachment_filename(
+    part: &mailparse::ParsedMail<'_>,
+    disp: &mailparse::ParsedContentDisposition,
+    fallback_index: usize,
+) -> String {
+    disp.params
+        .get("filename")
+        .cloned()
+        .or_else(|| part.ctype.params.get("name").cloned())
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| format!("attachment-{}", fallback_index))
+}
+
+fn is_attachment_part(
+    content_type: &str,
+    part: &mailparse::ParsedMail<'_>,
+    disp: &mailparse::ParsedContentDisposition,
+) -> bool {
+    let disp_kind = format!("{:?}", disp.disposition).to_ascii_lowercase();
+    let declared_attachment = disp_kind == "attachment"
+        || disp.params.contains_key("filename")
+        || part.ctype.params.contains_key("name");
+    let implicit_binary = !content_type.starts_with("text/") && content_type != "application/pgp-signature";
+    declared_attachment || implicit_binary
 }
 
 pub(crate) fn extract_attachments_for_ui(email: &Email) -> Vec<ExtractedAttachment> {
