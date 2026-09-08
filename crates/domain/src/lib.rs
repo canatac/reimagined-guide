@@ -90,6 +90,7 @@ pub struct ExternalSyncRun {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct CalendarEvent {
     pub id: String,
     pub user_id: String,
