@@ -49,6 +49,16 @@ pub(crate) struct CalendarQueryParams {
     end: Option<String>, // ISO 8601
 }
 
+#[derive(Deserialize)]
+pub(crate) struct CalendarAgendaQuery {
+    #[serde(default = "default_agenda_days")]
+    days: u32,
+}
+
+fn default_agenda_days() -> u32 {
+    14
+}
+
 pub(crate) fn parse_iso_to_bson(s: &str) -> Option<chrono::DateTime<chrono::Utc>> {
     chrono::DateTime::parse_from_rfc3339(s)
         .ok()
@@ -129,6 +139,61 @@ pub(crate) async fn calendar_list_events(
             eprintln!("Calendar list error: {}", e);
             HttpResponse::InternalServerError()
                 .json(serde_json::json!({"error": "Failed to list events"}))
+        }
+    }
+}
+
+pub(crate) async fn calendar_agenda(
+    req: actix_web::HttpRequest,
+    query: web::Query<CalendarAgendaQuery>,
+    logic: web::Data<Arc<Logic>>,
+) -> impl Responder {
+    let user = get_user_from_headers(&req);
+    let days = query.days.clamp(1, 90);
+    let start = Utc::now();
+    let end = start + chrono::Duration::days(days as i64);
+
+    match logic
+        .get_calendar_events(
+            &user,
+            Some(bson::DateTime::from_millis(start.timestamp_millis())),
+            Some(bson::DateTime::from_millis(end.timestamp_millis())),
+        )
+        .await
+    {
+        Ok(events) => {
+            let mut per_day: std::collections::BTreeMap<String, u32> =
+                std::collections::BTreeMap::new();
+            for e in &events {
+                let day = e.start.format("%Y-%m-%d").to_string();
+                *per_day.entry(day).or_insert(0) += 1;
+            }
+
+            let next_event = events
+                .iter()
+                .min_by(|a, b| a.start.cmp(&b.start))
+                .map(|e| {
+                    serde_json::json!({
+                        "id": e.id,
+                        "title": e.title,
+                        "start": e.start,
+                        "end": e.end,
+                        "location": e.location,
+                        "eventType": e.event_type,
+                    })
+                });
+
+            HttpResponse::Ok().json(serde_json::json!({
+                "windowDays": days,
+                "totalUpcoming": events.len(),
+                "eventsPerDay": per_day,
+                "nextEvent": next_event,
+            }))
+        }
+        Err(e) => {
+            eprintln!("Calendar agenda error: {}", e);
+            HttpResponse::InternalServerError()
+                .json(serde_json::json!({"error": "Failed to compute agenda"}))
         }
     }
 }

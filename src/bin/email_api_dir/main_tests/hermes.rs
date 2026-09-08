@@ -52,6 +52,24 @@ async fn test_api_hermes_runs_requires_input() {
     assert_eq!(resp.status(), actix_web::http::StatusCode::BAD_REQUEST);
 }
 
+#[actix_web::test]
+async fn test_mail_assistant_suggestions_returns_ok() {
+    let app = test::init_service(
+        App::new().route(
+            "/api/mail-assistant/suggestions",
+            web::get().to(api_mail_assistant_suggestions),
+        ),
+    )
+    .await;
+
+    let req = test::TestRequest::get()
+        .uri("/api/mail-assistant/suggestions")
+        .to_request();
+
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), actix_web::http::StatusCode::OK);
+}
+
 #[test]
 fn test_hermes_runs_request_accepts_explicit_session_overrides() {
     let parsed: HermesRunsProxyRequest = serde_json::from_value(serde_json::json!({

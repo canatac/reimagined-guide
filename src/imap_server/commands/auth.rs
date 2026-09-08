@@ -37,3 +37,46 @@ impl ImapServer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::logic::{Logic, MockDatabaseInterface, User};
+
+    #[tokio::test]
+    async fn handle_login_returns_ok_and_sets_session_on_valid_credentials() {
+        let mut mock_client = Box::new(MockDatabaseInterface::new());
+        mock_client
+            .expect_authenticate_user()
+            .times(1)
+            .returning(|_, _| {
+                Ok(Some(User {
+                    id: None,
+                    username: "testuser".to_string(),
+                    password: "secret".to_string(),
+                    mailbox: "inbox".to_string(),
+                    condition_accepted: false,
+                    locale: None,
+                }))
+            });
+
+        let logic = Arc::new(Logic::new_with_mock(mock_client));
+        let mut server = ImapServer::new(logic);
+        let sessions: Sessions = Arc::new(Mutex::new(HashMap::new()));
+        let mut session_id = None;
+        let command_parts = ["A1", "LOGIN", "\"testuser\"", "\"secret\""];
+
+        let response = server
+            .handle_login("A1", &command_parts, &sessions, &mut session_id)
+            .await;
+
+        assert_eq!(response, "A1 OK LOGIN completed\r\n");
+        assert!(session_id.is_some());
+        let stored_user = sessions
+            .lock()
+            .unwrap()
+            .get(session_id.as_ref().unwrap())
+            .cloned();
+        assert_eq!(stored_user.as_deref(), Some("testuser"));
+    }
+}

@@ -24,9 +24,20 @@ pub(crate) async fn api_openapi_json() -> impl Responder {
             "/api/emails/{id}/action": {
                 "post": { "tags": ["Emails"], "summary": "Perform action on email (move, delete, read, unread, star, unstar)", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" } } }
             },
-            "/api/tags": { "get": { "tags": ["Emails"], "summary": "List tags", "responses": { "200": { "description": "OK" } } } },
+            "/api/tags": {
+                "get": { "tags": ["Emails"], "summary": "List tags", "responses": { "200": { "description": "OK" } } },
+                "post": { "tags": ["Emails"], "summary": "Create tag", "responses": { "201": { "description": "Created" } } }
+            },
+            "/api/tags/{id}": {
+                "patch": { "tags": ["Emails"], "summary": "Update tag", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" } } },
+                "delete": { "tags": ["Emails"], "summary": "Delete tag", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" } } }
+            },
             "/api/send": { "post": { "tags": ["Send"], "summary": "Send an email", "responses": { "200": { "description": "OK" } } } },
             "/api/send/{id}/status": { "get": { "tags": ["Send"], "summary": "Get send status", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" } } } },
+            "/api/notifications/preferences": {
+                "get": { "tags": ["Notifications"], "summary": "Get notification preferences", "responses": { "200": { "description": "OK" } } },
+                "put": { "tags": ["Notifications"], "summary": "Update notification preferences", "responses": { "200": { "description": "OK" } } }
+            },
             "/api/drafts": {
                 "get": { "tags": ["Drafts"], "summary": "List drafts", "responses": { "200": { "description": "OK" } } },
                 "post": { "tags": ["Drafts"], "summary": "Create or update draft", "responses": { "200": { "description": "OK" } } }
@@ -38,6 +49,7 @@ pub(crate) async fn api_openapi_json() -> impl Responder {
                 "put": { "tags": ["AI"], "summary": "Update AI settings", "responses": { "200": { "description": "OK" } } }
             },
             "/api/hermes/chat": { "post": { "tags": ["Hermes"], "summary": "Chat completions proxy", "responses": { "200": { "description": "OK" } } } },
+            "/api/mail-assistant/suggestions": { "get": { "tags": ["Hermes"], "summary": "Mail assistant quick prompts", "responses": { "200": { "description": "OK" } } } },
             "/api/hermes/runs": { "post": { "tags": ["Hermes"], "summary": "Create run", "responses": { "200": { "description": "OK" } } } },
             "/api/hermes/runs/{run_id}": { "get": { "tags": ["Hermes"], "summary": "Get run status", "parameters": [{ "name": "run_id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" } } } },
             "/api/hermes/runs/{run_id}/events": { "get": { "tags": ["Hermes"], "summary": "Stream run events (SSE)", "parameters": [{ "name": "run_id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "SSE stream" } } } },
@@ -45,6 +57,7 @@ pub(crate) async fn api_openapi_json() -> impl Responder {
                 "get": { "tags": ["Calendar"], "summary": "List calendar events", "parameters": [{ "name": "start", "in": "query", "schema": { "type": "string", "format": "date-time" } }, { "name": "end", "in": "query", "schema": { "type": "string", "format": "date-time" } }], "responses": { "200": { "description": "OK" } } },
                 "post": { "tags": ["Calendar"], "summary": "Create calendar event", "responses": { "201": { "description": "Created" } } }
             },
+            "/api/calendar/agenda": { "get": { "tags": ["Calendar"], "summary": "Agenda summary for upcoming days", "parameters": [{ "name": "days", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 90 } }], "responses": { "200": { "description": "OK" } } } },
             "/api/calendar/events/{id}": {
                 "get": { "tags": ["Calendar"], "summary": "Get calendar event", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" } } },
                 "put": { "tags": ["Calendar"], "summary": "Update calendar event", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "OK" } } },

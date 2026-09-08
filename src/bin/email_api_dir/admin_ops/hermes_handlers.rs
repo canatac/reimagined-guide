@@ -1,6 +1,18 @@
 #![allow(unused_imports, dead_code)]
 use super::*; // inherit all imports from mod.rs
 
+pub(crate) async fn api_mail_assistant_suggestions() -> impl Responder {
+    HttpResponse::Ok().json(serde_json::json!({
+        "suggestions": [
+            "Quels emails importants ai-je reçus aujourd'hui ?",
+            "Résume la conversation avec Marc sur le projet X",
+            "Trouve les emails qui mentionnent le budget Q4",
+            "Rédige une réponse à ce thread",
+            "Programme un rappel si pas de réponse sous 3 jours"
+        ]
+    }))
+}
+
 pub(crate) async fn api_hermes_chat(
     req: HttpRequest,
     body: web::Json<HermesChatProxyRequest>,
