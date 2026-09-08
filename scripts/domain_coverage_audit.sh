@@ -6,8 +6,16 @@ THRESHOLD=${DOMAIN_COVERAGE_THRESHOLD:-90}
 cargo install cargo-llvm-cov --quiet
 echo "[audit] Coverage crates/domain (seuil ${THRESHOLD}%)..."
 
+set +e
 OUT=$(cargo llvm-cov -p simple-smtp-domain --summary-only 2>&1)
+RC=$?
+set -e
 echo "$OUT" | tail -20
+
+if [ "$RC" -ne 0 ]; then
+  echo "[audit] ❌ cargo llvm-cov a échoué (exit=${RC})"
+  exit 1
+fi
 
 PCT=$(echo "$OUT" | awk '
   /TOTAL/ {
