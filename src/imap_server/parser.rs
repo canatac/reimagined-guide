@@ -1,5 +1,59 @@
 use super::*;
 
+pub(super) fn parse_imap_command_line(line: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut chars = line.trim().chars().peekable();
+    let mut in_quotes = false;
+    let mut token_started = false;
+
+    while let Some(ch) = chars.next() {
+        if in_quotes {
+            if ch == '\\' {
+                if let Some(next_ch) = chars.next() {
+                    current.push(next_ch);
+                    token_started = true;
+                }
+                continue;
+            }
+
+            if ch == '"' {
+                in_quotes = false;
+                token_started = true;
+                continue;
+            }
+
+            current.push(ch);
+            token_started = true;
+            continue;
+        }
+
+        if ch == '"' {
+            in_quotes = true;
+            token_started = true;
+            continue;
+        }
+
+        if ch.is_whitespace() {
+            if token_started {
+                parts.push(current.clone());
+                current.clear();
+                token_started = false;
+            }
+            continue;
+        }
+
+        current.push(ch);
+        token_started = true;
+    }
+
+    if token_started {
+        parts.push(current);
+    }
+
+    parts
+}
+
 pub(super) fn parse_email(email_content: &str) -> (HashMap<String, String>, String) {
     let mut headers = HashMap::new();
     let mut body = String::new();
@@ -70,5 +124,22 @@ impl ImapServer {
         } else {
             return format!("NO APPEND failed: User not authenticated\r\n");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_imap_command_line;
+
+    #[test]
+    fn parses_list_with_quoted_mailbox_and_empty_reference() {
+        let parts = parse_imap_command_line("A1 LIST \"\" \"Sent Items\"\r\n");
+        assert_eq!(parts, vec!["A1", "LIST", "", "Sent Items"]);
+    }
+
+    #[test]
+    fn parses_list_with_unquoted_wildcards() {
+        let parts = parse_imap_command_line("A2 LIST \"\" *");
+        assert_eq!(parts, vec!["A2", "LIST", "", "*"]);
     }
 }

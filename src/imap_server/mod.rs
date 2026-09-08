@@ -99,10 +99,11 @@ impl ImapServer {
             return self.handle_append_data(command, sessions, session_id).await;
         }
 
-        let command_parts: Vec<&str> = command_str.split_whitespace().collect();
-        if command_parts.is_empty() {
+        let command_parts_owned = parse_imap_command_line(&command_str);
+        if command_parts_owned.is_empty() {
             return "BAD Command not recognized\r\n".to_string();
         }
+        let command_parts: Vec<&str> = command_parts_owned.iter().map(|s| s.as_str()).collect();
         if command_parts.len() < 2 {
             return "BAD Command not recognized\r\n".to_string();
         }
