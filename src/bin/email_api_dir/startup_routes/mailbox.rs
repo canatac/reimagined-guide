@@ -15,6 +15,14 @@ pub(crate) fn register_mailbox_routes(cfg: &mut web::ServiceConfig) {
         .route("/api/tags", web::get().to(api_tags))
         .route("/api/send", web::post().to(api_send))
         .route("/api/send/{id}/status", web::get().to(api_send_status))
+        .route(
+            "/api/notifications/preferences",
+            web::get().to(api_notifications_preferences_get),
+        )
+        .route(
+            "/api/notifications/preferences",
+            web::put().to(api_notifications_preferences_put),
+        )
         .route("/api/drafts", web::get().to(api_drafts_list))
         .route("/api/drafts", web::post().to(api_drafts_upsert))
         .route("/api/drafts/{id}", web::delete().to(api_drafts_delete))
