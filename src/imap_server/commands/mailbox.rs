@@ -210,7 +210,7 @@ mod tests {
     async fn handle_create_returns_ok_for_authenticated_user() {
         let mut mock_client = Box::new(MockDatabaseInterface::new());
         mock_client
-            .expect_create_mailbox()
+            .expect_create_mailbox_for_user()
             .with(eq("testuser"), eq("Projects"))
             .times(1)
             .returning(|_, _| Ok(()));
@@ -230,5 +230,49 @@ mod tests {
             .await;
 
         assert_eq!(response, "A2 OK CREATE completed\r\n");
+    }
+
+    #[tokio::test]
+    async fn handle_list_returns_no_when_user_not_authenticated() {
+        let mock_client = Box::new(MockDatabaseInterface::new());
+        let logic = Arc::new(Logic::new_with_mock(mock_client));
+        let mut server = ImapServer::new(logic);
+        let sessions: Sessions = Arc::new(Mutex::new(HashMap::new()));
+        let session_id = None;
+        let command_parts = ["A1", "LIST", "", "*"];
+
+        let response = server
+            .handle_list("A1", &command_parts, &sessions, &session_id)
+            .await;
+
+        assert_eq!(response, "A1 NO LIST failed: User not authenticated\r\n");
+    }
+
+    #[tokio::test]
+    async fn handle_list_returns_mailboxes_and_ok_for_authenticated_user() {
+        let mut mock_client = Box::new(MockDatabaseInterface::new());
+        mock_client
+            .expect_list_mailboxes()
+            .with(eq("testuser"), eq(""), eq("*"))
+            .times(1)
+            .returning(|_, _, _| Ok(vec!["INBOX".to_string(), "Archive".to_string()]));
+
+        let logic = Arc::new(Logic::new_with_mock(mock_client));
+        let mut server = ImapServer::new(logic);
+        let sessions: Sessions = Arc::new(Mutex::new(HashMap::new()));
+        sessions
+            .lock()
+            .unwrap()
+            .insert("sess-1".to_string(), "testuser".to_string());
+        let session_id = Some("sess-1".to_string());
+        let command_parts = ["A2", "LIST", "", "*"];
+
+        let response = server
+            .handle_list("A2", &command_parts, &sessions, &session_id)
+            .await;
+
+        assert!(response.contains("* LIST (\\HasNoChildren) \"/\" \"INBOX\"\r\n"));
+        assert!(response.contains("* LIST (\\HasNoChildren) \"/\" \"Archive\"\r\n"));
+        assert!(response.ends_with("A2 OK LIST completed\r\n"));
     }
 }
