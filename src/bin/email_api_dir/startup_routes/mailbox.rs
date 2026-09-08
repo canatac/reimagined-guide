@@ -63,6 +63,10 @@ pub(crate) fn register_mailbox_routes(cfg: &mut web::ServiceConfig) {
         .route("/api/settings/ai", web::get().to(api_get_ai_settings))
         .route("/api/settings/ai", web::put().to(api_put_ai_settings))
         .route("/api/hermes/chat", web::post().to(api_hermes_chat))
+        .route(
+            "/api/mail-assistant/suggestions",
+            web::get().to(api_mail_assistant_suggestions),
+        )
         .route("/api/hermes/runs", web::get().to(api_hermes_runs_list))
         .route("/api/hermes/runs", web::post().to(api_hermes_runs))
         .route(
