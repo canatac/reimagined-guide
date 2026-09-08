@@ -1,57 +1,31 @@
 use super::*;
 
-pub(super) fn parse_imap_command_line(line: &str) -> Vec<String> {
-    let mut parts = Vec::new();
-    let mut current = String::new();
-    let mut chars = line.trim().chars().peekable();
-    let mut in_quotes = false;
-    let mut token_started = false;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct FetchArguments {
+    pub sequence_set: String,
+    pub data_items: String,
+}
 
-    while let Some(ch) = chars.next() {
-        if in_quotes {
-            if ch == '\\' {
-                if let Some(next_ch) = chars.next() {
-                    current.push(next_ch);
-                    token_started = true;
-                }
-                continue;
-            }
-
-            if ch == '"' {
-                in_quotes = false;
-                token_started = true;
-                continue;
-            }
-
-            current.push(ch);
-            token_started = true;
-            continue;
-        }
-
-        if ch == '"' {
-            in_quotes = true;
-            token_started = true;
-            continue;
-        }
-
-        if ch.is_whitespace() {
-            if token_started {
-                parts.push(current.clone());
-                current.clear();
-                token_started = false;
-            }
-            continue;
-        }
-
-        current.push(ch);
-        token_started = true;
+pub(super) fn parse_fetch_arguments(command_parts: &[String]) -> Option<FetchArguments> {
+    if command_parts.len() < 4 {
+        return None;
     }
 
-    if token_started {
-        parts.push(current);
+    if command_parts[1].to_uppercase() != "FETCH" {
+        return None;
     }
 
-    parts
+    let sequence_set = command_parts[2].trim().to_string();
+    let data_items = command_parts[3..].join(" ").trim().to_string();
+
+    if sequence_set.is_empty() || data_items.is_empty() {
+        return None;
+    }
+
+    Some(FetchArguments {
+        sequence_set,
+        data_items,
+    })
 }
 
 pub(super) fn parse_email(email_content: &str) -> (HashMap<String, String>, String) {
@@ -129,17 +103,34 @@ impl ImapServer {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_imap_command_line;
+    use super::parse_fetch_arguments;
 
     #[test]
-    fn parses_list_with_quoted_mailbox_and_empty_reference() {
-        let parts = parse_imap_command_line("A1 LIST \"\" \"Sent Items\"\r\n");
-        assert_eq!(parts, vec!["A1", "LIST", "", "Sent Items"]);
+    fn parse_fetch_arguments_supports_single_data_item() {
+        let parts = vec![
+            "A1".to_string(),
+            "FETCH".to_string(),
+            "1".to_string(),
+            "FLAGS".to_string(),
+        ];
+
+        let args = parse_fetch_arguments(&parts).expect("expected valid FETCH args");
+        assert_eq!(args.sequence_set, "1");
+        assert_eq!(args.data_items, "FLAGS");
     }
 
     #[test]
-    fn parses_list_with_unquoted_wildcards() {
-        let parts = parse_imap_command_line("A2 LIST \"\" *");
-        assert_eq!(parts, vec!["A2", "LIST", "", "*"]);
+    fn parse_fetch_arguments_supports_parenthesized_data_items() {
+        let parts = vec![
+            "A2".to_string(),
+            "FETCH".to_string(),
+            "1:*".to_string(),
+            "(FLAGS".to_string(),
+            "BODY.PEEK[HEADER])".to_string(),
+        ];
+
+        let args = parse_fetch_arguments(&parts).expect("expected valid FETCH args");
+        assert_eq!(args.sequence_set, "1:*");
+        assert_eq!(args.data_items, "(FLAGS BODY.PEEK[HEADER])");
     }
 }
