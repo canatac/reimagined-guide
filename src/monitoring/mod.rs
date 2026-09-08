@@ -5,7 +5,11 @@ pub mod storage;
 
 pub use alerts::{ActiveAlert, AlertConfig};
 pub use enrichment::GeoInfo;
-pub use parse::parse_smtp_code;
+pub use parse::{
+    parse_smtp_code,
+    classify_smtp_reject,
+    SMTP_REJECT_TAXONOMY_CATALOG,
+};
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -112,6 +116,8 @@ pub struct SmtpEvent {
     // SMTP
     pub smtp_code: Option<u16>,
     pub smtp_reply: Option<String>,
+    pub reject_reason_code: Option<String>,
+    pub reject_action: Option<String>,
     // Status
     pub attempt: u32,
     pub status: SmtpStatus,
@@ -147,6 +153,8 @@ impl SmtpEvent {
             total_ms: None,
             smtp_code: None,
             smtp_reply: None,
+            reject_reason_code: None,
+            reject_action: None,
             attempt: 1,
             status: SmtpStatus::Pending,
             bounce_type: None,
