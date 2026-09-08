@@ -46,3 +46,4 @@ infra/*.tfvars.json
 
 # ephemeral Next bake patches (deploy patches in-container)
 runtime-patches/
+.worktrees/
