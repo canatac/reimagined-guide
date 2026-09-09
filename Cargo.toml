@@ -32,6 +32,7 @@ path = "src/lib.rs"
 simple-smtp-domain = { path = "crates/domain" }
 actix-web = { version = "4.11.0", features = ["rustls"] }
 rustls = { version = "0.23.12", default-features = false, features = ["std", "aws-lc-rs"] }
+openssl = { version = "0.10.66", features = ["vendored"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 tokio = { version = "1.53.1", features = ["full", "tracing"] }
