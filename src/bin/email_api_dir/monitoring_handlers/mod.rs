@@ -6,7 +6,7 @@ mod prometheus;
 mod dashboard;
 mod security;
 mod shared;
-mod webhook;
+pub(crate) mod webhook;
 
 pub(crate) use monitoring::*;
 pub(crate) use prometheus::*;

@@ -1,4 +1,5 @@
 // Route registration helpers live in `startup_routes.rs`.
+use actix_web::web;
 use super::startup_routes::{register_admin_routes, register_auth_routes, register_dashboard_routes, register_diag_routes, register_docs_routes, register_external_routes, register_mailbox_routes, register_prometheus_routes, register_webhook_routes};
 
 pub(crate) fn register_http_routes(cfg: &mut web::ServiceConfig) {
