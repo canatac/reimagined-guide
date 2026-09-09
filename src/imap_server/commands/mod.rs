@@ -18,7 +18,7 @@ impl ImapServer {
         let command_name = command_parts[1].to_uppercase();
         let trace_id = generate_trace_id();
         let user = Self::current_user(sessions, session_id);
-        
+
         log_imap_command(
             session_id,
             user.as_deref(),
