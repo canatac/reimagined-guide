@@ -24,7 +24,7 @@ pub(crate) fn build_mongo_uri() -> String {
 
     if mongo_cluster.starts_with("mongodb://") || mongo_cluster.starts_with("mongodb+srv://") {
         let base = mongo_cluster.trim_end_matches('&').trim_end_matches('?');
-        let sep = if base.contains('?') { "&" } : "?";
+        let sep = if base.contains('?') { "&" } else { "?" };
         format!(
             "{}{}appName={}&serverSelectionTimeoutMS=5000",
             base, sep, mongo_app
