@@ -11,7 +11,7 @@ use actix_web::{web, HttpResponse, Responder};
 use mongodb::bson::doc;
 use std::sync::Arc;
 
-use crate::webhook::{WebhookRegistry, WebhookSubscriber};
+use simple_smtp_server::webhook::{WebhookRegistry, WebhookSubscriber};
 
 /// Shared registry state.
 pub(crate) struct AppState {
