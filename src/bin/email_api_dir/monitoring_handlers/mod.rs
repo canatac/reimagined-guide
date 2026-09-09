@@ -2,6 +2,7 @@
 // Public API preserved via `pub use` re-exports; parent uses `pub use monitoring_handlers::*`.
 
 mod monitoring;
+mod mta_sts;
 mod prometheus;
 mod dashboard;
 mod security;
@@ -10,6 +11,7 @@ pub(crate) mod webhook;
 pub(crate) mod mongo_health;
 
 pub(crate) use monitoring::*;
+pub(crate) use mta_sts::*;
 pub(crate) use prometheus::*;
 pub(crate) use dashboard::*;
 pub(crate) use security::*;

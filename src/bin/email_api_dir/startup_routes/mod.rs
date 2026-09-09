@@ -10,6 +10,7 @@ mod diag;
 mod docs;
 mod external;
 mod mailbox;
+mod mta_sts;
 mod prometheus;
 mod webhook;
 
@@ -21,5 +22,6 @@ pub(crate) use diag::register_diag_routes;
 pub(crate) use docs::register_docs_routes;
 pub(crate) use external::register_external_routes;
 pub(crate) use mailbox::register_mailbox_routes;
+pub(crate) use mta_sts::register_mta_sts_routes;
 pub(crate) use prometheus::register_prometheus_routes;
 pub(crate) use webhook::register_webhook_routes;
