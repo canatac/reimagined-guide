@@ -100,6 +100,16 @@ pub(crate) fn register_mailbox_routes(cfg: &mut web::ServiceConfig) {
             "/api/calendar/events/{id}",
             web::delete().to(calendar_delete_event),
         )
+        .route("/api/calendar/holidays", web::get().to(list_holidays))
+        .route("/api/calendar/holidays", web::post().to(create_holiday))
+        .route(
+            "/api/calendar/holidays/{id}",
+            web::delete().to(delete_holiday),
+        )
+        .route(
+            "/api/calendar/holidays/countries",
+            web::get().to(list_holiday_countries),
+        )
         .route("/send-email", web::post().to(send_email_handler))
         .route("/create-mailing-list", web::post().to(create_mailing_list))
         .route(

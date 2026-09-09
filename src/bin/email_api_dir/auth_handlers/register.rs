@@ -79,7 +79,16 @@ pub(crate) async fn auth_register(
         }).await;
     }
     let session = make_session(&primary_email, &display_name);
+    // Set session_token cookie for frontend persistence
+    let cookie = actix_web::cookie::Cookie::build("session_token", &session.session.access_token)
+        .path("/")
+        .http_only(true)
+        .secure(true)
+        .same_site(actix_web::cookie::SameSite::Lax)
+        .max_age(actix_web::cookie::time::Duration::hours(24))
+        .finish();
     HttpResponse::Created()
+        .cookie(cookie)
         .insert_header(("Content-Language", locale.as_str()))
         .json(serde_json::json!({ "email": primary_email, "alias": alias_email, "session": session.session, "locale": locale }))
 }
