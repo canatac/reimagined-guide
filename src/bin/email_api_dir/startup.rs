@@ -22,7 +22,7 @@ pub(crate) fn build_mongo_uri() -> String {
 
     if mongo_cluster.starts_with("mongodb://") || mongo_cluster.starts_with("mongodb+srv://") {
         let base = mongo_cluster.trim_end_matches('&').trim_end_matches('?');
-        let sep = if base.contains('?') { "&" } else { "?" };
+        let sep = if base.contains('?') { "&" } : "?";
         format!(
             "{}{}appName={}&serverSelectionTimeoutMS=5000",
             base, sep, mongo_app
@@ -78,7 +78,7 @@ pub(crate) fn build_cors_layer() -> Cors {
 }
 
 // Route registration helpers live in `startup_routes.rs`.
-use super::startup_routes::{configure, register_admin_routes, register_auth_routes, register_dashboard_routes, register_diag_routes, register_docs_routes, register_external_routes, register_mailbox_routes, register_prometheus_routes, register_webhook_routes};
+use super::startup_routes::{register_admin_routes, register_auth_routes, register_dashboard_routes, register_dmarc_routes, register_diag_routes, register_docs_routes, register_external_routes, register_mailbox_routes, register_prometheus_routes, register_webhook_routes};
 
 pub(crate) fn register_http_routes(cfg: &mut web::ServiceConfig) {
     register_docs_routes(cfg);
@@ -89,6 +89,7 @@ pub(crate) fn register_http_routes(cfg: &mut web::ServiceConfig) {
     register_admin_routes(cfg);
     register_prometheus_routes(cfg);
     register_dashboard_routes(cfg);
+    register_dmarc_routes(cfg);
     register_webhook_routes(cfg);
     configure(cfg);
 }
