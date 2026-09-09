@@ -1,6 +1,7 @@
 pub mod alerts;
 pub mod dmarc;
 pub mod enrichment;
+pub mod mta_sts;
 pub mod parse;
 pub mod storage;
 pub mod tls_rpt;
