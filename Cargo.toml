@@ -75,9 +75,11 @@ warp = { version = "0.4.3", optional = true }
 
 quick-xml = { version = "0.31", features = ["serialize"] }
 async-trait = "0.1.83"
-quick-xml = { version = "0.31", features = ["serde"] }
+chrono = { version = "0.4.38", features = ["serde"] }
 uuid = { version = "1.11.0", features = ["v4"] }
 urlencoding = "2"
+hex = "0.4"
+subtle = "2.5"
 
 [dev-dependencies]
 mockall = "0.11.0"
