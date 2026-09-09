@@ -93,6 +93,7 @@ pub async fn evaluate_alerts(
     if let Some(a) = rules::check_p95_latency(&ctx).await {
         alerts.push(a);
     }
+    alerts.extend(rules::check_reject_taxonomy_spikes(&ctx).await);
     alerts
 }
 
@@ -106,5 +107,27 @@ mod tests {
         assert!(cfg.bounce_rate_threshold > 0.0);
         assert!(cfg.p95_total_ms_threshold > 0);
         assert!(cfg.smtp_spike_threshold > 0);
+    }
+
+    #[test]
+    fn test_reject_spike_threshold_env_default() {
+        // Default threshold is 5
+        std::env::remove_var("MONITORING_REJECT_SPIKE_THRESHOLD");
+        let val = std::env::var("MONITORING_REJECT_SPIKE_THRESHOLD")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(5);
+        assert_eq!(val, 5);
+    }
+
+    #[test]
+    fn test_reject_spike_threshold_env_override() {
+        std::env::set_var("MONITORING_REJECT_SPIKE_THRESHOLD", "10");
+        let val = std::env::var("MONITORING_REJECT_SPIKE_THRESHOLD")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(5);
+        assert_eq!(val, 10);
+        std::env::remove_var("MONITORING_REJECT_SPIKE_THRESHOLD");
     }
 }
