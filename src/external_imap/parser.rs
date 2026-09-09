@@ -116,10 +116,8 @@ pub(crate) fn parse_fetch_headers(lines: &[String]) -> Vec<ImapFetchedHeader> {
     let mut blocks: Vec<String> = Vec::new();
     let mut cur = String::new();
     for l in lines {
-        if l.starts_with("* ") && l.contains(" FETCH ") {
-            if !cur.is_empty() {
-                blocks.push(std::mem::take(&mut cur));
-            }
+        if l.starts_with("* ") && l.contains(" FETCH ") && !cur.is_empty() {
+            blocks.push(std::mem::take(&mut cur));
         }
         if !cur.is_empty() {
             cur.push('\n');
@@ -189,15 +187,7 @@ fn extract_flags(blob: &str) -> Vec<String> {
         .collect()
 }
 
-fn extract_header_fields(
-    blob: &str,
-) -> (
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    Option<chrono::DateTime<Utc>>,
-    Option<String>,
-) {
+fn extract_header_fields(blob: &str) -> HeaderFields {
     let mut from = None;
     let mut to = None;
     let mut subject = None;
@@ -223,3 +213,11 @@ fn extract_header_fields(
 
     (from, to, subject, date, message_id)
 }
+
+type HeaderFields = (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<chrono::DateTime<Utc>>,
+    Option<String>,
+);

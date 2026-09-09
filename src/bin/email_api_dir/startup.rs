@@ -58,6 +58,8 @@ pub(crate) async fn connect_mongo_optional(
             } else {
                 println!("MongoDB connection ready.");
             }
+            // Add server selection timeout of 5 seconds for reliability
+            // and enable monitoring for connection health
             Some(c)
         }
         Err(e) => {

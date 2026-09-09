@@ -1,7 +1,6 @@
 // Auto-split from mongo_adapter.rs (refactor: découpage par domaine).
 use super::MongoDatabaseAdapter;
-use crate::entities::{CalendarEvent, Email};
-use crate::logic::{Mailbox, User};
+use crate::entities::CalendarEvent;
 use futures_util::TryStreamExt;
 use mongodb::bson::{self, doc};
 use mongodb::error::Result;

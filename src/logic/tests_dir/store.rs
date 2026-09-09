@@ -5,7 +5,7 @@ use mockall::predicate::eq;
 
     #[tokio::test]
     async fn test_store_email() {
-        dotenv().ok();
+        dotenv::dotenv().ok();
         let mut mock_client = Box::new(MockDatabaseInterface::new());
 
         mock_client
@@ -27,7 +27,7 @@ use mockall::predicate::eq;
 
     #[tokio::test]
     async fn test_list_mailboxes() {
-        dotenv().ok();
+        dotenv::dotenv().ok();
         let mut mock_client = Box::new(MockDatabaseInterface::new());
 
         mock_client

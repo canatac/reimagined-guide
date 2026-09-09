@@ -1,8 +1,7 @@
 //! Helpers partagés par toutes les règles (crate-private).
 
 use chrono::{Duration as ChronoDuration, Utc};
-use futures_util::TryStreamExt;
-use mongodb::{bson::doc, Client};
+use mongodb::Client;
 
 pub(crate) fn since(minutes: i64) -> String {
     (Utc::now() - ChronoDuration::minutes(minutes)).to_rfc3339()
