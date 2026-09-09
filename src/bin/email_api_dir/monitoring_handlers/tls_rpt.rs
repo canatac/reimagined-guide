@@ -2,7 +2,7 @@
 // Issue #481: SMTP TLS reporting (TLS-RPT) aggregation
 
 use actix_web::{web, HttpResponse};
-use mongodb::bson::doc;
+use mongodb::bson::{self, doc};
 use simple_smtp_server::monitoring::tls_rpt::{
     self, TlsRptAlertConfig, TlsRptReport,
 };
