@@ -54,10 +54,15 @@ pub(crate) async fn build_mongo_options(
         .ok()
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(60000);
+    let wait_queue_timeout_ms = env::var("MONGODB_WAIT_QUEUE_TIMEOUT_MS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(5000);
 
     options.max_pool_size = Some(max_pool_size);
     options.min_pool_size = Some(min_pool_size);
     options.max_idle_time = Some(Duration::from_millis(max_idle_time_ms));
+    options.wait_queue_timeout = Some(Duration::from_millis(wait_queue_timeout_ms));
     options.connect_timeout = Some(Duration::from_secs(10));
     options.heartbeat_freq = Some(Duration::from_secs(10));
 
