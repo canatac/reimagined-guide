@@ -94,7 +94,17 @@ pub(crate) async fn auth_login(
                 Some(token) => make_session_with_token(&req.email, &display, &token),
                 None => make_session(&req.email, &display),
             };
-            HttpResponse::Ok().json(response)
+            // Set session_token cookie for frontend persistence
+            let cookie = actix_web::cookie::Cookie::build("session_token", &response.session.access_token)
+                .path("/")
+                .http_only(true)
+                .secure(true)
+                .same_site(actix_web::cookie::SameSite::Lax)
+                .max_age(actix_web::cookie::time::Duration::hours(24))
+                .finish();
+            HttpResponse::Ok()
+                .cookie(cookie)
+                .json(response)
         }
         Ok(None) => {
             let env_user = env::var("SMTP_USERNAME").unwrap_or_default();
@@ -105,7 +115,16 @@ pub(crate) async fn auth_login(
                         Some(token) => make_session_with_token(&req.email, &env_user, &token),
                         None => make_session(&req.email, &env_user),
                     };
-                    return HttpResponse::Ok().json(response);
+                    let cookie = actix_web::cookie::Cookie::build("session_token", &response.session.access_token)
+                        .path("/")
+                        .http_only(true)
+                        .secure(true)
+                        .same_site(actix_web::cookie::SameSite::Lax)
+                        .max_age(actix_web::cookie::time::Duration::hours(24))
+                        .finish();
+                    return HttpResponse::Ok()
+                        .cookie(cookie)
+                        .json(response);
                 }
             }
             let ip = req_ip_str(&req_http);
@@ -126,7 +145,16 @@ pub(crate) async fn auth_login(
                         Some(token) => make_session_with_token(&req.email, &env_user, &token),
                         None => make_session(&req.email, &env_user),
                     };
-                    return HttpResponse::Ok().json(response);
+                    let cookie = actix_web::cookie::Cookie::build("session_token", &response.session.access_token)
+                        .path("/")
+                        .http_only(true)
+                        .secure(true)
+                        .same_site(actix_web::cookie::SameSite::Lax)
+                        .max_age(actix_web::cookie::time::Duration::hours(24))
+                        .finish();
+                    return HttpResponse::Ok()
+                        .cookie(cookie)
+                        .json(response);
                 }
             }
             HttpResponse::Unauthorized().json(serde_json::json!({ "message": i18n::t(&locale, "error-login-invalid", &[]) }))
