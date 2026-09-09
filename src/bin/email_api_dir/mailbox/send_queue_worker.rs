@@ -87,6 +87,10 @@ pub(crate) async fn send_queue_worker(mongo: Arc<mongodb::Client>) {
         .max(1);
     let min_interval_ms: u64 = 60_000 / rate_limit_per_min;
     let mut last_send_ms: u64 = 0;
+    let batch_size: usize = std::env::var("SMTP_BATCH_SIZE")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(50);
     let now_ms = || {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -107,11 +111,13 @@ pub(crate) async fn send_queue_worker(mongo: Arc<mongodb::Client>) {
             .collection::<bson::Document>(SEND_QUEUE_COLL);
         let now = Utc::now();
 
+        // Fetch batch of pending entries (up to batch_size)
         let cursor = match coll
             .find(doc! {
                 "status": { "$in": ["pending", "scheduled"] },
                 "send_after": { "$lte": now },
             })
+            .limit(batch_size as i64)
             .await
         {
             Ok(c) => c,
@@ -129,16 +135,10 @@ pub(crate) async fn send_queue_worker(mongo: Arc<mongodb::Client>) {
             }
         };
 
+        // Process batch concurrently with bounded parallelism
+        let mut handles = vec![];
         for entry in entries {
             let id = entry.get_str("id").unwrap_or("").to_string();
-            let queued_at = entry.get_datetime("queued_at").ok().map(|dt| dt.timestamp_millis()).unwrap_or(0);
-            let queue_age_min = (now.timestamp_millis() - queued_at).max(0) / 60_000;
-            if queue_age_min >= 5 {
-                eprintln!(
-                    "send_queue_worker WARN: entry {} queued for {}min (threshold 5min) - consider increasing SMTP_RATE_LIMIT_PER_MINUTE or scaling workers",
-                    id, queue_age_min
-                );
-            }
             let user_id = entry.get_str("user_id").unwrap_or("admin").to_string();
             let from = entry.get_str("from").unwrap_or("").to_string();
             let to = entry.get_str("to").unwrap_or("").to_string();
@@ -167,133 +167,137 @@ pub(crate) async fn send_queue_worker(mongo: Arc<mongodb::Client>) {
                 })
                 .unwrap_or_default();
 
-            // Optimistic lock: claim entry before sending
-            let claim = coll
-                .update_one(
-                    doc! { "id": &id, "status": { "$in": ["pending", "scheduled"] } },
-                    doc! { "$set": { "status": "sending" } },
-                )
-                .await;
-            match claim {
-                Ok(r) if r.matched_count == 0 => continue,
-                Err(e) => {
-                    eprintln!("send_queue claim error for {}: {}", id, e);
-                    continue;
-                }
-                _ => {}
-            }
-
-            let mut headers = vec![
-                (
-                    "Message-ID".to_string(),
-                    if message_id.is_empty() {
-                        format!(
-                            "<{}@{}>",
-                            id,
-                            std::env::var("DOMAIN_NAME")
-                                .unwrap_or_else(|_| "misfits.ai".to_string())
-                        )
-                    } else {
-                        message_id
-                    },
-                ),
-                ("Date".to_string(), Utc::now().to_rfc2822()),
-                ("MIME-Version".to_string(), "1.0".to_string()),
-                (
-                    "Content-Type".to_string(),
-                    content_type,
-                ),
-            ];
-            if !cc.is_empty() {
-                headers.push(("Cc".to_string(), cc));
-            }
-            if !bcc.is_empty() {
-                headers.push(("Bcc".to_string(), bcc));
-            }
-            if !dkim_sig.is_empty() {
-                headers.push(("DKIM-Signature".to_string(), dkim_sig.clone()));
-            }
-            if let Some(in_reply_to) = &in_reply_to {
-                headers.push(("In-Reply-To".to_string(), in_reply_to.clone()));
-            }
-            if !references.is_empty() {
-                headers.push(("References".to_string(), references.join(" ")));
-            }
-
-            let email = Email {
-                id: id.clone(),
-                from,
-                to,
-                subject,
-                body: body_text,
-                headers,
-                flags: vec![],
-                sequence_number: 0,
-                uid: 0,
-                internal_date: Utc::now(),
-                dkim_signature: if dkim_sig.is_empty() {
-                    None
-                } else {
-                    Some(dkim_sig)
-                },
-            };
-
-            let mut final_status = "failed";
-            let mut retry_outcome = "final_fail";
-            let mut retry_count: i64 = 0;
-            let mut last_error: Option<String> = None;
-
-            for attempt in 1..=max_attempts {
-                last_send_ms = now_ms();
-                match send_outgoing_email(&email).await {
-                    Ok(_) => {
-                        retry_count = i64::from(attempt.saturating_sub(1));
-                        final_status = "sent";
-                        retry_outcome = if attempt > 1 {
-                            "success_after_retry"
-                        } else {
-                            "sent_first_try"
-                        };
-                        break;
-                    }
+            let coll_clone = coll.clone();
+            let handle = tokio::spawn(async move {
+                // Optimistic lock: claim entry before sending
+                let claim = coll_clone
+                    .update_one(
+                        doc! { "id": &id, "status": { "$in": ["pending", "scheduled"] } },
+                        doc! { "$set": { "status": "sending" } },
+                    )
+                    .await;
+                match claim {
+                    Ok(r) if r.matched_count == 0 => return,
                     Err(e) => {
-                        let retryable = is_retryable_error(&e);
-                        let err_msg = e.to_string();
-                        last_error = Some(err_msg.clone());
-                        eprintln!(
-                            "send_queue_worker send error for {} (attempt {}/{}): {}",
-                            id, attempt, max_attempts, err_msg
-                        );
-                        if !retryable || attempt >= max_attempts {
+                        eprintln!("send_queue claim error for {}: {}", id, e);
+                        return;
+                    }
+                    _ => {}
+                }
+
+                let mut headers = vec![
+                    (
+                        "Message-ID".to_string(),
+                        if message_id.is_empty() {
+                            format!(
+                                "<{}@{}>",
+                                id,
+                                std::env::var("DOMAIN_NAME")
+                                    .unwrap_or_else(|_| "misfits.ai".to_string())
+                            )
+                        } else {
+                            message_id
+                        },
+                    ),
+                    ("Date".to_string(), Utc::now().to_rfc2822()),
+                    ("MIME-Version".to_string(), "1.0".to_string()),
+                    ("Content-Type".to_string(), content_type),
+                ];
+                if !cc.is_empty() {
+                    headers.push(("Cc".to_string(), cc));
+                }
+                if !bcc.is_empty() {
+                    headers.push(("Bcc".to_string(), bcc));
+                }
+                if !dkim_sig.is_empty() {
+                    headers.push(("DKIM-Signature".to_string(), dkim_sig.clone()));
+                }
+                if let Some(in_reply_to) = &in_reply_to {
+                    headers.push(("In-Reply-To".to_string(), in_reply_to.clone()));
+                }
+                if !references.is_empty() {
+                    headers.push(("References".to_string(), references.join(" ")));
+                }
+
+                let email = Email {
+                    id: id.clone(),
+                    from,
+                    to,
+                    subject,
+                    body: body_text,
+                    headers,
+                    flags: vec![],
+                    sequence_number: 0,
+                    uid: 0,
+                    internal_date: Utc::now(),
+                    dkim_signature: if dkim_sig.is_empty() {
+                        None
+                    } else {
+                        Some(dkim_sig)
+                    },
+                };
+
+                let mut final_status = "failed";
+                let mut retry_outcome = "final_fail";
+                let mut retry_count: i64 = 0;
+                let mut last_error: Option<String> = None;
+
+                for attempt in 1..=max_attempts {
+                    last_send_ms = now_ms();
+                    match send_outgoing_email(&email).await {
+                        Ok(_) => {
                             retry_count = i64::from(attempt.saturating_sub(1));
+                            final_status = "sent";
+                            retry_outcome = if attempt > 1 {
+                                "success_after_retry"
+                            } else {
+                                "sent_first_try"
+                            };
                             break;
                         }
-                        // Rate-limit-aware backoff: 4.2.x / 4.3.x indicate server-side throttling
-                        let is_rate_limited = err_msg.contains("4.2.") || err_msg.contains("4.3.");
-                        let delay_ms = if is_rate_limited {
-                            // Double backoff when server signals rate limiting
-                            (backoff_delay_ms(&id, attempt, base_ms * 2, max_ms * 2, jitter_ms))
-                                .min(max_ms * 2)
-                        } else {
-                            backoff_delay_ms(&id, attempt, base_ms, max_ms, jitter_ms)
-                        };
-                        tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+                        Err(e) => {
+                            let retryable = is_retryable_error(&e);
+                            let err_msg = e.to_string();
+                            last_error = Some(err_msg.clone());
+                            eprintln!(
+                                "send_queue_worker send error for {} (attempt {}/{}): {}",
+                                id, attempt, max_attempts, err_msg
+                            );
+                            if !retryable || attempt >= max_attempts {
+                                retry_count = i64::from(attempt.saturating_sub(1));
+                                break;
+                            }
+                            let is_rate_limited = err_msg.contains("4.2.") || err_msg.contains("4.3.");
+                            let delay_ms = if is_rate_limited {
+                                (backoff_delay_ms(&id, attempt, base_ms * 2, max_ms * 2, jitter_ms))
+                                    .min(max_ms * 2)
+                            } else {
+                                backoff_delay_ms(&id, attempt, base_ms, max_ms, jitter_ms)
+                            };
+                            tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+                        }
                     }
                 }
-            }
 
-            let _ = coll
-                .update_one(
-                    doc! { "id": &id },
-                    doc! { "$set": {
-                        "status": final_status,
-                        "retry_count": retry_count,
-                        "retry_outcome": retry_outcome,
-                        "last_error": last_error,
-                        "updated_at": Utc::now(),
-                    } },
-                )
-                .await;
+                let _ = coll_clone
+                    .update_one(
+                        doc! { "id": &id },
+                        doc! { "$set": {
+                            "status": final_status,
+                            "retry_count": retry_count,
+                            "retry_outcome": retry_outcome,
+                            "last_error": last_error,
+                            "updated_at": Utc::now(),
+                        } },
+                    )
+                    .await;
+            });
+            handles.push(handle);
+        }
+
+        // Wait for all batch sends to complete
+        for handle in handles {
+            let _ = handle.await;
         }
     }
 }
