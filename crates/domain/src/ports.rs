@@ -591,6 +591,20 @@ pub trait MessageCopyPort: Send + Sync {
     async fn copy_message(&self, username: &str, src_mailbox: &str, uid: u32, dst_mailbox: &str) -> DomainResult<u32>;
 }
 
+/// Port mailbox subscribed list — IMAP LSUB côté utilisateur.
+///
+/// Cycle 58 : 51ème port autonome. Signatures 100 % primitives (`&str`, `String`),
+/// aucun type infrastructure ni domaine. Couvre l'opération IMAP LSUB
+/// (listage des mailboxes abonnées) côté utilisateur.
+#[async_trait]
+pub trait MailboxSubscribedListPort: Send + Sync {
+    /// Liste les mailboxes abonnées de `username` (IMAP LSUB).
+    async fn list_subscribed_mailboxes_for_user(
+        &self,
+        username: &str,
+    ) -> DomainResult<Vec<String>>;
+}
+
 /// Port user exists — Cycle 57, 50ème port.
 #[async_trait]
 pub trait UserExistsPort: Send + Sync {
