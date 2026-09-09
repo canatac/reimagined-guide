@@ -75,7 +75,8 @@ futures-util = "0.3.31"
 warp = { version = "0.4.3", optional = true }
 
 quick-xml = { version = "0.31", features = ["serialize"] }
-sha2 = "0.11"
+sha2 = "0.10"
+hex = "0.4"
 subtle = "2.6"
 async-trait = "0.1.83"
 uuid = { version = "1.11.0", features = ["v4"] }
