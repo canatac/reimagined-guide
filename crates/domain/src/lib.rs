@@ -359,4 +359,155 @@ mod tests {
         assert!(parsed_cr.workflow_events.is_empty());
         assert_eq!(parsed_cr.execution_run_id, None);
     }
+
+    #[test]
+    fn external_imap_account_roundtrip() {
+        let acct = ExternalImapAccount {
+            id: "acct-1".into(),
+            owner_user_id: "user-1".into(),
+            provider: "gmail".into(),
+            email: "a@gmail.com".into(),
+            auth_type: "oauth2".into(),
+            secret_ref: Some("ref-1".into()),
+            secret_value: None,
+            imap_host: "imap.gmail.com".into(),
+            imap_port: 993,
+            imap_tls: true,
+            smtp_host: Some("smtp.gmail.com".into()),
+            smtp_port: Some(587),
+            smtp_tls: Some(true),
+            status: "active".into(),
+            last_sync_at: None,
+            last_error: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let json = serde_json::to_value(&acct).unwrap();
+        assert_eq!(json["id"], "acct-1");
+        assert_eq!(json["provider"], "gmail");
+        assert_eq!(json["imapPort"], 993);
+        let parsed: ExternalImapAccount = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed.id, "acct-1");
+        assert_eq!(parsed.smtp_port, Some(587));
+    }
+
+    #[test]
+    fn email_roundtrip_with_headers_and_flags() {
+        let email = Email {
+            id: "e-1".into(),
+            from: "a@x.com".into(),
+            to: "b@x.com".into(),
+            subject: "hi".into(),
+            body: "body text".into(),
+            headers: vec![("X-Foo".into(), "bar".into())],
+            flags: vec!["\\Seen".into()],
+            sequence_number: 5,
+            uid: 42,
+            internal_date: Utc::now(),
+            dkim_signature: Some("sig123".into()),
+        };
+        let json = serde_json::to_value(&email).unwrap();
+        assert_eq!(json["from"], "a@x.com");
+        assert_eq!(json["uid"], 42);
+        let parsed: Email = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed.flags, vec![String::from("\\Seen")]);
+        assert_eq!(parsed.dkim_signature, Some("sig123".into()));
+        assert_eq!(parsed.headers[0], ("X-Foo".into(), "bar".into()));
+    }
+
+    #[test]
+    fn admin_user_record_defaults_for_optional_fields() {
+        let json = json!({
+            "id": "u-1",
+            "email": "a@b.com",
+            "role": "admin",
+            "status": "active",
+            "twoFactorEnabled": false,
+            "sessions24h": 0,
+            "actions7d": 0,
+            "changeRequests30d": 0,
+            "recentActivity": [],
+            "createdAt": "2026-01-01T00:00:00Z",
+            "updatedAt": "2026-01-01T00:00:00Z"
+        });
+        let rec: AdminUserRecord = serde_json::from_value(json).unwrap();
+        assert_eq!(rec.id, "u-1");
+        assert_eq!(rec.display_name, None);
+        assert_eq!(rec.password_hash, None);
+        assert_eq!(rec.invite_token, None);
+        assert_eq!(rec.notes, None);
+    }
+
+    #[test]
+    fn change_request_item_workflow_roundtrip() {
+        let cr = ChangeRequestItem {
+            id: "cr-2".into(),
+            title: "Add metrics".into(),
+            problem: "no visibility".into(),
+            desired_outcome: "full metrics".into(),
+            scope: "backend".into(),
+            priority: "P2".into(),
+            status: "open".into(),
+            requested_by: "root".into(),
+            linked_repo: "canatac/reimagined-guide".into(),
+            created_at: "2026-01-01T00:00:00Z".into(),
+            updated_at: "2026-01-01T00:00:00Z".into(),
+            taken_in_charge_at: None,
+            taken_in_charge_by: None,
+            target_release_window: "2026-W05".into(),
+            acceptance_criteria: vec!["criterion-1".into()],
+            workflow: vec![WorkflowStage {
+                key: "dev".into(),
+                label: "Development".into(),
+                owner: "dev-back".into(),
+                status: "in_progress".into(),
+                checklist: vec!["write tests".into()],
+                done_at: None,
+            }],
+            workflow_events: vec![],
+            execution_state: "running".into(),
+            execution_run_id: Some("run-1".into()),
+            execution_started_at: Some("2026-01-02T00:00:00Z".into()),
+            execution_last_heartbeat_at: None,
+            execution_finished_at: None,
+            execution_last_error: None,
+            changelog_entry: None,
+        };
+        let json = serde_json::to_value(&cr).unwrap();
+        assert_eq!(json["executionState"], "running");
+        assert_eq!(json["workflow"][0]["key"], "dev");
+        let parsed: ChangeRequestItem = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed.execution_state, "running");
+        assert_eq!(parsed.workflow.len(), 1);
+        assert_eq!(parsed.workflow[0].status, "in_progress");
+    }
+
+    #[test]
+    fn domain_error_display_messages() {
+        assert_eq!(DomainError::NotFound.to_string(), "not found");
+        assert_eq!(
+            DomainError::Conflict("dup".into()).to_string(),
+            "conflict: dup"
+        );
+        assert_eq!(
+            DomainError::Invalid("bad".into()).to_string(),
+            "invalid input: bad"
+        );
+        assert_eq!(
+            DomainError::Storage("io".into()).to_string(),
+            "storage error: io"
+        );
+        assert_eq!(
+            DomainError::Internal("bug".into()).to_string(),
+            "internal error: bug"
+        );
+    }
+
+    #[test]
+    fn domain_result_ok_and_err() {
+        let ok: DomainResult<i32> = Ok(42);
+        assert_eq!(ok, Ok(42));
+        let err: DomainResult<i32> = Err(DomainError::NotFound);
+        assert!(err.is_err());
+    }
 }
