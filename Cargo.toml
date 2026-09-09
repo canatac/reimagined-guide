@@ -73,9 +73,11 @@ bson = { version = "2", features = ["chrono-0_4"] }
 futures-util = "0.3.31"
 warp = { version = "0.4.3", optional = true }
 
-quick-xml = { version = "0.31", features = ["serde"] }
+quick-xml = { version = "0.31", features = ["serialize", "serde"] }
 async-trait = "0.1.83"
 chrono = "0.4"
+subtle = "2"
+sha2 = "0.10"
 hex = "0.4"
 rand = "0.8"
 uuid = { version = "1.11.0", features = ["v4"] }
