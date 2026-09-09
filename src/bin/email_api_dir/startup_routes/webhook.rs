@@ -10,5 +10,6 @@ pub(crate) fn register_webhook_routes(cfg: &mut web::ServiceConfig) {
     cfg.route("/api/webhooks", web::post().to(api_webhook_subscribe))
         .route("/api/webhooks", web::get().to(api_webhook_list))
         .route("/api/webhooks/{id}", web::delete().to(api_webhook_unsubscribe))
-        .route("/api/webhooks/dispatch", web::post().to(api_webhook_dispatch));
+        .route("/api/webhooks/dispatch", web::post().to(api_webhook_dispatch))
+        .route("/api/webhooks/incoming", web::post().to(api_webhook_incoming));
 }

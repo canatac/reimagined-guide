@@ -90,3 +90,91 @@ pub(crate) async fn api_webhook_dispatch(
         "message": "Event dispatched"
     }))
 }
+
+/// Receive an incoming webhook with HMAC-SHA256 signature verification.
+///
+/// Headers required:
+/// - `X-Webhook-Id`: subscriber ID (to look up the shared secret)
+/// - `X-Webhook-Signature`: hex-encoded HMAC-SHA256 signature of the body
+///
+/// On invalid/missing signature → 401 + audit log of the failed attempt.
+pub(crate) async fn api_webhook_incoming(
+    state: web::Data<AppState>,
+    req: actix_web::HttpRequest,
+    body: web::Bytes,
+) -> impl Responder {
+    let webhook_id = req
+        .headers()
+        .get("X-Webhook-Id")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let signature = req
+        .headers()
+        .get("X-Webhook-Signature")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or "";
+
+    if webhook_id.is_empty() || signature.is_empty() {
+        // Log failed attempt
+        eprintln!(
+            "webhook_incoming: rejected missing headers (id={}, sig_len={})",
+            webhook_id.len(),
+            signature.len()
+        );
+        return HttpResponse::BadRequest().json(serde_json::json!({
+            "message": "X-Webhook-Id and X-Webhook-Signature headers required"
+        }));
+    }
+
+    // Look up the subscriber to get the shared secret
+    let subs = state.webhook_registry.list().await;
+    let subscriber = subs.iter().find(|s| s.id == webhook_id && s.active);
+
+    let secret = match subscriber {
+        Some(sub) => sub.secret.clone(),
+        None => {
+            eprintln!(
+                "webhook_incoming: rejected unknown/inactive webhook id={}",
+                webhook_id
+            );
+            return HttpResponse::Unauthorized().json(serde_json::json!({
+                "message": "Unknown webhook id"
+            }));
+        }
+    };
+
+    // Verify HMAC-SHA256 signature
+    let body_str = String::from_utf8_lossy(&body);
+    if !simple_smtp_server::webhook::verify(&body_str, &secret, signature) {
+        eprintln!(
+            "webhook_incoming: rejected invalid signature for webhook id={}",
+            webhook_id
+        );
+        return HttpResponse::Unauthorized().json(serde_json::json!({
+            "message": "Invalid signature"
+        }));
+    }
+
+    // Parse the verified payload
+    let payload: serde_json::Value = match serde_json::from_str(&body_str) {
+        Ok(v) => v,
+        Err(e) => {
+            return HttpResponse::BadRequest().json(serde_json::json!({
+                "message": format!("Invalid JSON body: {}", e)
+            }));
+        }
+    };
+
+    // Dispatch internally so downstream handlers can react
+    let event = payload
+        .get("event")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown")
+        .to_string();
+    let data = payload.get("data").cloned().unwrap_or(serde_json::json!({}));
+    state.webhook_registry.dispatch(event, data).await;
+
+    HttpResponse::Ok().json(serde_json::json!({
+        "message": "Webhook received and verified"
+    }))
+}
