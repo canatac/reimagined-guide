@@ -506,7 +506,7 @@ mod tests {
     #[test]
     fn domain_result_ok_and_err() {
         let ok: DomainResult<i32> = Ok(42);
-        assert_eq!(ok.unwrap(), 42);
+        assert_eq!(ok, Ok(42));
         let err: DomainResult<i32> = Err(DomainError::NotFound);
         assert!(err.is_err());
     }
