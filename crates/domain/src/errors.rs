@@ -2,7 +2,7 @@ use thiserror::Error;
 
 /// DomainError — erreur pure du domaine, sans dépendance externe (mongodb, etc.).
 /// Les adapters convertissent leurs erreurs concrètes vers ce type via `From`.
-#[derive(Debug, Error)]
+#[derive(Debug, Error, PartialEq)]
 pub enum DomainError {
     #[error("not found")]
     NotFound,
