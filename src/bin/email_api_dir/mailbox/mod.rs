@@ -15,6 +15,7 @@ mod folder_utils;
 mod mime_utils;
 mod mime_body;
 mod mime_attachments;
+mod scheduled_drafts;
 
 // Le mod.rs originel exposait via glob les types du parent (Arc, Logic, Email,
 // Responder, bson, monitoring, ...). Après split minimal (helpers déplacés),
@@ -41,3 +42,4 @@ pub(crate) use mime_utils::{
     email_to_dto, parse_address, strip_tags, EmailAddressDto, EmailDto,
 };
 pub(crate) use mime_attachments::{extract_attachments_for_ui, ExtractedAttachment};
+pub(crate) use scheduled_drafts::*;

@@ -82,6 +82,9 @@ pub(crate) fn register_mailbox_routes(cfg: &mut web::ServiceConfig) {
         )
         .route("/api/send/undo", web::post().to(api_send_undo))
         .route("/api/send/schedule", web::post().to(api_send_schedule))
+        .route("/api/v1/drafts/schedule", web::post().to(api_drafts_schedule))
+        .route("/api/v1/drafts/scheduled", web::get().to(api_drafts_scheduled_list))
+        .route("/api/v1/drafts/scheduled/{id}", web::delete().to(api_drafts_scheduled_cancel))
         .route(
             "/api/calendar/events",
             web::post().to(calendar_create_event),
