@@ -186,3 +186,56 @@ pub(super) async fn check_p95_latency(ctx: &AlertCtx<'_>) -> Option<ActiveAlert>
         ts: Utc::now().to_rfc3339(),
     })
 }
+
+/// Alert when a specific SMTP reject reason code spikes.
+/// Threshold is configurable via MONITORING_REJECT_SPIKE_THRESHOLD (default: 5).
+pub(super) async fn check_reject_taxonomy_spikes(ctx: &AlertCtx<'_>) -> Vec<ActiveAlert> {
+    let coll = ctx.events_coll();
+    let threshold: u64 = std::env::var("MONITORING_REJECT_SPIKE_THRESHOLD")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(5);
+
+    let pipeline = vec![
+        doc! { "$match": {
+            "ts": { "$gte": &ctx.since_str },
+            "reject_reason_code": { "$exists": true, "$ne": null },
+        }},
+        doc! { "$group": {
+            "_id": "$reject_reason_code",
+            "count": { "$sum": 1 },
+        }},
+        doc! { "$match": { "count": { "$gte": threshold as i64 } }},
+    ];
+
+    let mut out = Vec::new();
+    if let Ok(cursor) = coll.aggregate(pipeline).await {
+        use futures_util::TryStreamExt;
+        if let Ok(docs) = cursor.try_collect::<Vec<_>>().await {
+            for doc in docs {
+                let reason_code = doc
+                    .get_str("_id")
+                    .unwrap_or("SMTP_REJECT_UNKNOWN")
+                    .to_string();
+                let count = doc.get_i64("count").ok().unwrap_or(0) as u64;
+                let severity = match reason_code.as_str() {
+                    "SMTP_REJECT_DKIM_FAIL" | "SMTP_REJECT_SPF_FAIL" | "SMTP_REJECT_DMARC_FAIL" => "critical",
+                    "SMTP_REJECT_BLACKLISTED" => "critical",
+                    _ => "warning",
+                };
+                out.push(ActiveAlert {
+                    kind: format!("reject_spike_{}", reason_code),
+                    severity: severity.into(),
+                    message: format!(
+                        "Reject reason '{}' spiked: {} occurrences in {}m window (threshold: {})",
+                        reason_code, count, ctx.window_minutes, threshold
+                    ),
+                    value: serde_json::json!(count),
+                    threshold: serde_json::json!(threshold),
+                    ts: Utc::now().to_rfc3339(),
+                });
+            }
+        }
+    }
+    out
+}
