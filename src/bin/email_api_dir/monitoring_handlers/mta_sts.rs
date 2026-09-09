@@ -17,7 +17,7 @@ pub async fn api_mta_sts_policy(
     let manager = MtaStsManager::new();
     match manager.fetch_policy(&query.domain).await {
         Ok(policy) => Ok(HttpResponse::Ok().json(policy)),
-        Err(e) => Ok(HttpResponse().json(serde_json::json!({
+        Err(e) => Ok(HttpResponse::BadRequest().json(serde_json::json!({
             "error": e,
             "domain": query.domain,
         }))),
@@ -53,7 +53,7 @@ pub async fn api_mta_sts_generate(
         "testing" => StsMode::Testing,
         "none" => StsMode::None,
         _ => {
-            return Ok(HttpResponse().json(serde_json::json!({
+            return Ok(HttpResponse::BadRequest().json(serde_json::json!({
                 "error": "Invalid mode. Use 'enforce', 'testing', or 'none'",
             })));
         }
@@ -61,7 +61,7 @@ pub async fn api_mta_sts_generate(
 
     let policy_text = generate_policy_text(mode, body.max_age, &body.mx);
 
-    Ok(HttpResponse().json(serde_json::json!({
+    Ok(HttpResponse::Ok().json(serde_json::json!({
         "policy": policy_text,
         "mode": body.mode,
         "max_age": body.max_age,
