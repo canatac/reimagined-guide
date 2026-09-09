@@ -410,7 +410,7 @@ mod tests {
         assert_eq!(json["from"], "a@x.com");
         assert_eq!(json["uid"], 42);
         let parsed: Email = serde_json::from_value(json).unwrap();
-        assert_eq!(parsed.flags, vec!["\\Seen".into()]);
+        assert_eq!(parsed.flags, vec![String::from("\\Seen")]);
         assert_eq!(parsed.dkim_signature, Some("sig123".into()));
         assert_eq!(parsed.headers[0], ("X-Foo".into(), "bar".into()));
     }
