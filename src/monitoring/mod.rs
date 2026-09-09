@@ -1,4 +1,5 @@
 pub mod alerts;
+pub mod dmarc;
 pub mod enrichment;
 pub mod parse;
 pub mod storage;
