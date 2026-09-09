@@ -7,8 +7,10 @@
 
 use actix_cors::Cors;
 use actix_web::web;
+use mongodb::options::ClientOptions;
 use std::env;
 use std::sync::Arc;
+use std::time::Duration;
 
 use super::*;
 
@@ -37,6 +39,43 @@ pub(crate) fn build_mongo_uri() -> String {
     }
 }
 
+/// Build MongoDB client options with connection pool configuration.
+/// Configurable via env vars:
+/// - MONGODB_MAX_POOL_SIZE (default: 50)
+/// - MONGODB_MIN_POOL_SIZE (default: 10)
+/// - MONGODB_MAX_IDLE_TIME_MS (default: 60000)
+/// - MONGODB_WAIT_QUEUE_TIMEOUT_MS (default: 5000)
+pub(crate) async fn build_mongo_options(
+    client_uri: &str,
+) -> Result<ClientOptions, mongodb::error::Error> {
+    let mut options = ClientOptions::parse(client_uri).await?;
+    let max_pool_size = env::var("MONGODB_MAX_POOL_SIZE")
+        .ok()
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(50);
+    let min_pool_size = env::var("MONGODB_MIN_POOL_SIZE")
+        .ok()
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(10);
+    let max_idle_time_ms = env::var("MONGODB_MAX_IDLE_TIME_MS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(60000);
+    let wait_queue_timeout_ms = env::var("MONGODB_WAIT_QUEUE_TIMEOUT_MS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(5000);
+
+    options.max_pool_size = Some(max_pool_size);
+    options.min_pool_size = Some(min_pool_size);
+    options.max_idle_time = Some(Duration::from_millis(max_idle_time_ms));
+    options.wait_queue_timeout = Some(Duration::from_millis(wait_queue_timeout_ms));
+    options.connect_timeout = Some(Duration::from_secs(10));
+    options.heartbeat_freq = Some(Duration::from_secs(10));
+
+    Ok(options)
+}
+
 /// Attempt to connect to MongoDB (with warm-up ping) if enabled via env.
 pub(crate) async fn connect_mongo_optional(
     client_uri: &str,
@@ -46,24 +85,45 @@ pub(crate) async fn connect_mongo_optional(
     if !(use_mongodb && !mongo_user.is_empty()) {
         return None;
     }
-    match mongodb::Client::with_uri_str(client_uri).await {
+    let options = match build_mongo_options(client_uri).await {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("MongoDB options parse failed: {}, falling back to URI", e);
+            return match mongodb::Client::with_uri_str(client_uri).await {
+                Ok(c) => {
+                    let c = Arc::new(c);
+                    warm_up_mongo(&c).await;
+                    Some(c)
+                }
+                Err(e) => {
+                    eprintln!("MongoDB connection failed: {}, auth will use env vars", e);
+                    None
+                }
+            };
+        }
+    };
+    match mongodb::Client::with_options(options) {
         Ok(c) => {
             let c = Arc::new(c);
-            if let Err(e) = c
-                .database("admin")
-                .run_command(mongodb::bson::doc! {"ping": 1})
-                .await
-            {
-                eprintln!("MongoDB warm-up ping failed (non-fatal): {}", e);
-            } else {
-                println!("MongoDB connection ready.");
-            }
+            warm_up_mongo(&c).await;
             Some(c)
         }
         Err(e) => {
             eprintln!("MongoDB connection failed: {}, auth will use env vars", e);
             None
         }
+    }
+}
+
+async fn warm_up_mongo(client: &Arc<mongodb::Client>) {
+    if let Err(e) = client
+        .database("admin")
+        .run_command(mongodb::bson::doc! {"ping": 1})
+        .await
+    {
+        eprintln!("MongoDB warm-up ping failed (non-fatal): {}", e);
+    } else {
+        println!("MongoDB connection ready.");
     }
 }
 
