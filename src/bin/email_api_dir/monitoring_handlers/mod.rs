@@ -3,11 +3,13 @@
 
 mod monitoring;
 mod prometheus;
+mod dashboard;
 mod security;
 mod shared;
 
 pub(crate) use monitoring::*;
 pub(crate) use prometheus::*;
+pub(crate) use dashboard::*;
 pub(crate) use security::*;
 #[allow(unused_imports)]
 pub(crate) use shared::*;
