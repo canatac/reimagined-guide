@@ -45,10 +45,9 @@ async fn main() -> std::io::Result<()> {
                 opts.heartbeat_freq = Some(std::time::Duration::from_secs(10));
                 mongodb::Client::with_options(opts)
                     .or_else(|_| mongodb::Client::with_uri_str(&client_uri))
-                    .await
                     .unwrap()
             }
-            Err(_) => mongodb::Client::with_uri_str(&client_uri).await.unwrap(),
+            Err(_) => mongodb::Client::with_uri_str(&client_uri).unwrap(),
         },
     );
 
