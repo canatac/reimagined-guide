@@ -7,7 +7,6 @@ mod auth;
 mod dashboard;
 mod dmarc;
 mod diag;
-mod dmarc;
 mod docs;
 mod external;
 mod mailbox;
