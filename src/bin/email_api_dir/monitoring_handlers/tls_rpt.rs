@@ -2,7 +2,7 @@
 // Issue #481: SMTP TLS reporting (TLS-RPT) aggregation
 
 use actix_web::{web, HttpResponse};
-use mongodb::bson::{self, doc};
+use mongodb::bson::doc;
 use simple_smtp_server::monitoring::tls_rpt::{
     self, TlsRptAlertConfig, TlsRptReport,
 };
@@ -30,9 +30,16 @@ pub(crate) async fn api_tls_rpt_import(
                 .database(&db_name)
                 .collection::<mongodb::bson::Document>("tls_rpt_reports");
 
-            // Convert to BSON via JSON serialization
-            let json_value = serde_json::to_value(&report).unwrap_or_default();
-            let doc = mongodb::bson::to_bson(&json_value).unwrap_or_default();
+            // Convert to BSON document
+            let doc = match mongodb::bson::to_document(&report) {
+                Ok(d) => d,
+                Err(e) => {
+                    return HttpResponse::InternalServerError().json(serde_json::json!({
+                        "status": "error",
+                        "message": format!("Failed to serialize report: {}", e)
+                    }));
+                }
+            };
             let _ = coll.insert_one(doc).await;
 
             HttpResponse::Created().json(serde_json::json!({
