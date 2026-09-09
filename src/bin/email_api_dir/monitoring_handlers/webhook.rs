@@ -85,7 +85,7 @@ pub(crate) async fn api_webhook_dispatch(
         }));
     }
 
-    state.webhook_registry.dispatch(event, data).await;
+    state.webhook_registry.dispatch(event.to_string(), data).await;
     HttpResponse::Ok().json(serde_json::json!({
         "message": "Event dispatched"
     }))

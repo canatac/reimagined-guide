@@ -10,6 +10,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use std::sync::Arc;
+use subtle::ConstantTimeEq;
 use tokio::sync::RwLock;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -79,9 +80,9 @@ impl WebhookRegistry {
     }
 
     /// Dispatch an event to all matching subscribers.
-    pub async fn dispatch(&self, event: &str, data: serde_json::Value) {
+    pub async fn dispatch(&self, event: String, data: serde_json::Value) {
         let payload = WebhookPayload {
-            event: event.to_string(),
+            event: event.clone(),
             timestamp: chrono::Utc::now().to_rfc3339(),
             data,
         };
@@ -104,12 +105,13 @@ impl WebhookRegistry {
             let client = self.client.clone();
             let url = sub.url.clone();
             let body = body.clone();
+            let event_header = event.clone();
             tokio::spawn(async move {
                 if let Err(e) = client
                     .post(&url)
                     .header("Content-Type", "application/json")
                     .header("X-Webhook-Signature", signature)
-                    .header("X-Webhook-Event", event)
+                    .header("X-Webhook-Event", event_header)
                     .body(body)
                     .send()
                     .await
@@ -139,8 +141,6 @@ pub fn sign(body: &str, secret: &str) -> String {
 /// Verify an HMAC-SHA256 signature.
 pub fn verify(body: &str, secret: &str, signature: &str) -> bool {
     let expected = sign(body, secret);
-    // Constant-time comparison to prevent timing attacks.
-    use constant_time_eq::ConstantTimeEq;
     expected.as_bytes().ct_eq(signature.as_bytes()).into()
 }
 
@@ -220,6 +220,6 @@ mod tests {
     fn registry_filters_events() {
         let registry = WebhookRegistry::new();
         // Should not panic even if no subscribers match
-        registry.dispatch("pr_opened", serde_json::json!({}));
+        registry.dispatch("pr_opened".to_string(), serde_json::json!({}));
     }
 }
