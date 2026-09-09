@@ -10,6 +10,7 @@ mod docs;
 mod external;
 mod mailbox;
 mod prometheus;
+mod webhook;
 
 pub(crate) use admin::register_admin_routes;
 pub(crate) use auth::register_auth_routes;
@@ -19,3 +20,4 @@ pub(crate) use docs::register_docs_routes;
 pub(crate) use external::register_external_routes;
 pub(crate) use mailbox::register_mailbox_routes;
 pub(crate) use prometheus::register_prometheus_routes;
+pub(crate) use webhook::register_webhook_routes;
