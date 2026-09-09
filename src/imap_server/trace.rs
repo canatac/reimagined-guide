@@ -4,8 +4,6 @@
 //! Each IMAP command gets a unique trace_id for cross-service correlation.
 //! Logs include user, domain, command, and trace_id for RCA.
 
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 /// Generate a new trace_id for an IMAP command
@@ -21,21 +19,26 @@ pub fn log_imap_command(
     trace_id: &str,
     args: &[&str],
 ) {
-    let domain = user.and_then(|u| u.split('@').nth(1)).unwrap_or("unknown");
-    let username = user.and_then(|u| u.split('@').next()).unwrap_or("unknown");
+    let domain = match user.and_then(|u| u.split('@').nth(1)) {
+        Some(d) => d,
+        None => "unknown",
+    };
+    let username = match user.and_then(|u| u.split('@').next()) {
+        Some(u) => u,
+        None => "unknown",
+    };
+    let session = match session_id.as_deref() {
+        Some(s) => s,
+        None => "none",
+    };
     let args_str = if args.is_empty() {
-        "".to_string()
+        String::new()
     } else {
         format!(" args={:?}", args)
     };
     println!(
         "{{\"trace_id\":\"{}\",\"user\":\"{}\",\"domain\":\"{}\",\"command\":\"{}\",\"session_id\":\"{}\"{}}}",
-        trace_id,
-        username,
-        domain,
-        command,
-        session_id.as_deref().unwrap_or("none"),
-        args_str
+        trace_id, username, domain, command, session, args_str
     );
 }
 
@@ -91,14 +94,20 @@ mod tests {
     #[test]
     fn domain_extraction_from_email() {
         let user = Some("test@misfits.ai");
-        let domain = user.and_then(|u| u.split('@').nth(1)).unwrap_or("unknown");
+        let domain = match user.and_then(|u| u.split('@').nth(1)) {
+            Some(d) => d,
+            None => "unknown",
+        };
         assert_eq!(domain, "misfits.ai");
     }
 
     #[test]
     fn domain_extraction_from_email_without_domain() {
         let user = Some("testuser");
-        let domain = user.and_then(|u| u.split('@').nth(1)).unwrap_or("unknown");
+        let domain = match user.and_then(|u| u.split('@').nth(1)) {
+            Some(d) => d,
+            None => "unknown",
+        };
         assert_eq!(domain, "unknown");
     }
 }
