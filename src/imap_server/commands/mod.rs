@@ -1,4 +1,5 @@
 use super::*;
+use crate::imap_server::trace::{generate_trace_id, log_imap_command, log_imap_completion};
 
 mod auth;
 mod mailbox;
@@ -15,13 +16,19 @@ impl ImapServer {
     ) -> String {
         let tag = command_parts[0];
         let command_name = command_parts[1].to_uppercase();
-        println!(
-            "Command name: {}, Arguments: {:?}",
-            command_name,
-            &command_parts[2..]
+        let trace_id = generate_trace_id();
+        let user = Self::current_user(sessions, session_id);
+        
+        log_imap_command(
+            session_id,
+            user.as_deref(),
+            &command_name,
+            &trace_id,
+            &command_parts[2..],
         );
 
-        match command_name.as_str() {
+        let start = std::time::Instant::now();
+        let result = match command_name.as_str() {
             "APPEND" => self.handle_append(tag, command_parts),
             "CAPABILITY" => format!("* CAPABILITY IMAP4rev1 AUTH=PLAIN LOGIN NAMESPACE\r\n{} OK CAPABILITY completed\r\n", tag),
             "NOOP" => format!("{} OK NOOP completed\r\n", tag),
@@ -44,7 +51,12 @@ impl ImapServer {
             "SEARCH" => self.handle_search(tag, command_parts, sessions, session_id).await,
             "COPY" => self.handle_copy(tag, command_parts, sessions, session_id).await,
             _ => format!("{} BAD Command not recognized\r\n", tag),
-        }
+        };
+
+        let duration = start.elapsed().as_millis() as u64;
+        let success = !result.contains("BAD") && !result.contains("NO ");
+        log_imap_completion(&trace_id, &command_name, success, duration);
+        result
     }
 
     fn current_user(sessions: &Sessions, session_id: &Option<String>) -> Option<String> {

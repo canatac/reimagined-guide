@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 mod commands;
 mod parser;
+mod trace;
 
 fn parse_imap_command_line(command: &str) -> Vec<String> {
     let mut parts = Vec::new();
