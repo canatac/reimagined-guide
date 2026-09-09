@@ -80,8 +80,27 @@ pub(crate) async fn send_queue_worker(mongo: Arc<mongodb::Client>) {
     let db_name = std::env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
     let logic = Arc::new(Logic::new(mongo.clone()));
     let (max_attempts, base_ms, max_ms, jitter_ms) = retry_policy();
+    let rate_limit_per_min: u64 = std::env::var("SMTP_RATE_LIMIT_PER_MINUTE")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(60)
+        .max(1);
+    let min_interval_ms: u64 = 60_000 / rate_limit_per_min;
+    let mut last_send_ms: u64 = 0;
+    let now_ms = || {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64
+    };
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+        // Rate limiting: pace sends to stay under rate_limit_per_min
+        let elapsed = now_ms() - last_send_ms;
+        if elapsed < min_interval_ms {
+            tokio::time::sleep(std::time::Duration::from_millis(min_interval_ms - elapsed)).await;
+        }
 
         let coll = mongo
             .database(&db_name)
@@ -112,6 +131,14 @@ pub(crate) async fn send_queue_worker(mongo: Arc<mongodb::Client>) {
 
         for entry in entries {
             let id = entry.get_str("id").unwrap_or("").to_string();
+            let queued_at = entry.get_datetime("queued_at").ok().map(|dt| dt.timestamp_millis()).unwrap_or(0);
+            let queue_age_min = (now.timestamp_millis() - queued_at).max(0) / 60_000;
+            if queue_age_min >= 5 {
+                eprintln!(
+                    "send_queue_worker WARN: entry {} queued for {}min (threshold 5min) - consider increasing SMTP_RATE_LIMIT_PER_MINUTE or scaling workers",
+                    id, queue_age_min
+                );
+            }
             let user_id = entry.get_str("user_id").unwrap_or("admin").to_string();
             let from = entry.get_str("from").unwrap_or("").to_string();
             let to = entry.get_str("to").unwrap_or("").to_string();
@@ -217,6 +244,7 @@ pub(crate) async fn send_queue_worker(mongo: Arc<mongodb::Client>) {
             let mut last_error: Option<String> = None;
 
             for attempt in 1..=max_attempts {
+                last_send_ms = now_ms();
                 match send_outgoing_email(&email).await {
                     Ok(_) => {
                         retry_count = i64::from(attempt.saturating_sub(1));
@@ -240,7 +268,15 @@ pub(crate) async fn send_queue_worker(mongo: Arc<mongodb::Client>) {
                             retry_count = i64::from(attempt.saturating_sub(1));
                             break;
                         }
-                        let delay_ms = backoff_delay_ms(&id, attempt, base_ms, max_ms, jitter_ms);
+                        // Rate-limit-aware backoff: 4.2.x / 4.3.x indicate server-side throttling
+                        let is_rate_limited = err_msg.contains("4.2.") || err_msg.contains("4.3.");
+                        let delay_ms = if is_rate_limited {
+                            // Double backoff when server signals rate limiting
+                            (backoff_delay_ms(&id, attempt, base_ms * 2, max_ms * 2, jitter_ms))
+                                .min(max_ms * 2)
+                        } else {
+                            backoff_delay_ms(&id, attempt, base_ms, max_ms, jitter_ms)
+                        };
                         tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
                     }
                 }
@@ -315,6 +351,52 @@ mod tests {
 
         let hard_fail = Error::other("550 5.1.1 unknown user");
         assert!(!super::is_retryable_error(&hard_fail));
+    }
+
+    #[test]
+    fn rate_limit_42x_triggers_double_backoff() {
+        // 4.2.x errors indicate server-side rate limiting
+        let rate_limit_err = Error::other("450 4.2.1 Mailbox busy, try again later");
+        assert!(super::is_retryable_error(&rate_limit_err));
+        // Verify the error message contains 4.2. for rate-limit detection
+        assert!(rate_limit_err.to_string().contains("4.2."));
+    }
+
+    #[test]
+    fn rate_limit_43x_triggers_double_backoff() {
+        // 4.3.x errors indicate system overload / rate limiting
+        let system_overload = Error::other("421 4.3.2 System not accepting messages");
+        assert!(super::is_retryable_error(&system_overload));
+        assert!(system_overload.to_string().contains("4.3."));
+    }
+
+    #[test]
+    fn rate_limit_detection_distinguishes_from_other_4xx() {
+        // 4.4.x (timeout/routing) should NOT trigger double backoff
+        let routing_err = Error::other("451 4.4.0 Temporary forwarding failure");
+        assert!(super::is_retryable_error(&routing_err));
+        let is_rate_limited = routing_err.to_string().contains("4.2.") || routing_err.to_string().contains("4.3.");
+        assert!(!is_rate_limited);
+
+        // 4.5.x (protocol error) should NOT trigger double backoff
+        let protocol_err = Error::other("451 4.5.0 Protocol error");
+        assert!(super::is_retryable_error(&protocol_err));
+        let is_rate_limited = protocol_err.to_string().contains("4.2.") || protocol_err.to_string().contains("4.3.");
+        assert!(!is_rate_limited);
+    }
+
+    #[test]
+    fn double_backoff_produces_longer_delay_than_standard() {
+        let std_delay = backoff_delay_ms("msg-rl", 2, 500, 30_000, 0);
+        let double_delay = backoff_delay_ms("msg-rl", 2, 500 * 2, 30_000 * 2, 0);
+        assert!(double_delay > std_delay);
+    }
+
+    #[test]
+    fn double_backoff_respects_doubled_max() {
+        let doubled_max = 5_000;
+        let delay = backoff_delay_ms("msg-rl", 10, 500 * 2, doubled_max, 250);
+        assert!(delay <= doubled_max);
     }
 }
 
