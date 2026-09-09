@@ -2,6 +2,7 @@ pub mod alerts;
 pub mod enrichment;
 pub mod parse;
 pub mod storage;
+pub mod tls_rpt;
 
 pub use alerts::{ActiveAlert, AlertConfig};
 pub use enrichment::GeoInfo;
