@@ -30,7 +30,9 @@ pub(crate) async fn api_tls_rpt_import(
                 .database(&db_name)
                 .collection::<mongodb::bson::Document>("tls_rpt_reports");
 
-            let doc = mongodb::bson::to_bson(&report).unwrap_or_default();
+            // Convert to BSON via JSON serialization
+            let json_value = serde_json::to_value(&report).unwrap_or_default();
+            let doc = mongodb::bson::to_bson(&json_value).unwrap_or_default();
             let _ = coll.insert_one(doc).await;
 
             HttpResponse::Created().json(serde_json::json!({
