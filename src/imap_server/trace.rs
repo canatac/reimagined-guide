@@ -4,11 +4,20 @@
 //! Each IMAP command gets a unique trace_id for cross-service correlation.
 //! Logs include user, domain, command, and trace_id for RCA.
 
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use uuid::Uuid;
 
 /// Generate a new trace_id for an IMAP command
 pub fn generate_trace_id() -> String {
     Uuid::new_v4().to_string()
+}
+
+/// Hash a sensitive value for logging (one-way, non-reversible)
+fn hash_for_log(value: &str) -> String {
+    let mut hasher = DefaultHasher::new();
+    value.hash(&mut hasher);
+    format!("{:x}", hasher.finish())
 }
 
 /// Log an IMAP command with trace_id for structured logging
@@ -23,9 +32,9 @@ pub fn log_imap_command(
         Some(d) => d,
         None => "unknown",
     };
-    let username = match user.and_then(|u| u.split('@').next()) {
-        Some(u) => u,
-        None => "unknown",
+    let username_hash = match user {
+        Some(u) => hash_for_log(u),
+        None => "none".to_string(),
     };
     let session = match session_id.as_deref() {
         Some(s) => s,
@@ -37,8 +46,8 @@ pub fn log_imap_command(
         format!(" args={:?}", args)
     };
     println!(
-        "{{\"trace_id\":\"{}\",\"user\":\"{}\",\"domain\":\"{}\",\"command\":\"{}\",\"session_id\":\"{}\"{}}}",
-        trace_id, username, domain, command, session, args_str
+        "{{\"trace_id\":\"{}\",\"user_hash\":\"{}\",\"domain\":\"{}\",\"command\":\"{}\",\"session_id\":\"{}\"{}}}",
+        trace_id, username_hash, domain, command, session, args_str
     );
 }
 
