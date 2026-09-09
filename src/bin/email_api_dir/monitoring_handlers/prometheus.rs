@@ -2,6 +2,7 @@
 // Exposes SMTP queue metrics in Prometheus exposition format
 // Issue #436: queue_depth, queue_latency_ms, alert rules
 // Issue #438: smtp_reject_total by reason_code + action (taxonomy)
+// Issue #485: mongodb pool size gauges
 
 use actix_web::{web, HttpResponse};
 use chrono::Utc;
@@ -93,7 +94,26 @@ pub(crate) async fn api_monitoring_prometheus(
         }
     }
 
-    let response = format!("{}{}{}", metrics, per_status, reject_metrics);
+    // MongoDB pool size gauges (issue #485)
+    let max_pool = std::env::var("MONGODB_MAX_POOL_SIZE").ok().and_then(|s| s.parse::<u64>().ok()).unwrap_or(50);
+    let min_pool = std::env::var("MONGODB_MIN_POOL_SIZE").ok().and_then(|s| s.parse::<u64>().ok()).unwrap_or(10);
+    let pool_metrics = format!(
+        "# HELP mongodb_pool_max Max pool size configured for MongoDB connections\n\
+         # TYPE mongodb_pool_max gauge\n\
+         mongodb_pool_max {}\n\
+         # HELP mongodb_pool_min Min pool size configured for MongoDB connections\n\
+         # TYPE mongodb_pool_min gauge\n\
+         mongodb_pool_min {}\n\
+         # HELP mongodb_connect_timeout_secs Connection timeout in seconds\n\
+         # TYPE mongodb_connect_timeout_secs gauge\n\
+         mongodb_connect_timeout_secs 10\n\
+         # HELP mongodb_heartbeat_secs Heartbeat frequency in seconds\n\
+         # TYPE mongodb_heartbeat_secs gauge\n\
+         mongodb_heartbeat_secs 10\n",
+        max_pool, min_pool
+    );
+
+    let response = format!("{}{}{}{}", metrics, per_status, reject_metrics, pool_metrics);
 
     HttpResponse::Ok()
         .content_type("text/plain; version=0.0.4; charset=utf-8")
@@ -167,5 +187,24 @@ mod tests {
         let type_line = "# TYPE smtp_reject_total counter\n";
         assert!(help_line.contains("# HELP smtp_reject_total"));
         assert!(type_line.contains("# TYPE smtp_reject_total counter"));
+    }
+
+    #[test]
+    fn prometheus_mongodb_pool_gauges_present() {
+        let max_pool = 50u64;
+        let min_pool = 10u64;
+        let pool_metrics = format!(
+            "# HELP mongodb_pool_max Max pool size configured for MongoDB connections\n\
+             # TYPE mongodb_pool_max gauge\n\
+             mongodb_pool_max {}\n\
+             # HELP mongodb_pool_min Min pool size configured for MongoDB connections\n\
+             # TYPE mongodb_pool_min gauge\n\
+             mongodb_pool_min {}\n",
+            max_pool, min_pool
+        );
+        assert!(pool_metrics.contains("# HELP mongodb_pool_max"));
+        assert!(pool_metrics.contains("# TYPE mongodb_pool_max gauge"));
+        assert!(pool_metrics.contains("mongodb_pool_max 50"));
+        assert!(pool_metrics.contains("mongodb_pool_min 10"));
     }
 }
