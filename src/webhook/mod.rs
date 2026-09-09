@@ -98,7 +98,7 @@ impl WebhookRegistry {
             if !sub.active {
                 continue;
             }
-            if !sub.events.iter().any(|e| e == "*" || e == event) {
+            if !sub.events.iter().any(|e| e == "*" || *e == event) {
                 continue;
             }
             let signature = sign(&body, &sub.secret);
