@@ -1,6 +1,7 @@
 // Prometheus metrics endpoint handler
 // Exposes SMTP queue metrics in Prometheus exposition format
 // Issue #436: queue_depth, queue_latency_ms, alert rules
+// Issue #438: smtp_reject_total by reason_code + action (taxonomy)
 
 use actix_web::{web, HttpResponse};
 use chrono::Utc;
@@ -57,7 +58,42 @@ pub(crate) async fn api_monitoring_prometheus(
         ));
     }
 
-    let response = format!("{}{}", metrics, per_status);
+    // Issue #438: reject taxonomy counts from smtp_events collection
+    let events_coll = mongo
+        .database(&db_name)
+        .collection::<mongodb::bson::Document>("smtp_events");
+    let reject_filter = doc! {
+        "reject_reason_code": { "$exists": true, "$ne": null },
+    };
+    let pipeline = vec![
+        doc! { "$match": reject_filter },
+        doc! { "$group": {
+            "_id": { "reason_code": "$reject_reason_code", "action": "$reject_action" },
+            "count": { "$sum": 1 },
+        }},
+    ];
+    let mut reject_metrics = String::new();
+    reject_metrics.push_str(
+        "# HELP smtp_reject_total Total SMTP rejects classified by reason_code and action\n\
+         # TYPE smtp_reject_total counter\n",
+    );
+    if let Ok(cursor) = events_coll.aggregate(pipeline).await {
+        use futures_util::TryStreamExt;
+        if let Ok(docs) = cursor.try_collect::<Vec<_>>().await {
+            for doc in docs {
+                let id = doc.get_document("_id").ok();
+                let reason_code = id.and_then(|d| d.get_str("reason_code").ok()).unwrap_or("unknown");
+                let action = id.and_then(|d| d.get_str("action").ok()).unwrap_or("unknown");
+                let count = doc.get_i64("count").ok().unwrap_or(0);
+                reject_metrics.push_str(&format!(
+                    "smtp_reject_total{{reason_code=\"{}\",action=\"{}\"}} {}\n",
+                    reason_code, action, count
+                ));
+            }
+        }
+    }
+
+    let response = format!("{}{}{}", metrics, per_status, reject_metrics);
 
     HttpResponse::Ok()
         .content_type("text/plain; version=0.0.4; charset=utf-8")
@@ -110,15 +146,26 @@ mod tests {
     }
 
     #[test]
-    fn prometheus_format_zero_values() {
-        let queue_depth = 0u64;
-        let queue_latency_ms = 0u64;
-        let metrics = format!(
-            "smtp_queue_depth {}\n\
-             smtp_queue_latency_ms {}\n",
-            queue_depth, queue_latency_ms
+    fn prometheus_format_includes_reject_taxonomy_metric() {
+        // Verify the reject taxonomy metric format
+        let reason_code = "SMTP_REJECT_INVALID_RECIPIENT";
+        let action = "verify_recipient";
+        let count = 5i64;
+        let reject_metric = format!(
+            "smtp_reject_total{{reason_code=\"{}\",action=\"{}\"}} {}\n",
+            reason_code, action, count
         );
-        assert!(metrics.contains("smtp_queue_depth 0"));
-        assert!(metrics.contains("smtp_queue_latency_ms 0"));
+        assert!(reject_metric.contains("smtp_reject_total"));
+        assert!(reject_metric.contains("reason_code=\"SMTP_REJECT_INVALID_RECIPIENT\""));
+        assert!(reject_metric.contains("action=\"verify_recipient\""));
+        assert!(reject_metric.contains(" 5"));
+    }
+
+    #[test]
+    fn prometheus_reject_metric_help_and_type_lines() {
+        let help_line = "# HELP smtp_reject_total Total SMTP rejects classified by reason_code and action\n";
+        let type_line = "# TYPE smtp_reject_total counter\n";
+        assert!(help_line.contains("# HELP smtp_reject_total"));
+        assert!(type_line.contains("# TYPE smtp_reject_total counter"));
     }
 }

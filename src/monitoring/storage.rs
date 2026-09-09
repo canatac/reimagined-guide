@@ -27,6 +27,7 @@ pub async fn ensure_indexes(client: &Client) {
         IndexModel::builder().keys(doc! { "smtp_code": 1, "ts": -1 }).build(),
         IndexModel::builder().keys(doc! { "correlation_id": 1 }).build(),
         IndexModel::builder().keys(doc! { "risk_score": -1, "ts": -1 }).build(),
+        IndexModel::builder().keys(doc! { "reject_reason_code": 1, "ts": -1 }).build(),
     ];
     for idx in indexes {
         if let Err(e) = coll.create_index(idx).await {
