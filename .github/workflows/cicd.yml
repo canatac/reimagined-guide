@@ -28,6 +28,11 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install system dependencies (pkg-config, OpenSSL)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libssl-dev
+
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
