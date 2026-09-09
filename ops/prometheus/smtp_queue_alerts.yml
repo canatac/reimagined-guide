@@ -1,0 +1,68 @@
+# Prometheus Alert Rules for SMTP Queue Monitoring
+# Issue #436: SMTP queue depth Prometheus metrics
+#
+# These rules should be placed in your Prometheus configuration
+# (e.g., /etc/prometheus/alerts/smtp_queue.yml)
+
+groups:
+  - name: smtp_queue_alerts
+    interval: 30s
+    rules:
+      # Alert when queue depth exceeds threshold for 5 minutes
+      - alert: SmtpQueueDepthHigh
+        expr: smtp_queue_depth > 50
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "SMTP queue depth is high ({{ $value }} messages)"
+          description: "The SMTP send queue has more than 50 messages for 5 minutes. Consider scaling workers or investigating delivery delays."
+
+      # Alert when queue depth is critically high
+      - alert: SmtpQueueDepthCritical
+        expr: smtp_queue_depth > 200
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "SMTP queue depth is critically high ({{ $value }} messages)"
+          description: "The SMTP send queue has more than 200 messages for 2 minutes. Immediate action required."
+
+      # Alert when oldest message has been queued for too long
+      - alert: SmtpQueueLatencyHigh
+        expr: smtp_queue_latency_ms > 300000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "SMTP queue latency is high ({{ $value | humanizeDuration }})"
+          description: "The oldest message in the queue has been waiting for more than 5 minutes."
+
+      # Alert when sending status count is high (potential bottleneck)
+      - alert: SmtpQueueSendingHigh
+        expr: smtp_queue_depth_by_status{status="sending"} > 10
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Many messages in sending state ({{ $value }})"
+          description: "More than 10 messages are in 'sending' state for 10 minutes. Possible SMTP server bottleneck."
+
+      # Alert when failed count is increasing
+      - alert: SmtpQueueFailedIncreasing
+        expr: rate(smtp_queue_depth_by_status{status="failed"}[15m]) > 0.1
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "SMTP queue failed messages increasing"
+          description: "Failed messages in queue are increasing. Check SMTP server health."
+
+# Example Prometheus scrape_config to add to your prometheus.yml:
+#
+# scrape_configs:
+#   - job_name: 'smtp-server'
+#     static_configs:
+#       - targets: ['localhost:8000']
+#     metrics_path: '/api/monitoring/metrics'
+#     scrape_interval: 15s

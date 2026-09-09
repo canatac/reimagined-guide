@@ -2,10 +2,12 @@
 // Public API preserved via `pub use` re-exports; parent uses `pub use monitoring_handlers::*`.
 
 mod monitoring;
+mod prometheus;
 mod security;
 mod shared;
 
 pub(crate) use monitoring::*;
+pub(crate) use prometheus::*;
 pub(crate) use security::*;
 #[allow(unused_imports)]
 pub(crate) use shared::*;
