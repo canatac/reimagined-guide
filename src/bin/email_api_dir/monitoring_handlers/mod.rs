@@ -6,10 +6,12 @@ mod prometheus;
 mod dashboard;
 mod security;
 mod shared;
+mod tls_rpt;
 
 pub(crate) use monitoring::*;
 pub(crate) use prometheus::*;
 pub(crate) use dashboard::*;
 pub(crate) use security::*;
+pub(crate) use tls_rpt::*;
 #[allow(unused_imports)]
 pub(crate) use shared::*;
