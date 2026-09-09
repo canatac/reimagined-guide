@@ -7,7 +7,7 @@
 //! 3. Enforce TLS when policy mode = `enforce` or `testing`
 //! 4. Generate TLS-RPT reports for failures
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
