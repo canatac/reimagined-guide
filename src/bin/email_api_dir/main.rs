@@ -64,6 +64,7 @@ mod mailing_list;
 mod dkim_service;
 mod startup;
 mod startup_routes;
+mod incoming_webhook_handlers;
 // Temporarily disabled in strict clippy hard-gate mode; dedicated integration
 // coverage lives in src/bin/email_api_dir/main_tests/** harness files.
 // #[cfg(test)]
@@ -76,6 +77,7 @@ use helpers::{normalize_segment, build_misfits_local, normalize_oauth_provider, 
 
 pub use auth_handlers::*;
 pub use monitoring_handlers::*;
+pub use incoming_webhook_handlers::*;
 pub use mailbox::*;
 pub use admin_ops::*;
 pub use external_handlers::*;
@@ -214,6 +216,9 @@ async fn main() -> std::io::Result<()> {
     let http_mongo = mongo_data.clone();
     let http_event_bus = event_bus.clone();
     let http_external_imap = external_imap_service.clone();
+    let http_incoming_webhook = web::Data::new(IncomingWebhookState {
+        registry: Arc::new(simple_smtp_server::incoming_webhook::IncomingWebhookRegistry::new()),
+    });
     let http_addr = env::var("API_SERVER_ADDR").unwrap_or_else(|_| "0.0.0.0:8000".to_string());
     let http_server = actix_web::rt::spawn(async move {
         let server = HttpServer::new(move || {
@@ -223,6 +228,7 @@ async fn main() -> std::io::Result<()> {
                 .app_data(http_mongo.clone())
                 .app_data(http_event_bus.clone())
                 .app_data(http_external_imap.clone())
+                .app_data(http_incoming_webhook.clone())
                 .configure(startup::register_http_routes)
         })
         .bind(http_addr.clone());

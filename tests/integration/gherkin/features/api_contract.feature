@@ -24,3 +24,23 @@ Feature: reimagined-guide API/UI contract integrity
     Given the source file "src/bin/email_api_dir/main_tests/dkim.rs" is loaded
     When I inspect the send email assertions
     Then the test should assert successful response status
+
+  Scenario: TLS-RPT aggregation module exposes report ingestion endpoint
+    Given the source file "src/monitoring/mod.rs" is loaded
+    When I inspect declared monitoring routes
+    Then POST /api/v1/tls-rpt/reports endpoint must exist
+
+  Scenario: DMARC aggregate report parsing exposes stats endpoint
+    Given the source file "src/monitoring/dmarc.rs" is loaded
+    When I inspect declared DMARC routes
+    Then GET /api/v1/dmarc/stats endpoint must exist
+
+  Scenario: Send Later feature exposes scheduled send endpoint
+    Given the source file "src/bin/email_api_dir/startup_routes/mailbox.rs" is loaded
+    When I inspect declared API routes
+    Then POST /api/v1/drafts/schedule endpoint must exist for delayed sending
+
+  Scenario: GDPR data minimization — user data export endpoint exists
+    Given the source file "src/bin/email_api_dir/startup_routes/" directory is loaded
+    When I inspect declared API routes
+    Then GET /api/v1/user/export endpoint must exist for data portability
