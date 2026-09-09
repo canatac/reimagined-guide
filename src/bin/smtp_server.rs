@@ -165,10 +165,32 @@ fn format_cluster_uri(cluster_url: &str, username: &str, password: &str, app_nam
     )
 }
 async fn init_mongo_client(client_uri: &str) -> Result<Arc<mongodb::Client>, MainError> {
-    let client = mongodb::Client::with_uri_str(client_uri)
-        .await
+    let options = build_mongo_options(client_uri).await.map_err(|e| MainError(format!("MongoDB options parse failed: {e}")))?;
+    let client = mongodb::Client::with_options(options)
         .map_err(|e| MainError(format!("MongoDB client initialization failed: {e}")))?;
     Ok(Arc::new(client))
+}
+
+/// Build MongoDB client options with connection pool configuration.
+async fn build_mongo_options(client_uri: &str) -> Result<mongodb::options::ClientOptions, mongodb::error::Error> {
+    let mut options = mongodb::options::ClientOptions::parse(client_uri).await?;
+    let max_pool_size = std::env::var("MONGODB_MAX_POOL_SIZE")
+        .ok().and_then(|s| s.parse::<u32>().ok()).unwrap_or(50);
+    let min_pool_size = std::env::var("MONGODB_MIN_POOL_SIZE")
+        .ok().and_then(|s| s.parse::<u32>().ok()).unwrap_or(10);
+    let max_idle_time_ms = std::env::var("MONGODB_MAX_IDLE_TIME_MS")
+        .ok().and_then(|s| s.parse::<u64>().ok()).unwrap_or(60000);
+    let wait_queue_timeout_ms = std::env::var("MONGODB_WAIT_QUEUE_TIMEOUT_MS")
+        .ok().and_then(|s| s.parse::<u64>().ok()).unwrap_or(5000);
+
+    options.max_pool_size = Some(max_pool_size);
+    options.min_pool_size = Some(min_pool_size);
+    options.max_idle_time = Some(std::time::Duration::from_millis(max_idle_time_ms));
+    options.wait_queue_timeout = Some(std::time::Duration::from_millis(wait_queue_timeout_ms));
+    options.connect_timeout = Some(std::time::Duration::from_secs(10));
+    options.heartbeat_freq = Some(std::time::Duration::from_secs(10));
+
+    Ok(options)
 }
 async fn warmup_mongo_if_enabled(client: &mongodb::Client, use_mongodb: bool) {
     if !use_mongodb {

@@ -33,7 +33,27 @@ async fn main() -> std::io::Result<()> {
         )
     };
 
-    let client = Arc::new(mongodb::Client::with_uri_str(&client_uri).await.unwrap());
+    let client = Arc::new(
+        mongodb::options::ClientOptions::parse(&client_uri)
+            .await
+            .map(|mut opts| {
+                opts.max_pool_size = std::env::var("MONGODB_MAX_POOL_SIZE").ok().and_then(|s| s.parse::<u32>().ok()).or(Some(50));
+                opts.min_pool_size = std::env::var("MONGODB_MIN_POOL_SIZE").ok().and_then(|s| s.parse::<u32>().ok()).or(Some(10));
+                opts.max_idle_time = Some(std::time::Duration::from_millis(
+                    std::env::var("MONGODB_MAX_IDLE_TIME_MS").ok().and_then(|s| s.parse::<u64>().ok()).unwrap_or(60000),
+                ));
+                opts.wait_queue_timeout = Some(std::time::Duration::from_millis(
+                    std::env::var("MONGODB_WAIT_QUEUE_TIMEOUT_MS").ok().and_then(|s| s.parse::<u64>().ok()).unwrap_or(5000),
+                ));
+                opts.connect_timeout = Some(std::time::Duration::from_secs(10));
+                opts.heartbeat_freq = Some(std::time::Duration::from_secs(10));
+                opts
+            })
+            .and_then(|opts| mongodb::Client::with_options(opts))
+            .or_else(|_| mongodb::Client::with_uri_str(&client_uri))
+            .await
+            .unwrap(),
+    );
 
     // Warm-up: force DNS resolution + TLS handshake + MongoDB handshake at startup
     // so the first user login is not delayed by 10-30s.

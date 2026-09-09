@@ -126,7 +126,6 @@ mod tests {
 
     #[test]
     fn prometheus_format_includes_help_and_type_lines() {
-        // Verify the expected format structure
         let queue_depth = 5u64;
         let queue_latency_ms = 30000u64;
         let metrics = format!(
@@ -167,7 +166,6 @@ mod tests {
 
     #[test]
     fn prometheus_format_includes_reject_taxonomy_metric() {
-        // Verify the reject taxonomy metric format
         let reason_code = "SMTP_REJECT_INVALID_RECIPIENT";
         let action = "verify_recipient";
         let count = 5i64;

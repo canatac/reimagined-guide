@@ -33,6 +33,10 @@ pub(crate) fn register_diag_routes(cfg: &mut web::ServiceConfig) {
             web::get().to(api_monitoring_alerts_active),
         )
         .route(
+            "/api/monitoring/mongo-health",
+            web::get().to(api_monitoring_mongo_health),
+        )
+        .route(
             "/api/security/alerts/active",
             web::get().to(api_security_alerts_active),
         )
