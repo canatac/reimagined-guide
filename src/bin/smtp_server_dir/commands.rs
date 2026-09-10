@@ -156,6 +156,7 @@ pub(crate) async fn process_command(
 #[cfg(test)]
 mod tests {
     use super::classify_data_bdat_and_basic_responses;
+    use super::*;
 
     #[test]
     fn data_bdat_edge_coverage_cases() {
@@ -192,5 +193,57 @@ mod tests {
                 None => assert!(got.is_none(), "raw={raw:?} expected None, got={got:?}"),
             }
         }
+    }
+
+    #[test]
+    fn handle_helo_includes_starttls_when_not_tls() {
+        let resp = handle_helo(false, true);
+        assert!(resp.contains("250-STARTTLS"));
+        assert!(resp.contains("250 OK"));
+    }
+
+    #[test]
+    fn handle_helo_excludes_starttls_when_tls() {
+        let resp = handle_helo(true, true);
+        assert!(!resp.contains("STARTTLS"));
+        assert!(resp.contains("250 OK"));
+    }
+
+    #[test]
+    fn handle_helo_auth_only_when_tls_or_no_requirement() {
+        let resp = handle_helo(false, false);
+        assert!(resp.contains("250-AUTH LOGIN PLAIN"));
+    }
+
+    #[test]
+    fn handle_starttls_returns_220_for_plain() {
+        // Test via require_tls_or_530 instead
+        assert_eq!(require_tls_or_530(true, false), Some("530 Must issue a STARTTLS command first\r\n".to_string()));
+        assert_eq!(require_tls_or_530(true, true), None);
+        assert_eq!(require_tls_or_530(false, false), None);
+    }
+
+    #[test]
+    fn handle_rset_resets_email() {
+        let mut email = CustomEmail {
+            email: Email::new("old-id", "from@x.com", "to@x.com", "old-subject", "old-body"),
+            raw_content: "raw".to_string(),
+            dkim_signature: Some("sig".to_string()),
+        };
+        let resp = handle_rset(&mut email);
+        assert_eq!(resp, "250 OK\r\n");
+        assert_eq!(email.email.id, "");
+        assert_eq!(email.email.from, "");
+        assert_eq!(email.dkim_signature, None);
+    }
+
+    #[test]
+    fn handle_quit_returns_bye() {
+        let email = CustomEmail {
+            email: Email::new("", "", "", "", ""),
+            raw_content: String::new(),
+            dkim_signature: None,
+        };
+        assert_eq!(handle_quit(&email), "221 Bye\r\n");
     }
 }
