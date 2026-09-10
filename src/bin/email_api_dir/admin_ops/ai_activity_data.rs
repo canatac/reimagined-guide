@@ -159,6 +159,182 @@ pub(crate) fn round6(v: f64) -> f64 {
     (v * 1_000_000.0).round() / 1_000_000.0
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn doc_str_returns_string_value() {
+        let mut doc = bson::Document::new();
+        doc.insert("name", "test_value");
+        assert_eq!(doc_str(&doc, "name"), Some("test_value".to_string()));
+    }
+
+    #[test]
+    fn doc_str_returns_none_for_missing() {
+        let doc = bson::Document::new();
+        assert_eq!(doc_str(&doc, "missing"), None);
+    }
+
+    #[test]
+    fn doc_i64_int32() {
+        let mut doc = bson::Document::new();
+        doc.insert("val", 42i32);
+        assert_eq!(doc_i64(&doc, "val"), 42);
+    }
+
+    #[test]
+    fn doc_i64_int64() {
+        let mut doc = bson::Document::new();
+        doc.insert("val", 999i64);
+        assert_eq!(doc_i64(&doc, "val"), 999);
+    }
+
+    #[test]
+    fn doc_i64_double() {
+        let mut doc = bson::Document::new();
+        doc.insert("val", 3.14f64);
+        assert_eq!(doc_i64(&doc, "val"), 3);
+    }
+
+    #[test]
+    fn doc_i64_string_parses() {
+        let mut doc = bson::Document::new();
+        doc.insert("val", "123");
+        assert_eq!(doc_i64(&doc, "val"), 123);
+    }
+
+    #[test]
+    fn doc_i64_string_invalid_fallback() {
+        let mut doc = bson::Document::new();
+        doc.insert("val", "not_a_number");
+        assert_eq!(doc_i64(&doc, "val"), 0);
+    }
+
+    #[test]
+    fn doc_i64_missing_returns_zero() {
+        let doc = bson::Document::new();
+        assert_eq!(doc_i64(&doc, "missing"), 0);
+    }
+
+    #[test]
+    fn parse_env_f64_valid() {
+        std::env::set_var("TEST_F64", "3.14");
+        assert_eq!(parse_env_f64("TEST_F64"), Some(3.14));
+        std::env::remove_var("TEST_F64");
+    }
+
+    #[test]
+    fn parse_env_f64_invalid() {
+        std::env::set_var("TEST_F64", "not_a_number");
+        assert_eq!(parse_env_f64("TEST_F64"), None);
+        std::env::remove_var("TEST_F64");
+    }
+
+    #[test]
+    fn parse_env_f64_negative() {
+        std::env::set_var("TEST_F64", "-1.0");
+        assert_eq!(parse_env_f64("TEST_F64"), None);
+        std::env::remove_var("TEST_F64");
+    }
+
+    #[test]
+    fn parse_env_f64_infinite() {
+        std::env::set_var("TEST_F64", "inf");
+        assert_eq!(parse_env_f64("TEST_F64"), None);
+        std::env::remove_var("TEST_F64");
+    }
+
+    #[test]
+    fn parse_env_f64_unset() {
+        std::env::remove_var("TEST_UNSET_F64");
+        assert_eq!(parse_env_f64("TEST_UNSET_F64"), None);
+    }
+
+    #[test]
+    fn parse_pricing_overrides_json_valid() {
+        std::env::set_var("LLM_COST_MODEL_OVERRIDES_JSON", r#"{"model1":{"input":1.0,"output":2.0}}"#);
+        let map = parse_pricing_overrides_json();
+        assert!(map.contains_key("model1"));
+        let rate = map.get("model1").unwrap();
+        assert_eq!(rate.input_per_1m_usd, 1.0);
+        assert_eq!(rate.output_per_1m_usd, 2.0);
+        std::env::remove_var("LLM_COST_MODEL_OVERRIDES_JSON");
+    }
+
+    #[test]
+    fn parse_pricing_overrides_json_empty() {
+        std::env::remove_var("LLM_COST_MODEL_OVERRIDES_JSON");
+        let map = parse_pricing_overrides_json();
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn parse_pricing_overrides_json_invalid() {
+        std::env::set_var("LLM_COST_MODEL_OVERRIDES_JSON", "not json");
+        let map = parse_pricing_overrides_json();
+        assert!(map.is_empty());
+        std::env::remove_var("LLM_COST_MODEL_OVERRIDES_JSON");
+    }
+
+    #[test]
+    fn default_pricing_rate_zero() {
+        std::env::remove_var("LLM_COST_DEFAULT_INPUT_PER_1M_USD");
+        std::env::remove_var("LLM_COST_DEFAULT_OUTPUT_PER_1M_USD");
+        let rate = default_pricing_rate();
+        assert_eq!(rate.input_per_1m_usd, 0.0);
+        assert_eq!(rate.output_per_1m_usd, 0.0);
+    }
+
+    #[test]
+    fn parse_openrouter_token_price_valid() {
+        assert_eq!(parse_openrouter_token_price_to_per_1m(Some("0.000001")), Some(1.0));
+    }
+
+    #[test]
+    fn parse_openrouter_token_price_none() {
+        assert_eq!(parse_openrouter_token_price_to_per_1m(None), None);
+    }
+
+    #[test]
+    fn parse_openrouter_token_price_empty() {
+        assert_eq!(parse_openrouter_token_price_to_per_1m(Some("")), None);
+    }
+
+    #[test]
+    fn parse_openrouter_token_price_negative() {
+        assert_eq!(parse_openrouter_token_price_to_per_1m(Some("-0.001")), None);
+    }
+
+    #[test]
+    fn resolve_pricing_rate_override() {
+        let default = PricingRate { input_per_1m_usd: 1.0, output_per_1m_usd: 2.0 };
+        let mut overrides = HashMap::new();
+        overrides.insert("model1".to_string(), PricingRate { input_per_1m_usd: 5.0, output_per_1m_usd: 10.0 });
+        let (rate, source) = resolve_pricing_rate("model1", &HashMap::new(), &overrides, default);
+        assert_eq!(rate.input_per_1m_usd, 5.0);
+        assert_eq!(source, "model_override");
+    }
+
+    #[test]
+    fn resolve_pricing_rate_openrouter() {
+        let default = PricingRate { input_per_1m_usd: 1.0, output_per_1m_usd: 2.0 };
+        let mut openrouter = HashMap::new();
+        openrouter.insert("model1".to_string(), PricingRate { input_per_1m_usd: 3.0, output_per_1m_usd: 4.0 });
+        let (rate, source) = resolve_pricing_rate("model1", &openrouter, &HashMap::new(), default);
+        assert_eq!(rate.input_per_1m_usd, 3.0);
+        assert_eq!(source, "openrouter");
+    }
+
+    #[test]
+    fn resolve_pricing_rate_default() {
+        let default = PricingRate { input_per_1m_usd: 1.0, output_per_1m_usd: 2.0 };
+        let (rate, source) = resolve_pricing_rate("unknown", &HashMap::new(), &HashMap::new(), default);
+        assert_eq!(rate.input_per_1m_usd, 1.0);
+        assert_eq!(source, "default");
+    }
+}
+
 pub(crate) async fn load_ai_activity_runs(
     client: &mongodb::Client,
     limit: u32,
