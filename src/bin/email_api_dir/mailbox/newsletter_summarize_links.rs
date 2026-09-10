@@ -16,6 +16,55 @@ pub(crate) fn is_html_payload(content_type: &str, raw_body: &str) -> bool {
     content_type.contains("text/html") || raw_body.to_ascii_lowercase().contains("<html")
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_plain_text_collapses_whitespace() {
+        assert_eq!(normalize_plain_text("hello   world"), "hello world");
+        assert_eq!(normalize_plain_text("  a  b  c  "), "a b c");
+    }
+
+    #[test]
+    fn normalize_plain_text_handles_empty() {
+        assert_eq!(normalize_plain_text(""), "");
+    }
+
+    #[test]
+    fn truncate_chars_within_limit() {
+        assert_eq!(truncate_chars("hello", 10), "hello");
+    }
+
+    #[test]
+    fn truncate_chars_exceeds_limit() {
+        assert_eq!(truncate_chars("hello world", 5), "hello");
+    }
+
+    #[test]
+    fn truncate_chars_unicode() {
+        let result = truncate_chars("héllo wörld", 5);
+        assert_eq!(result, "héllo");
+    }
+
+    #[test]
+    fn is_html_payload_content_type() {
+        assert!(is_html_payload("text/html; charset=utf-8", "plain"));
+        assert!(is_html_payload("TEXT/HTML", "plain"));
+    }
+
+    #[test]
+    fn is_html_payload_body() {
+        assert!(is_html_payload("text/plain", "<html><body>Hi</body></html>"));
+        assert!(is_html_payload("text/plain", "<HTML>"));
+    }
+
+    #[test]
+    fn is_html_payload_false() {
+        assert!(!is_html_payload("text/plain", "plain text"));
+    }
+}
+
 fn normalize_discovered_link(base_url: &str, candidate: &str) -> Option<String> {
     let raw = candidate
         .trim()
