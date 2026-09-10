@@ -47,6 +47,84 @@ fn kind_matches(content_type: &str, filename: &str, content_type_hints: &[&str],
             .any(|extension| filename.ends_with(extension))
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn infer_attachment_kind_image() {
+        assert_eq!(infer_attachment_kind("image/png", "photo.png"), "image");
+        assert_eq!(infer_attachment_kind("image/jpeg", "photo.jpg"), "image");
+    }
+
+    #[test]
+    fn infer_attachment_kind_audio() {
+        assert_eq!(infer_attachment_kind("audio/mpeg", "song.mp3"), "audio");
+    }
+
+    #[test]
+    fn infer_attachment_kind_video() {
+        assert_eq!(infer_attachment_kind("video/mp4", "video.mp4"), "video");
+    }
+
+    #[test]
+    fn infer_attachment_kind_pdf() {
+        assert_eq!(infer_attachment_kind("application/pdf", "doc.pdf"), "pdf");
+        assert_eq!(infer_attachment_kind("application/octet-stream", "doc.pdf"), "pdf");
+    }
+
+    #[test]
+    fn infer_attachment_kind_doc() {
+        assert_eq!(infer_attachment_kind("application/msword", "doc.doc"), "doc");
+        assert_eq!(infer_attachment_kind("application/vnd.openxmlformats-officedocument.wordprocessingml.document", "doc.docx"), "doc");
+    }
+
+    #[test]
+    fn infer_attachment_kind_spreadsheet() {
+        assert_eq!(infer_attachment_kind("application/vnd.ms-excel", "data.xls"), "spreadsheet");
+        assert_eq!(infer_attachment_kind("text/csv", "data.csv"), "spreadsheet");
+    }
+
+    #[test]
+    fn infer_attachment_kind_presentation() {
+        assert_eq!(infer_attachment_kind("application/vnd.ms-powerpoint", "slides.ppt"), "presentation");
+    }
+
+    #[test]
+    fn infer_attachment_kind_archive() {
+        assert_eq!(infer_attachment_kind("application/zip", "file.zip"), "archive");
+        assert_eq!(infer_attachment_kind("application/gzip", "file.tar.gz"), "archive");
+    }
+
+    #[test]
+    fn infer_attachment_kind_other() {
+        assert_eq!(infer_attachment_kind("text/plain", "file.txt"), "other");
+        assert_eq!(infer_attachment_kind("application/octet-stream", "file.bin"), "other");
+    }
+
+    #[test]
+    fn media_kind_audio_video() {
+        assert_eq!(media_kind("audio/mpeg"), Some("audio"));
+        assert_eq!(media_kind("video/mp4"), Some("video"));
+        assert_eq!(media_kind("image/png"), None);
+    }
+
+    #[test]
+    fn kind_matches_content_type_hint() {
+        assert!(kind_matches("application/pdf", "file", &["application/pdf"], &[".pdf"]));
+    }
+
+    #[test]
+    fn kind_matches_extension_hint() {
+        assert!(kind_matches("application/octet-stream", "report.pdf", &[], &[".pdf"]));
+    }
+
+    #[test]
+    fn kind_matches_no_match() {
+        assert!(!kind_matches("text/plain", "file.txt", &["application/pdf"], &[".pdf"]));
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct ExtractedAttachment {
     pub id: String,
