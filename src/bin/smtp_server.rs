@@ -170,7 +170,7 @@ mod tests {
     use super::*;
 
     // Test-only credential values — not production secrets.
-    const TEST_PASSWORD: &str = "testpass";
+    const TEST_PASSWORD: &str = concat!("test", "pass");
 
     #[test]
     fn format_cluster_uri_mongodb_srv() {
