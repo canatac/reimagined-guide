@@ -4,6 +4,7 @@
 // "scheduled" status with retry/exponential backoff).
 #![allow(unused_imports)]
 use super::*;
+use futures_util::TryStreamExt;
 
 #[derive(Deserialize)]
 pub(crate) struct ScheduleDraftRequest {
