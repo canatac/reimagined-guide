@@ -201,5 +201,5 @@ mod import_wizard;
 pub use import_wizard::{
     autodiscover, preset_for, validate_credentials, AutodiscoverResult,
     ImportWizardPreset, ProviderPreset, SmtpPreset, WizardCredentialsInput,
-    WizardPresetInput, WizardValidationResult,
+    WizardValidationResult,
 };

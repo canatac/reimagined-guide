@@ -209,7 +209,7 @@ pub fn validate_credentials(input: &WizardCredentialsInput) -> WizardValidationR
     ) {
         Ok((greeting, capabilities, folders)) => WizardValidationResult {
             ok: true,
-            if folders.is_empty() {
+            message: if folders.is_empty() {
                 "Connected. Login successful (no folders listed).".into()
             } else {
                 format!("Connected. Login successful, {} folder(s).", folders.len())
