@@ -133,6 +133,53 @@ fn default_analytics_days() -> u32 {
     30
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn personal_analytics_query_default_days() {
+        let json = serde_json::json!({});
+        let query: PersonalAnalyticsQuery = serde_json::from_value(json).unwrap();
+        assert_eq!(query.days, 30);
+    }
+
+    #[test]
+    fn personal_analytics_query_custom_days() {
+        let json = serde_json::json!({ "days": 7 });
+        let query: PersonalAnalyticsQuery = serde_json::from_value(json).unwrap();
+        assert_eq!(query.days, 7);
+    }
+
+    #[test]
+    fn email_list_query_defaults() {
+        let json = serde_json::json!({});
+        let query: EmailListQuery = serde_json::from_value(json).unwrap();
+        assert_eq!(query.folder, "inbox");
+        assert_eq!(query.page, 1);
+        assert_eq!(query.page_size, 50);
+    }
+
+    #[test]
+    fn email_list_query_custom() {
+        let json = serde_json::json!({
+            "folder": "sent",
+            "page": 2,
+            "pageSize": 25
+        });
+        let query: EmailListQuery = serde_json::from_value(json).unwrap();
+        assert_eq!(query.folder, "sent");
+        assert_eq!(query.page, 2);
+        assert_eq!(query.page_size, 25);
+    }
+
+    #[test]
+    fn default_analytics_days_is_30() {
+        assert_eq!(default_analytics_days(), 30);
+    }
+}
+
+
 pub(crate) async fn api_personal_analytics(
     query: web::Query<PersonalAnalyticsQuery>,
     req: actix_web::HttpRequest,
