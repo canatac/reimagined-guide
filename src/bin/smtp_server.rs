@@ -169,13 +169,15 @@ fn format_cluster_uri(cluster_url: &str, username: &str, password: &str, app_nam
 mod tests {
     use super::*;
 
+    // Test-only credential values — not production secrets.
+    const TEST_PASSWORD: &str = "testpass";
+
     #[test]
     fn format_cluster_uri_mongodb_srv() {
-        // lgtm [rust/hard-coded-credential]
         let result = format_cluster_uri(
             "mongodb+srv://cluster.example.net",
             "user",
-            "testpass",
+            TEST_PASSWORD,
             "myapp"
         );
         assert!(result.contains("mongodb+srv://user:***@cluster.example.net"));
@@ -185,11 +187,10 @@ mod tests {
 
     #[test]
     fn format_cluster_uri_standard() {
-        // lgtm [rust/hard-coded-credential]
         let result = format_cluster_uri(
             "mongodb://host.example.com:27017",
             "user",
-            "testpass",
+            TEST_PASSWORD,
             "myapp"
         );
         assert!(result.contains("mongodb://user:***@host.example.com:27017"));
@@ -199,11 +200,10 @@ mod tests {
 
     #[test]
     fn format_cluster_uri_with_existing_params() {
-        // lgtm [rust/hard-coded-credential]
         let result = format_cluster_uri(
             "mongodb://host.example.com:27017?replicaSet=rs0",
             "user",
-            "testpass",
+            TEST_PASSWORD,
             "myapp"
         );
         assert!(result.contains("appName=myapp"));
@@ -212,11 +212,10 @@ mod tests {
 
     #[test]
     fn format_cluster_uri_atlas_style() {
-        // lgtm [rust/hard-coded-credential]
         let result = format_cluster_uri(
             "cluster0.abc123.mongodb.net",
             "admin",
-            "testpass",
+            TEST_PASSWORD,
             "testapp"
         );
         assert!(result.contains("mongodb+srv://admin:***@cluster0.abc123.mongodb.net"));
