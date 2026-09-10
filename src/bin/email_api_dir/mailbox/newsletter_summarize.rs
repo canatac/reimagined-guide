@@ -122,7 +122,7 @@ mod tests {
     }
 }
 
-#[path = "newsletter_summarize_links.rs"]\
+#[path = "newsletter_summarize_links.rs"]
 mod links;
 #[path = "newsletter_summarize_parsing.rs"]
 mod parsing;
