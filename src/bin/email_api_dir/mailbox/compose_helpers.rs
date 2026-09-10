@@ -93,6 +93,130 @@ pub(crate) fn canonical_message_id(raw: &str) -> Option<String> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_recipient_with_name() {
+        let r = ComposerRecipient { email: "alice@example.com".to_string(), name: Some("Alice".to_string()) };
+        assert_eq!(format_recipient(&r), Some("Alice <alice@example.com>".to_string()));
+    }
+
+    #[test]
+    fn format_recipient_without_name() {
+        let r = ComposerRecipient { email: "alice@example.com".to_string(), name: None };
+        assert_eq!(format_recipient(&r), Some("alice@example.com".to_string()));
+    }
+
+    #[test]
+    fn format_recipient_empty_email() {
+        let r = ComposerRecipient { email: "".to_string(), name: Some("Alice".to_string()) };
+        assert_eq!(format_recipient(&r), None);
+    }
+
+    #[test]
+    fn format_recipient_whitespace_name() {
+        let r = ComposerRecipient { email: "alice@example.com".to_string(), name: Some("   ".to_string()) };
+        assert_eq!(format_recipient(&r), Some("alice@example.com".to_string()));
+    }
+
+    #[test]
+    fn format_recipient_trims_email() {
+        let r = ComposerRecipient { email: "  alice@example.com  ".to_string(), name: None };
+        assert_eq!(format_recipient(&r), Some("alice@example.com".to_string()));
+    }
+
+    #[test]
+    fn join_recipients_empty() {
+        let list: Vec<ComposerRecipient> = vec![];
+        assert_eq!(join_recipients(&list), "");
+    }
+
+    #[test]
+    fn join_recipients_single() {
+        let list = vec![ComposerRecipient { email: "a@b.com".to_string(), name: None }];
+        assert_eq!(join_recipients(&list), "a@b.com");
+    }
+
+    #[test]
+    fn join_recipients_multiple() {
+        let list = vec![
+            ComposerRecipient { email: "a@b.com".to_string(), name: Some("A".to_string()) },
+            ComposerRecipient { email: "c@d.com".to_string(), name: None },
+        ];
+        assert_eq!(join_recipients(&list), "A <a@b.com>, c@d.com");
+    }
+
+    #[test]
+    fn join_recipients_skips_empty() {
+        let list = vec![
+            ComposerRecipient { email: "".to_string(), name: Some("A".to_string()) },
+            ComposerRecipient { email: "c@d.com".to_string(), name: None },
+        ];
+        assert_eq!(join_recipients(&list), "c@d.com");
+    }
+
+    #[test]
+    fn domain_from_env_default() {
+        std::env::remove_var("DOMAIN_NAME");
+        assert_eq!(domain_from_env(), "misfits.ai");
+    }
+
+    #[test]
+    fn domain_from_env_reads_env() {
+        std::env::set_var("DOMAIN_NAME", "custom.example.com");
+        assert_eq!(domain_from_env(), "custom.example.com");
+        std::env::remove_var("DOMAIN_NAME");
+    }
+
+    #[test]
+    fn from_address_for_user_with_at() {
+        assert_eq!(from_address_for_user("alice@example.com"), "alice@example.com");
+    }
+
+    #[test]
+    fn from_address_for_user_without_at() {
+        std::env::remove_var("DOMAIN_NAME");
+        assert_eq!(from_address_for_user("alice"), "alice@misfits.ai");
+    }
+
+    #[test]
+    fn normalize_message_id_strips_brackets() {
+        assert_eq!(normalize_message_id("<abc-123@example.com>"), "abc-123@example.com");
+    }
+
+    #[test]
+    fn normalize_message_id_no_brackets() {
+        assert_eq!(normalize_message_id("abc-123@example.com"), "abc-123@example.com");
+    }
+
+    #[test]
+    fn normalize_message_id_trims() {
+        assert_eq!(normalize_message_id("  <abc>  "), "abc");
+    }
+
+    #[test]
+    fn canonical_message_id_valid() {
+        assert_eq!(canonical_message_id("abc-123"), Some("<abc-123>".to_string()));
+    }
+
+    #[test]
+    fn canonical_message_id_strips_and_wraps() {
+        assert_eq!(canonical_message_id("<abc-123>"), Some("<abc-123>".to_string()));
+    }
+
+    #[test]
+    fn canonical_message_id_empty() {
+        assert_eq!(canonical_message_id(""), None);
+    }
+
+    #[test]
+    fn canonical_message_id_whitespace() {
+        assert_eq!(canonical_message_id("   "), None);
+    }
+}
+
 fn sanitize_filename(name: &str, fallback_index: usize) -> String {
     let cleaned = name
         .trim()
