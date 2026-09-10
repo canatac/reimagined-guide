@@ -197,9 +197,63 @@ mod folder_ops;
 mod sync_ops;
 mod message_ops;
 mod imap_client_ops;
-pub mod import_wizard;
+mod import_wizard;
 pub use import_wizard::{
     autodiscover, preset_for, validate_credentials, AutodiscoverResult,
     ImportWizardPreset, ProviderPreset, SmtpPreset, WizardCredentialsInput,
     WizardValidationResult,
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_rfc3339_as_bson_some() {
+        let result = parse_rfc3339_as_bson("2026-01-01T00:00:00Z");
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn parse_rfc3339_as_bson_none() {
+        let result = parse_rfc3339_as_bson("invalid");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn infer_role_inbox() {
+        assert_eq!(infer_role("INBOX"), "inbox");
+    }
+
+    #[test]
+    fn infer_role_sent() {
+        assert_eq!(infer_role("Sent Items"), "sent");
+    }
+
+    #[test]
+    fn infer_role_drafts() {
+        assert_eq!(infer_role("Drafts"), "drafts");
+    }
+
+    #[test]
+    fn infer_role_trash() {
+        assert_eq!(infer_role("Trash"), "trash");
+        assert_eq!(infer_role("Bin"), "trash");
+    }
+
+    #[test]
+    fn infer_role_spam() {
+        assert_eq!(infer_role("Spam"), "spam");
+        assert_eq!(infer_role("Junk"), "spam");
+    }
+
+    #[test]
+    fn infer_role_archive() {
+        assert_eq!(infer_role("Archive"), "archive");
+    }
+
+    #[test]
+    fn infer_role_custom() {
+        assert_eq!(infer_role("Custom Folder"), "custom");
+    }
+}
