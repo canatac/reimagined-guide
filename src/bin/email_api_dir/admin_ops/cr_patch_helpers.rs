@@ -69,6 +69,80 @@ pub(crate) fn set_run_id_if_present(item: &mut ChangeRequestItem, body: &PatchCh
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn set_run_id_if_present_valid() {
+        let mut item = ChangeRequestItem {
+            id: "cr_1".to_string(), title: "T".to_string(), problem: "P".to_string(),
+            desired_outcome: "D".to_string(), scope: "backend".to_string(),
+            priority: "P1".to_string(), status: "submitted".to_string(),
+            requested_by: "a".to_string(), linked_repo: "reimagined-guide".to_string(),
+            created_at: "2026-01-01".to_string(), updated_at: "2026-01-01".to_string(),
+            taken_in_charge_at: None, taken_in_charge_by: None, target_release_window: "next-72h".to_string(),
+            acceptance_criteria: vec![], workflow: vec![], workflow_events: vec![],
+            execution_state: "idle".to_string(), execution_run_id: None,
+            execution_started_at: None, execution_last_heartbeat_at: None,
+            execution_finished_at: None, execution_last_error: None, changelog_entry: None,
+        };
+        let body = PatchChangeRequestInputApi {
+            action: None, note: None, actor: None, title: None, problem: None,
+            desired_outcome: None, status: None, execution_run_id: Some("run-123".to_string()),
+            execution_error: None,
+        };
+        set_run_id_if_present(&mut item, &body);
+        assert_eq!(item.execution_run_id, Some("run-123".to_string()));
+    }
+
+    #[test]
+    fn set_run_id_if_present_empty() {
+        let mut item = ChangeRequestItem {
+            id: "cr_1".to_string(), title: "T".to_string(), problem: "P".to_string(),
+            desired_outcome: "D".to_string(), scope: "backend".to_string(),
+            priority: "P1".to_string(), status: "submitted".to_string(),
+            requested_by: "a".to_string(), linked_repo: "reimagined-guide".to_string(),
+            created_at: "2026-01-01".to_string(), updated_at: "2026-01-01".to_string(),
+            taken_in_charge_at: None, taken_in_charge_by: None, target_release_window: "next-72h".to_string(),
+            acceptance_criteria: vec![], workflow: vec![], workflow_events: vec![],
+            execution_state: "idle".to_string(), execution_run_id: None,
+            execution_started_at: None, execution_last_heartbeat_at: None,
+            execution_finished_at: None, execution_last_error: None, changelog_entry: None,
+        };
+        let body = PatchChangeRequestInputApi {
+            action: None, note: None, actor: None, title: None, problem: None,
+            desired_outcome: None, status: None, execution_run_id: Some("".to_string()),
+            execution_error: None,
+        };
+        set_run_id_if_present(&mut item, &body);
+        assert_eq!(item.execution_run_id, None);
+    }
+
+    #[test]
+    fn set_run_id_if_present_none() {
+        let mut item = ChangeRequestItem {
+            id: "cr_1".to_string(), title: "T".to_string(), problem: "P".to_string(),
+            desired_outcome: "D".to_string(), scope: "backend".to_string(),
+            priority: "P1".to_string(), status: "submitted".to_string(),
+            requested_by: "a".to_string(), linked_repo: "reimagined-guide".to_string(),
+            created_at: "2026-01-01".to_string(), updated_at: "2026-01-01".to_string(),
+            taken_in_charge_at: None, taken_in_charge_by: None, target_release_window: "next-72h".to_string(),
+            acceptance_criteria: vec![], workflow: vec![], workflow_events: vec![],
+            execution_state: "idle".to_string(), execution_run_id: None,
+            execution_started_at: None, execution_last_heartbeat_at: None,
+            execution_finished_at: None, execution_last_error: None, changelog_entry: None,
+        };
+        let body = PatchChangeRequestInputApi {
+            action: None, note: None, actor: None, title: None, problem: None,
+            desired_outcome: None, status: None, execution_run_id: None,
+            execution_error: None,
+        };
+        set_run_id_if_present(&mut item, &body);
+        assert_eq!(item.execution_run_id, None);
+    }
+}
+
 pub(crate) fn apply_execution_action(
     item: &mut ChangeRequestItem,
     action: &str,
