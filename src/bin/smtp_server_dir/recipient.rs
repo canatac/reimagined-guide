@@ -44,3 +44,88 @@ pub(crate) fn recipient_local_part(raw_to: &str) -> Option<String> {
         None
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recipient_domain_simple() {
+        assert_eq!(recipient_domain("<EMAIL>"), Some("example.com".to_string()));
+    }
+
+    #[test]
+    fn recipient_domain_with_angle_brackets() {
+        assert_eq!(recipient_domain("<<EMAIL>>"), Some("example.com".to_string()));
+    }
+
+    #[test]
+    fn recipient_domain_with_display_name() {
+        assert_eq!(recipient_domain("John <<EMAIL>>"), Some("example.com".to_string()));
+    }
+
+    #[test]
+    fn recipient_domain_uppercase() {
+        assert_eq!(recipient_domain("<EMAIL>"), Some("example.com".to_string()));
+    }
+
+    #[test]
+    fn recipient_domain_trailing_dot() {
+        assert_eq!(recipient_domain("<EMAIL>."), Some("example.com".to_string()));
+    }
+
+    #[test]
+    fn recipient_domain_no_at() {
+        assert_eq!(recipient_domain("invalid"), None);
+    }
+
+    #[test]
+    fn recipient_domain_empty() {
+        assert_eq!(recipient_domain(""), None);
+    }
+
+    #[test]
+    fn is_local_recipient_misfits() {
+        assert!(is_local_recipient("<EMAIL>"));
+    }
+
+    #[test]
+    fn is_local_recipient_mail_misfits() {
+        assert!(is_local_recipient("<EMAIL>"));
+    }
+
+    #[test]
+    fn is_local_recipient_not_local() {
+        assert!(!is_local_recipient("<EMAIL>"));
+    }
+
+    #[test]
+    fn is_local_recipient_with_brackets() {
+        assert!(is_local_recipient("<<EMAIL>>"));
+    }
+
+    #[test]
+    fn recipient_local_part_misfits() {
+        assert_eq!(recipient_local_part("<EMAIL>"), Some("user".to_string()));
+    }
+
+    #[test]
+    fn recipient_local_part_mail_misfits() {
+        assert_eq!(recipient_local_part("<EMAIL>"), Some("user".to_string()));
+    }
+
+    #[test]
+    fn recipient_local_part_not_local() {
+        assert_eq!(recipient_local_part("<EMAIL>"), None);
+    }
+
+    #[test]
+    fn recipient_local_part_empty_local() {
+        assert_eq!(recipient_local_part("@misfits.ai"), None);
+    }
+
+    #[test]
+    fn recipient_local_part_with_brackets() {
+        assert_eq!(recipient_local_part("<<EMAIL>>"), Some("user".to_string()));
+    }
+}
