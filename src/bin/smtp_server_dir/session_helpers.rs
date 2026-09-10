@@ -59,6 +59,79 @@ pub(crate) fn use_mongodb_env() -> bool {
     env::var("USE_MONGODB").unwrap_or_else(|_| "false".to_string()) == "true"
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn use_mongodb_env_default_false() {
+        std::env::remove_var("USE_MONGODB");
+        assert!(!use_mongodb_env());
+    }
+
+    #[test]
+    fn use_mongodb_env_true() {
+        std::env::set_var("USE_MONGODB", "true");
+        assert!(use_mongodb_env());
+        std::env::remove_var("USE_MONGODB");
+    }
+
+    #[test]
+    fn use_mongodb_env_false_explicit() {
+        std::env::set_var("USE_MONGODB", "false");
+        assert!(!use_mongodb_env());
+        std::env::remove_var("USE_MONGODB");
+    }
+
+    #[test]
+    fn use_mongodb_env_invalid() {
+        std::env::set_var("USE_MONGODB", "yes");
+        assert!(!use_mongodb_env());
+        std::env::remove_var("USE_MONGODB");
+    }
+
+    #[test]
+    fn email_from_current_fields_propagated() {
+        let current = super::CustomEmail::default();
+        let email = email_from_current(&current);
+        assert_eq!(email.id, current.email.id);
+        assert_eq!(email.from, current.email.from);
+        assert_eq!(email.to, current.email.to);
+        assert_eq!(email.subject, current.email.subject);
+        assert_eq!(email.body, current.email.body);
+    }
+
+    #[test]
+    fn resolve_route_authenticated() {
+        let manager = SessionManager::new();
+        let session_id = manager.create_session("alice");
+        manager.set_mailbox(&session_id, "INBOX");
+        let result = resolve_route(Some(&session_id), &std::sync::Arc::new(manager), "bob@example.com");
+        assert!(result.is_some());
+        let (user, mbox) = result.unwrap();
+        assert_eq!(user, "alice");
+        assert_eq!(mbox, "INBOX");
+    }
+
+    #[test]
+    fn resolve_route_unauthenticated() {
+        use crate::smtp_server_dir::recipient::recipient_local_part;
+        let manager = std::sync::Arc::new(SessionManager::new());
+        let result = resolve_route(None, &manager, "alice@misfits.ai");
+        assert!(result.is_some());
+        let (user, mbox) = result.unwrap();
+        assert_eq!(user, "alice");
+        assert_eq!(mbox, "inbox");
+    }
+
+    #[test]
+    fn resolve_route_authenticated_no_session() {
+        let manager = std::sync::Arc::new(SessionManager::new());
+        let result = resolve_route(Some("nonexistent"), &manager, "alice@misfits.ai");
+        assert!(result.is_none());
+    }
+}
+
 /// Persiste + forward un mail via MongoDB. Écrit la réponse SMTP appropriée.
 pub(crate) async fn store_and_forward_mongo(
     stream: &mut StreamType,
