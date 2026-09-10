@@ -72,5 +72,17 @@ pub(crate) fn register_external_routes(cfg: &mut web::ServiceConfig) {
     .route(
         "/api/external-messages/{id}/action",
         web::post().to(api_external_message_action),
+    )
+    .route(
+        "/api/external-accounts/wizard/autodiscover",
+        web::post().to(api_wizard_autodiscover),
+    )
+    .route(
+        "/api/external-accounts/wizard/validate",
+        web::post().to(api_wizard_validate),
+    )
+    .route(
+        "/api/external-accounts/wizard/preset",
+        web::post().to(api_wizard_preset),
     );
 }
