@@ -4,7 +4,7 @@
 use chrono::Utc;
 use mongodb::bson::doc;
 
-use super::{ActiveAlert, AlertCtx};
+use super::{AlertConfig, ActiveAlert, AlertCtx};
 
 pub(super) async fn check_bounce_rate(ctx: &AlertCtx<'_>) -> Option<ActiveAlert> {
     let coll = ctx.events_coll();
@@ -238,4 +238,61 @@ pub(super) async fn check_reject_taxonomy_spikes(ctx: &AlertCtx<'_>) -> Vec<Acti
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn alert_config_default() {
+        let config = AlertConfig::default();
+        assert_eq!(config.bounce_rate_threshold, 0.1);
+        assert_eq!(config.p95_total_ms_threshold, 10_000);
+        assert_eq!(config.smtp_spike_threshold, 10);
+        assert!(config.forbidden_countries.is_empty());
+        assert!(config.forbidden_companies.is_empty());
+    }
+
+    #[test]
+    fn alert_config_custom_env() {
+        std::env::set_var("MONITORING_BOUNCE_RATE_THRESHOLD", "0.2");
+        std::env::set_var("MONITORING_P95_MS_THRESHOLD", "5000");
+        std::env::set_var("MONITORING_SMTP_SPIKE_THRESHOLD", "20");
+        std::env::set_var("MONITORING_FORBIDDEN_COUNTRIES", "CN,RU");
+        std::env::set_var("MONITORING_RISKY_COMPANIES", "BadISP,EvilHost");
+        std::env::set_var("MONITORING_UNDELIVERED_RATIO_THRESHOLD", "0.05");
+
+        let config = AlertConfig::default();
+        assert_eq!(config.bounce_rate_threshold, 0.2);
+        assert_eq!(config.p95_total_ms_threshold, 5000);
+        assert_eq!(config.smtp_spike_threshold, 20);
+        assert_eq!(config.forbidden_countries, vec!["CN".to_string(), "RU".to_string()]);
+        assert_eq!(config.forbidden_companies, vec!["BadISP".to_string(), "EvilHost".to_string()]);
+        assert_eq!(config.undelivered_ratio_threshold, 0.05);
+
+        std::env::remove_var("MONITORING_BOUNCE_RATE_THRESHOLD");
+        std::env::remove_var("MONITORING_P95_MS_THRESHOLD");
+        std::env::remove_var("MONITORING_SMTP_SPIKE_THRESHOLD");
+        std::env::remove_var("MONITORING_FORBIDDEN_COUNTRIES");
+        std::env::remove_var("MONITORING_RISKY_COMPANIES");
+        std::env::remove_var("MONITORING_UNDELIVERED_RATIO_THRESHOLD");
+    }
+
+    #[test]
+    fn active_alert_creation() {
+        let alert = ActiveAlert {
+            kind: "bounce_rate".into(),
+            severity: "high".into(),
+            message: "Bounce rate exceeded".into(),
+            value: serde_json::json!(0.15),
+            threshold: serde_json::json!(0.1),
+            ts: "2026-01-01T00:00:00Z".into(),
+        };
+        assert_eq!(alert.kind, "bounce_rate");
+        assert_eq!(alert.severity, "high");
+        assert!(alert.message.contains("Bounce rate"));
+        assert_eq!(alert.value, serde_json::json!(0.15));
+        assert_eq!(alert.threshold, serde_json::json!(0.1));
+    }
 }
