@@ -9,6 +9,37 @@ use std::sync::Arc;
 
 use super::shared::{SecurityAlertsQuery, SecurityIncidentsQuery};
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn security_alerts_query_deserializes() {
+        let json = serde_json::json!({ "severity": "high", "tenantId": "t1" });
+        let q: SecurityAlertsQuery = serde_json::from_value(json).unwrap();
+        assert_eq!(q.severity, Some("high".to_string()));
+        assert_eq!(q.tenant_id, Some("t1".to_string()));
+    }
+
+    #[test]
+    fn security_alerts_query_defaults() {
+        let json = serde_json::json!({});
+        let q: SecurityAlertsQuery = serde_json::from_value(json).unwrap();
+        assert_eq!(q.severity, None);
+        assert_eq!(q.tenant_id, None);
+    }
+
+    #[test]
+    fn security_incidents_query_deserializes() {
+        let json = serde_json::json!({ "severity": "critical", "tenantId": "t1", "page": 2, "pageSize": 10 });
+        let q: SecurityIncidentsQuery = serde_json::from_value(json).unwrap();
+        assert_eq!(q.severity, Some("critical".to_string()));
+        assert_eq!(q.tenant_id, Some("t1".to_string()));
+        assert_eq!(q.page, 2);
+        assert_eq!(q.page_size, 10);
+    }
+}
+
 pub(crate) async fn api_security_alerts_active(
     query: web::Query<SecurityAlertsQuery>,
     mongo: web::Data<Arc<mongodb::Client>>,
