@@ -14,6 +14,10 @@ pub(crate) fn register_external_routes(cfg: &mut web::ServiceConfig) {
         web::post().to(external_probe_handlers::api_external_probe_stream),
     )
     .route(
+        "/api/v1/import/configure",
+        web::post().to(api_import_configure),
+    )
+    .route(
         "/api/external-accounts",
         web::post().to(api_external_accounts_create),
     )
