@@ -158,8 +158,9 @@ pub(crate) async fn api_drafts_scheduled_list(
         .await
     {
         Ok(cursor) => {
+            let docs: Vec<bson::Document> = cursor.try_collect().await.unwrap_or_default();
             let mut entries: Vec<serde_json::Value> = Vec::new();
-            for mut doc in cursor.try_collect::<Vec<bson::Document>>().await.unwrap_or_default() {
+            for mut doc in docs {
                 doc.remove("_id");
                 doc.remove("user_id");
                 if let Ok(v) = bson::from_bson::<serde_json::Value>(bson::Bson::Document(doc)) {
