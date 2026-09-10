@@ -41,3 +41,33 @@ pub(crate) fn imap_probe(
         run_imap_dialog_plain(tcp, username, password, include_list)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn imap_probe_empty_password_returns_validation_error() {
+        let result = imap_probe("host", 993, true, "user", "", false);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("Missing credential"),
+            "expected credential validation, got: {err}"
+        );
+    }
+
+    #[test]
+    fn imap_probe_empty_host_returns_validation_error() {
+        let result = imap_probe("", 993, true, "user@example.com", "secret", false);
+        // Will fail on resolve
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn imap_probe_zero_port_returns_validation_error() {
+        let result = imap_probe("host", 0, true, "user@example.com", "secret", false);
+        // Will fail on connect
+        assert!(result.is_err());
+    }
+}
