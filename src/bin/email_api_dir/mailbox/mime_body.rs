@@ -62,6 +62,51 @@ pub(super) fn looks_like_raw_multipart_dump(body: &str) -> bool {
     b.starts_with("--") && b.contains("Content-Type:")
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compact_preview_joins_whitespace() {
+        assert_eq!(compact_preview("hello   world"), "hello world");
+        assert_eq!(compact_preview("  a  b  c  "), "a b c");
+    }
+
+    #[test]
+    fn compact_preview_handles_empty() {
+        assert_eq!(compact_preview(""), "");
+    }
+
+    #[test]
+    fn raw_mime_from_email_with_headers() {
+        let email = Email::new("id", "a@b.com", "c@d.com", "Subj", "Body");
+        let raw = raw_mime_from_email(&email);
+        assert!(raw.contains("Body"));
+    }
+
+    #[test]
+    fn raw_mime_from_email_no_headers() {
+        let email = Email::new("id", "a@b.com", "c@d.com", "Subj", "Body");
+        let raw = raw_mime_from_email(&email);
+        assert_eq!(raw, "Body");
+    }
+
+    #[test]
+    fn looks_like_raw_multipart_dump_valid() {
+        assert!(looks_like_raw_multipart_dump("--boundary\nContent-Type: text/html"));
+    }
+
+    #[test]
+    fn looks_like_raw_multipart_dump_no_boundary() {
+        assert!(!looks_like_raw_multipart_dump("Content-Type: text/html"));
+    }
+
+    #[test]
+    fn looks_like_raw_multipart_dump_no_content_type() {
+        assert!(!looks_like_raw_multipart_dump("--boundary\nHello"));
+    }
+}
+
 fn decode_from_synthetic_boundary(body: &str) -> Option<(String, String, String)> {
     let first_line = body.lines().next()?.trim();
     if !first_line.starts_with("--") {
