@@ -40,6 +40,63 @@ pub fn rbac_enabled() -> bool {
     )
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rbac_enabled_default_false() {
+        std::env::remove_var("ADMIN_RBAC_ENFORCE");
+        assert!(!rbac_enabled());
+    }
+
+    #[test]
+    fn rbac_enabled_true_values() {
+        for val in &["1", "true", "yes", "on", "TRUE", "True", "YES", "ON"] {
+            std::env::set_var("ADMIN_RBAC_ENFORCE", val);
+            assert!(rbac_enabled(), "expected rbac_enabled()=true for {}", val);
+        }
+        std::env::remove_var("ADMIN_RBAC_ENFORCE");
+    }
+
+    #[test]
+    fn rbac_enabled_false_values() {
+        for val in &["0", "false", "no", "off", "disabled", ""] {
+            std::env::set_var("ADMIN_RBAC_ENFORCE", val);
+            assert!(!rbac_enabled(), "expected rbac_enabled()=false for {}", val);
+        }
+        std::env::remove_var("ADMIN_RBAC_ENFORCE");
+    }
+
+    #[test]
+    fn session_ttl_secs_default() {
+        std::env::remove_var("ADMIN_SESSION_TTL_SECS");
+        assert_eq!(session_ttl_secs(), 86400);
+    }
+
+    #[test]
+    fn session_ttl_secs_from_env() {
+        std::env::set_var("ADMIN_SESSION_TTL_SECS", "3600");
+        assert_eq!(session_ttl_secs(), 3600);
+        std::env::remove_var("ADMIN_SESSION_TTL_SECS");
+    }
+
+    #[test]
+    fn session_ttl_secs_invalid_falls_back() {
+        std::env::set_var("ADMIN_SESSION_TTL_SECS", "not-a-number");
+        assert_eq!(session_ttl_secs(), 86400);
+        std::env::remove_var("ADMIN_SESSION_TTL_SECS");
+    }
+
+    #[test]
+    fn auth_user_system() {
+        let user = AuthUser::system();
+        assert_eq!(user.user_id, "system");
+        assert_eq!(user.email, "system@misfits.ai");
+        assert_eq!(user.role, "admin");
+    }
+}
+
 /// Nombre de secondes avant expiration d'une session admin (24h par défaut).
 fn session_ttl_secs() -> i64 {
     env::var("ADMIN_SESSION_TTL_SECS")
