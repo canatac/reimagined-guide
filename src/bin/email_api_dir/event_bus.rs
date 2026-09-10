@@ -34,6 +34,45 @@ pub(super) type EventBus = broadcast::Sender<MailEvent>;
 
 pub(super) const SEND_QUEUE_COLL: &str = "send_queue";
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn send_queue_coll_name() {
+        assert_eq!(SEND_QUEUE_COLL, "send_queue");
+    }
+
+    #[test]
+    fn undo_send_request_field() {
+        let req = UndoSendRequest { id: "test-id".to_string() };
+        assert_eq!(req.id, "test-id");
+    }
+
+    #[test]
+    fn github_token_response_fields() {
+        let resp = GithubTokenResponse {
+            access_token: Some("token123".to_string()),
+            error: None,
+            error_description: None,
+        };
+        assert_eq!(resp.access_token, Some("token123".to_string()));
+        assert!(resp.error.is_none());
+    }
+
+    #[test]
+    fn github_user_fields() {
+        let user = GithubUser {
+            id: 42,
+            login: "testuser".to_string(),
+            name: Some("Test User".to_string()),
+            email: Some("test@example.com".to_string()),
+        };
+        assert_eq!(user.id, 42);
+        assert_eq!(user.login, "testuser");
+    }
+}
+
 #[derive(Deserialize)]
 pub(super) struct UndoSendRequest {
     pub id: String,
