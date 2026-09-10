@@ -71,6 +71,46 @@ pub(crate) async fn api_send_undo(
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn schedule_send_body_deserializes() {
+        let json = serde_json::json!({
+            "to": [{"email": "<EMAIL>"}],
+            "subject": "Test",
+            "body": "Hello",
+            "sendAt": "2026-12-31T23:59:59Z"
+        });
+        let body: ScheduleSendBody = serde_json::from_value(json).unwrap();
+        assert_eq!(body.to.len(), 1);
+        assert_eq!(body.subject, "Test");
+        assert_eq!(body.send_at, "2026-12-31T23:59:59Z");
+    }
+
+    #[test]
+    fn schedule_send_body_defaults() {
+        let json = serde_json::json!({
+            "to": [{"email": "<EMAIL>"}],
+            "subject": "Test",
+            "body": "Hello",
+            "sendAt": "2026-12-31T23:59:59Z"
+        });
+        let body: ScheduleSendBody = serde_json::from_value(json).unwrap();
+        assert_eq!(body.cc.len(), 0);
+        assert_eq!(body.bcc.len(), 0);
+        assert_eq!(body.attachments.len(), 0);
+    }
+
+    #[test]
+    fn undo_send_request_deserializes() {
+        let json = serde_json::json!({ "id": "send-1" });
+        let req: UndoSendRequest = serde_json::from_value(json).unwrap();
+        assert_eq!(req.id, "send-1");
+    }
+}
+
 // --- Send schedule (POST /api/send/schedule) ---
 
 pub(crate) async fn api_send_schedule(
