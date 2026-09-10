@@ -280,6 +280,34 @@ fn normalize_label_color(raw: Option<String>) -> String {
         .unwrap_or_else(|| "#64748b".to_string())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_label_name_trims() {
+        assert_eq!(normalize_label_name("  Work  "), "Work");
+    }
+
+    #[test]
+    fn normalize_label_name_empty() {
+        assert_eq!(normalize_label_name(""), "");
+    }
+
+    #[test]
+    fn normalize_label_color_default() {
+        assert_eq!(normalize_label_color(None), "#64748b");
+        assert_eq!(normalize_label_color(Some("".into())), "#64748b");
+        assert_eq!(normalize_label_color(Some("  ".into())), "#64748b");
+    }
+
+    #[test]
+    fn normalize_label_color_custom() {
+        assert_eq!(normalize_label_color(Some("#ff0000".into())), "#ff0000");
+        assert_eq!(normalize_label_color(Some("  #abc  ".into())), "#abc");
+    }
+}
+
 pub(crate) async fn api_tags(
     req: actix_web::HttpRequest,
     mongo: web::Data<Arc<mongodb::Client>>,
