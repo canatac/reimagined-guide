@@ -32,6 +32,96 @@ pub fn extract_email_address(content: &str, header: &str) -> Option<String> {
     Some(value.to_string())
 }
 
+#[cfg(test)]
+mod extract_email_tests {
+    use super::extract_email_address;
+
+    #[test]
+    fn extracts_plain_email_address() {
+        let content = "From: alice@example.com\r\nTo: bob@example.com\r\nSubject: Hello";
+        assert_eq!(
+            extract_email_address(content, "From:"),
+            Some("alice@example.com".to_string())
+        );
+        assert_eq!(
+            extract_email_address(content, "To:"),
+            Some("bob@example.com".to_string())
+        );
+    }
+
+    #[test]
+    fn extracts_email_from_angle_brackets() {
+        let content = "From: Alice Smith <alice@example.com>\r\nTo: Bob Jones <bob@example.com>";
+        assert_eq!(
+            extract_email_address(content, "From:"),
+            Some("alice@example.com".to_string())
+        );
+        assert_eq!(
+            extract_email_address(content, "To:"),
+            Some("bob@example.com".to_string())
+        );
+    }
+
+    #[test]
+    fn returns_none_for_missing_header() {
+        let content = "From: alice@example.com\r\nSubject: Hello";
+        assert_eq!(extract_email_address(content, "To:"), None);
+    }
+
+    #[test]
+    fn returns_none_for_empty_content() {
+        assert_eq!(extract_email_address("", "From:"), None);
+    }
+
+    #[test]
+    fn handles_colon_in_display_name() {
+        let content = "From: \"Smith, Alice\" <alice@example.com>";
+        assert_eq!(
+            extract_email_address(content, "From:"),
+            Some("alice@example.com".to_string())
+        );
+    }
+
+    #[test]
+    fn handles_malformed_no_angle_brackets() {
+        let content = "From: just-an-email@example.com";
+        assert_eq!(
+            extract_email_address(content, "From:"),
+            Some("just-an-email@example.com".to_string())
+        );
+    }
+
+    #[test]
+    fn handles_whitespace_around_value() {
+        let content = "From:   alice@example.com  ";
+        assert_eq!(
+            extract_email_address(content, "From:"),
+            Some("alice@example.com".to_string())
+        );
+    }
+
+    #[test]
+    fn returns_none_for_empty_value() {
+        let content = "From:";
+        assert_eq!(extract_email_address(content, "From:"), None);
+    }
+
+    #[test]
+    fn handles_only_header_name_no_colon_after() {
+        let content = "From";
+        assert_eq!(extract_email_address(content, "From:"), None);
+    }
+
+    #[test]
+    fn handles_multiple_colons_in_line() {
+        let content = "From: alice@example.com: extra info";
+        assert_eq!(
+            extract_email_address(content, "From:"),
+            Some("alice@example.com: extra info".to_string())
+        );
+    }
+}
+
 async fn send_email_content_inner<T: AsyncWriteExt + AsyncReadExt + Unpin>(
     stream: &mut T,
     from: &str,
