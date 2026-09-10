@@ -153,3 +153,83 @@ pub use traits::MockDatabaseInterface;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod helper_tests {
+    use super::*;
+
+    #[test]
+    fn default_mailbox_is_inbox() {
+        assert_eq!(default_mailbox(), "inbox");
+    }
+
+    #[test]
+    fn user_from_document_full() {
+        let doc = bson::doc! {
+            "_id": bson::oid::ObjectId::new(),
+            "username": "alice",
+            "password": "secret",
+            "mailbox": "custom",
+            "locale": "fr",
+        };
+        let user = user_from_document(&doc, "fallback");
+        assert_eq!(user.username, "alice");
+        assert_eq!(user.password, "secret");
+        assert_eq!(user.mailbox, "custom");
+        assert_eq!(user.locale, Some("fr".to_string()));
+        assert!(!user.condition_accepted);
+    }
+
+    #[test]
+    fn user_from_document_fallbacks() {
+        let doc = bson::doc! {};
+        let user = user_from_document(&doc, "fallback_user");
+        assert_eq!(user.username, "fallback_user");
+        assert_eq!(user.password, "");
+        assert_eq!(user.mailbox, "inbox");
+        assert_eq!(user.locale, None);
+    }
+
+    #[test]
+    fn user_from_document_partial() {
+        let doc = bson::doc! {
+            "username": "bob",
+            "password": "pass123",
+        };
+        let user = user_from_document(&doc, "fallback");
+        assert_eq!(user.username, "bob");
+        assert_eq!(user.password, "pass123");
+        assert_eq!(user.mailbox, "inbox");
+    }
+
+    #[test]
+    fn mailbox_struct_creation() {
+        let mbox = Mailbox {
+            name: "INBOX".to_string(),
+            flags: vec!["\\HasNoChildren".to_string()],
+            exists: 10,
+            recent: 2,
+            unseen: 1,
+            permanent_flags: vec!["\\Seen".to_string()],
+            uid_validity: 12345,
+            uid_next: 100,
+            user_id: "user-1".to_string(),
+        };
+        assert_eq!(mbox.name, "INBOX");
+        assert_eq!(mbox.exists, 10);
+    }
+
+    #[test]
+    fn user_struct_creation() {
+        let user = User {
+            id: None,
+            username: "test".to_string(),
+            password: "pass".to_string(),
+            mailbox: "inbox".to_string(),
+            condition_accepted: true,
+            locale: Some("en".to_string()),
+        };
+        assert_eq!(user.username, "test");
+        assert!(user.condition_accepted);
+    }
+}

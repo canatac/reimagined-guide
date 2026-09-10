@@ -149,12 +149,151 @@ fn format_msg(bs: &Bundles, locale: &str, key: &str, args: &[(&str, &str)]) -> O
     let value = if args.is_empty() {
         bundle.format_pattern(pattern, None, &mut errors)
     } else {
-        let mut fa = FluentArgs::new();
+        let mut args_map = FluentArgs::new();
         for (k, v) in args {
-            fa.set(k.to_string(), v.to_string());
+            args_map.set(*k, v.to_string());
         }
-        bundle.format_pattern(pattern, Some(&fa), &mut errors)
+        bundle.format_pattern(pattern, Some(&args_map), &mut errors)
     };
 
-    Some(value.into_owned())
+    Some(value.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_rtl_arabic() {
+        assert!(is_rtl("ar"));
+    }
+
+    #[test]
+    fn is_rtl_hebrew() {
+        assert!(is_rtl("he"));
+    }
+
+    #[test]
+    fn is_rtl_persian() {
+        assert!(is_rtl("fa"));
+    }
+
+    #[test]
+    fn is_rtl_ltr_locales() {
+        assert!(!is_rtl("fr"));
+        assert!(!is_rtl("en"));
+        assert!(!is_rtl("es"));
+        assert!(!is_rtl("de"));
+        assert!(!is_rtl("pt"));
+        assert!(!is_rtl("it"));
+    }
+
+    #[test]
+    fn resolve_locale_empty_accept_lang() {
+        assert_eq!(resolve_locale("", None), "fr");
+    }
+
+    #[test]
+    fn resolve_locale_user_preference_wins() {
+        assert_eq!(resolve_locale("en-US,en;q=0.9", Some("de")), "de");
+    }
+
+    #[test]
+    fn resolve_locale_unsupported_user_preference_falls_back() {
+        // "xx" is not supported, falls back to accept-language negotiation
+        assert_eq!(resolve_locale("en-US,en;q=0.9", Some("xx")), "en");
+    }
+
+    #[test]
+    fn resolve_locale_accept_lang_en() {
+        assert_eq!(resolve_locale("en-US,en;q=0.9", None), "en");
+    }
+
+    #[test]
+    fn resolve_locale_accept_lang_fr() {
+        assert_eq!(resolve_locale("fr-FR,fr;q=0.9", None), "fr");
+    }
+
+    #[test]
+    fn resolve_locale_accept_lang_es() {
+        assert_eq!(resolve_locale("es-ES,es;q=0.9", None), "es");
+    }
+
+    #[test]
+    fn resolve_locale_accept_lang_de() {
+        assert_eq!(resolve_locale("de-DE,de;q=0.9", None), "de");
+    }
+
+    #[test]
+    fn resolve_locale_region_prefix_fallback() {
+        // "fr-CA" → should fallback to "fr"
+        assert_eq!(resolve_locale("fr-CA,fr;q=0.9", None), "fr");
+    }
+
+    #[test]
+    fn resolve_locale_unsupported_language_falls_back_to_default() {
+        // "zh" (Chinese) is not supported, falls back to default "fr"
+        assert_eq!(resolve_locale("zh-CN,zh;q=0.9", None), "fr");
+    }
+
+    #[test]
+    fn resolve_locale_multiple_languages() {
+        // "en" is supported, should win over unsupported "zh"
+        assert_eq!(resolve_locale("zh-CN,zh;q=0.8,en-US;q=0.9", None), "en");
+    }
+
+    #[test]
+    fn supported_locales_contains_fr() {
+        assert!(SUPPORTED_LOCALES.contains(&"fr"));
+    }
+
+    #[test]
+    fn supported_locales_contains_en() {
+        assert!(SUPPORTED_LOCALES.contains(&"en"));
+    }
+
+    #[test]
+    fn supported_locales_contains_rtl() {
+        assert!(SUPPORTED_LOCALES.contains(&"ar"));
+        assert!(SUPPORTED_LOCALES.contains(&"he"));
+        assert!(SUPPORTED_LOCALES.contains(&"fa"));
+    }
+
+    #[test]
+    fn default_locale_is_fr() {
+        assert_eq!(DEFAULT_LOCALE, "fr");
+    }
+
+    #[test]
+    fn rtl_locales_count() {
+        assert_eq!(RTL_LOCALES.len(), 3);
+    }
+
+    #[test]
+    fn t_missing_key_returns_key() {
+        // Key not found in any bundle returns the key itself
+        let result = t("fr", "totally_missing_key_xyz123", &[]);
+        assert_eq!(result, "totally_missing_key_xyz123");
+    }
+
+    #[test]
+    fn t_unsupported_locale_falls_back_to_default() {
+        // "xx" locale not supported, falls back to "fr"
+        let result = t("xx", "totally_missing_key_xyz123", &[]);
+        assert_eq!(result, "totally_missing_key_xyz123");
+    }
+
+    #[test]
+    fn supported_locales_count() {
+        assert_eq!(SUPPORTED_LOCALES.len(), 9);
+    }
+
+    #[test]
+    fn bundles_initialization_succeeds() {
+        // Verify that init_bundles() doesn't panic
+        let b = bundles();
+        assert!(!b.is_empty());
+        assert!(b.contains_key("fr"));
+        assert!(b.contains_key("en"));
+    }
 }

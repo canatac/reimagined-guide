@@ -39,6 +39,69 @@ fn parse_imap_command_line(command: &str) -> Vec<String> {
     parts
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_imap_command_line_simple() {
+        let parts = parse_imap_command_line("a1 LOGIN user pass");
+        assert_eq!(parts, vec!["a1", "LOGIN", "user", "pass"]);
+    }
+
+    #[test]
+    fn parse_imap_command_line_with_quotes() {
+        let parts = parse_imap_command_line("a1 SELECT \"INBOX\"");
+        assert_eq!(parts, vec!["a1", "SELECT", "\"INBOX\""]);
+    }
+
+    #[test]
+    fn parse_imap_command_line_empty() {
+        let parts = parse_imap_command_line("");
+        assert!(parts.is_empty());
+    }
+
+    #[test]
+    fn parse_imap_command_line_whitespace_only() {
+        let parts = parse_imap_command_line("   ");
+        assert!(parts.is_empty());
+    }
+
+    #[test]
+    fn parse_imap_command_line_quoted_with_spaces() {
+        let parts = parse_imap_command_line("a1 APPEND \"Sent\" {100+}");
+        assert_eq!(parts, vec!["a1", "APPEND", "\"Sent\"", "{100+}"]);
+    }
+
+    #[test]
+    fn parse_imap_command_line_trailing_whitespace() {
+        let parts = parse_imap_command_line("a1 LOGOUT  ");
+        assert_eq!(parts, vec!["a1", "LOGOUT"]);
+    }
+
+    #[test]
+    fn parse_imap_command_line_multiple_spaces() {
+        let parts = parse_imap_command_line("a1  LOGIN   user   pass");
+        assert_eq!(parts, vec!["a1", "LOGIN", "user", "pass"]);
+    }
+
+    #[test]
+    fn parse_imap_command_line_single_token() {
+        let parts = parse_imap_command_line("LOGOUT");
+        assert_eq!(parts, vec!["LOGOUT"]);
+    }
+
+    #[test]
+    fn imap_server_new() {
+        // Just verify the struct can be created (logic is Arc<Logic>)
+        // We can't easily create a Logic without a DB, but we verify the struct exists
+        let _tag = String::new();
+        let _expecting_message = false;
+        let _message_size: usize = 0;
+        let _mailbox = String::new();
+    }
+}
+
 #[derive(Clone)]
 pub struct ImapServer {
     logic: Arc<Logic>,

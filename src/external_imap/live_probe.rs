@@ -245,3 +245,77 @@ fn parse_search(lines: &[String]) -> Vec<u64> {
     }
     vec![]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_iso_to_imap_date_valid() {
+        let result = parse_iso_to_imap_date("2026-01-15T10:30:00Z");
+        assert_eq!(result, Some("15-Jan-2026".to_string()));
+    }
+
+    #[test]
+    fn parse_iso_to_imap_date_invalid() {
+        let result = parse_iso_to_imap_date("not-a-date");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn parse_iso_to_imap_date_with_timezone() {
+        let result = parse_iso_to_imap_date("2026-06-15T00:00:00+02:00");
+        assert_eq!(result, Some("15-Jun-2026".to_string()));
+    }
+
+    #[test]
+    fn json_str_escapes_quotes() {
+        let result = json_str(r#"hello "world""#);
+        assert_eq!(result, r#"hello \"world\""#);
+    }
+
+    #[test]
+    fn json_str_escapes_backslash() {
+        let result = json_str(r"hello\world");
+        assert_eq!(result, r"hello\\world");
+    }
+
+    #[test]
+    fn json_str_escapes_newline() {
+        let result = json_str("hello\nworld");
+        assert_eq!(result, r"hello\nworld");
+    }
+
+    #[test]
+    fn json_str_no_special() {
+        let result = json_str("hello world");
+        assert_eq!(result, r#""hello world""#);
+    }
+
+    #[test]
+    fn parse_search_basic() {
+        let lines = vec![
+            "* SEARCH 1 2 3 42".to_string(),
+            "a5 OK".to_string(),
+        ];
+        assert_eq!(parse_search(&lines), vec![1, 2, 3, 42]);
+    }
+
+    #[test]
+    fn parse_search_empty() {
+        let lines = vec!["* SEARCH".to_string()];
+        assert!(parse_search(&lines).is_empty());
+    }
+
+    #[test]
+    fn tag_ok_positive() {
+        let lines = vec!["a1 OK CAPABILITY completed".to_string()];
+        assert!(tag_ok(&lines, "a1"));
+    }
+
+    #[test]
+    fn tag_ok_negative() {
+        let lines = vec!["a1 NO failed".to_string()];
+        assert!(!tag_ok(&lines, "a1"));
+    }
+}

@@ -233,3 +233,39 @@ fn logout_best_effort<S: std::io::Write>(stream: &mut S) {
 fn _touch_utc() -> chrono::DateTime<Utc> {
     Utc::now()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ensure_password_empty_rejected() {
+        let result = ensure_password("");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Missing credential"));
+    }
+
+    #[test]
+    fn ensure_password_non_empty_accepted() {
+        let result = ensure_password("secret");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn ensure_ok_positive() {
+        let lines = vec!["a1 OK LOGIN completed".to_string()];
+        assert!(ensure_ok(&lines, "a1", "err").is_ok());
+    }
+
+    #[test]
+    fn ensure_ok_negative() {
+        let lines = vec!["a1 NO LOGIN failed".to_string()];
+        assert!(ensure_ok(&lines, "a1", "err").is_err());
+    }
+
+    #[test]
+    fn ensure_ok_wrong_tag() {
+        let lines = vec!["a1 OK".to_string()];
+        assert!(ensure_ok(&lines, "a2", "err").is_err());
+    }
+}

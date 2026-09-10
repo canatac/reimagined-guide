@@ -5,6 +5,7 @@ pub(crate) mod folders;
 pub(crate) mod sync;
 pub(crate) mod calendar;
 pub(crate) mod holidays;
+pub(crate) mod wizard;
 
 pub(crate) use openapi::*;
 pub(crate) use accounts::*;
@@ -12,3 +13,4 @@ pub(crate) use folders::*;
 pub(crate) use sync::*;
 pub(crate) use calendar::*;
 pub(crate) use holidays::*;
+pub(crate) use wizard::*;

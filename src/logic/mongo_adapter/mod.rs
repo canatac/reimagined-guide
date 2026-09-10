@@ -36,6 +36,37 @@ impl MongoDatabaseAdapter {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn database_name_default() {
+        std::env::remove_var("MONGODB_DATABASE");
+        assert_eq!(MongoDatabaseAdapter::database_name(), "mailserver");
+    }
+
+    #[test]
+    fn database_name_custom() {
+        std::env::set_var("MONGODB_DATABASE", "custom_mongo_db");
+        assert_eq!(MongoDatabaseAdapter::database_name(), "custom_mongo_db");
+        std::env::remove_var("MONGODB_DATABASE");
+    }
+
+    #[test]
+    fn users_collection_name_default() {
+        std::env::remove_var("MONGODB_USERS_COLLECTION");
+        assert_eq!(MongoDatabaseAdapter::users_collection_name(), "users");
+    }
+
+    #[test]
+    fn users_collection_name_custom() {
+        std::env::set_var("MONGODB_USERS_COLLECTION", "custom_users");
+        assert_eq!(MongoDatabaseAdapter::users_collection_name(), "custom_users");
+        std::env::remove_var("MONGODB_USERS_COLLECTION");
+    }
+}
+
 #[allow(dead_code)]
 fn _bson_use() -> bson::Document {
     doc! {}

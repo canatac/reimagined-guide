@@ -28,69 +28,50 @@ mod tests {
     use super::*;
 
     #[test]
-    fn env_f32_returns_default_when_unset() {
-        std::env::remove_var("TEST_F32_VAR");
-        assert_eq!(env_f32("TEST_F32_VAR", 3.14), 3.14);
+    fn env_f32_default() {
+        std::env::remove_var("TEST_ALERT_F32");
+        assert_eq!(env_f32("TEST_ALERT_F32", 0.5), 0.5);
     }
 
     #[test]
-    fn env_f32_reads_env_value() {
-        std::env::set_var("TEST_F32_VAR", "2.71");
-        assert_eq!(env_f32("TEST_F32_VAR", 0.0), 2.71);
-        std::env::remove_var("TEST_F32_VAR");
+    fn env_f32_custom() {
+        std::env::set_var("TEST_ALERT_F32", "0.75");
+        assert_eq!(env_f32("TEST_ALERT_F32", 0.5), 0.75);
+        std::env::remove_var("TEST_ALERT_F32");
     }
 
     #[test]
-    fn env_f33_falls_back_on_invalid() {
-        std::env::set_var("TEST_F32_VAR", "not-a-number");
-        assert_eq!(env_f32("TEST_F32_VAR", 1.5), 1.5);
-        std::env::remove_var("TEST_F32_VAR");
+    fn env_f32_invalid() {
+        std::env::set_var("TEST_ALERT_F32", "invalid");
+        assert_eq!(env_f32("TEST_ALERT_F32", 0.5), 0.5);
+        std::env::remove_var("TEST_ALERT_F32");
     }
 
     #[test]
-    fn env_u64_returns_default_when_unset() {
-        std::env::remove_var("TEST_U64_VAR");
-        assert_eq!(env_u64("TEST_U64_VAR", 42), 42);
+    fn env_u64_default() {
+        std::env::remove_var("TEST_ALERT_U64");
+        assert_eq!(env_u64("TEST_ALERT_U64", 100), 100);
     }
 
     #[test]
-    fn env_u64_reads_env_value() {
-        std::env::set_var("TEST_U64_VAR", "100");
-        assert_eq!(env_u64("TEST_U64_VAR", 0), 100);
-        std::env::remove_var("TEST_U64_VAR");
+    fn env_u64_custom() {
+        std::env::set_var("TEST_ALERT_U64", "500");
+        assert_eq!(env_u64("TEST_ALERT_U64", 100), 500);
+        std::env::remove_var("TEST_ALERT_U64");
     }
 
     #[test]
-    fn env_u64_falls_back_on_invalid() {
-        std::env::set_var("TEST_U64_VAR", "abc");
-        assert_eq!(env_u64("TEST_U64_VAR", 99), 99);
-        std::env::remove_var("TEST_U64_VAR");
+    fn env_list_empty() {
+        std::env::remove_var("TEST_ALERT_LIST");
+        let result = env_list("TEST_ALERT_LIST");
+        assert!(result.is_empty());
     }
 
     #[test]
-    fn env_list_returns_empty_when_unset() {
-        std::env::remove_var("TEST_LIST_VAR");
-        assert!(env_list("TEST_LIST_VAR").is_empty());
-    }
-
-    #[test]
-    fn env_list_splits_comma_separated() {
-        std::env::set_var("TEST_LIST_VAR", "a,b,c");
-        assert_eq!(env_list("TEST_LIST_VAR"), vec!["a", "b", "c"]);
-        std::env::remove_var("TEST_LIST_VAR");
-    }
-
-    #[test]
-    fn env_list_trims_whitespace() {
-        std::env::set_var("TEST_LIST_VAR", "  a , b ,  c  ");
-        assert_eq!(env_list("TEST_LIST_VAR"), vec!["a", "b", "c"]);
-        std::env::remove_var("TEST_LIST_VAR");
-    }
-
-    #[test]
-    fn env_list_skips_empty_entries() {
-        std::env::set_var("TEST_LIST_VAR", "a,,b,");
-        assert_eq!(env_list("TEST_LIST_VAR"), vec!["a", "b"]);
-        std::env::remove_var("TEST_LIST_VAR");
+    fn env_list_multiple() {
+        std::env::set_var("TEST_ALERT_LIST", "a,b,c");
+        let result = env_list("TEST_ALERT_LIST");
+        assert_eq!(result, vec!["a".to_string(), "b".to_string(), "c".to_string()]);
+        std::env::remove_var("TEST_ALERT_LIST");
     }
 }

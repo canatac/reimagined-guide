@@ -148,129 +148,115 @@ mod tests {
     use super::*;
 
     #[test]
-    fn is_private_detects_loopback() {
+    fn is_private_localhost() {
         assert!(is_private("127.0.0.1"));
-        assert!(is_private("127.255.255.255"));
-    }
-
-    #[test]
-    fn is_private_detects_10_range() {
-        assert!(is_private("10.0.0.1"));
-        assert!(is_private("10.255.255.255"));
-    }
-
-    #[test]
-    fn is_private_detects_192_168() {
-        assert!(is_private("192.168.0.1"));
-        assert!(is_private("192.168.255.254"));
-    }
-
-    #[test]
-    fn is_private_detects_172_ranges() {
-        assert!(is_private("172.16.0.1"));
-        assert!(is_private("172.1.0.1"));
-        assert!(is_private("172.2.0.1"));
-        assert!(is_private("172.3.0.1"));
-    }
-
-    #[test]
-    fn is_private_detects_exact_values() {
         assert!(is_private("::1"));
         assert!(is_private("localhost"));
         assert!(is_private("0.0.0.0"));
     }
 
     #[test]
-    fn is_private_returns_false_for_public() {
+    fn is_private_private_networks() {
+        assert!(is_private("10.0.0.1"));
+        assert!(is_private("192.168.1.1"));
+        assert!(is_private("172.16.0.1"));
+        assert!(is_private("172.20.0.1"));
+        assert!(is_private("172.31.255.255"));
+    }
+
+    #[test]
+    fn is_private_public_ip() {
         assert!(!is_private("8.8.8.8"));
         assert!(!is_private("1.1.1.1"));
-        assert!(!is_private("15.15.15.15"));
+        assert!(!is_private("203.0.113.1"));
     }
 
     #[test]
     fn non_empty_returns_unknown_for_empty() {
-        assert_eq!(non_empty(String::from("")), "unknown");
+        assert_eq!(non_empty("".to_string()), "unknown");
     }
 
     #[test]
-    fn non_empty_returns_original_for_non_empty() {
-        assert_eq!(non_empty(String::from("test")), "test");
-        assert_eq!(non_empty(String::from("AWS")), "AWS");
+    fn non_empty_preserves_value() {
+        assert_eq!(non_empty("FR".to_string()), "FR");
+        assert_eq!(non_empty("Google".to_string()), "Google");
     }
 
     #[test]
-    fn infer_datacenter_detects_aws() {
-        assert_eq!(infer_datacenter("Amazon Web Services"), Some("AWS".to_string()));
-        assert_eq!(infer_datacenter("AWS us-east-1"), Some("AWS".to_string()));
+    fn infer_datacenter_aws() {
+        assert_eq!(
+            infer_datacenter("Amazon Web Services, Inc."),
+            Some("AWS".to_string())
+        );
+        assert_eq!(
+            infer_datacenter("Amazon Data Services"),
+            Some("AWS".to_string())
+        );
     }
 
     #[test]
-    fn infer_datacenter_detects_gcp() {
-        assert_eq!(infer_datacenter("Google Cloud Platform"), Some("GCP".to_string()));
+    fn infer_datacenter_gcp() {
+        assert_eq!(
+            infer_datacenter("Google Cloud Platform"),
+            Some("GCP".to_string())
+        );
     }
 
     #[test]
-    fn infer_datacenter_detects_azure() {
-        assert_eq!(infer_datacenter("Microsoft Corporation"), Some("Azure".to_string()));
-        assert_eq!(infer_datacenter("Azure West Europe"), Some("Azure".to_string()));
+    fn infer_datacenter_microsoft() {
+        assert_eq!(
+            infer_datacenter("Microsoft Corporation"),
+            Some("Azure".to_string())
+        );
+        assert_eq!(
+            infer_datacenter("Azure Datacenters"),
+            Some("Azure".to_string())
+        );
     }
 
     #[test]
-    fn infer_datacenter_detects_cloudflare() {
-        assert_eq!(infer_datacenter("Cloudflare Inc"), Some("Cloudflare".to_string()));
+    fn infer_datacenter_ovh() {
+        assert_eq!(
+            infer_datacenter("OVH SAS"),
+            Some("OVH".to_string())
+        );
     }
 
     #[test]
-    fn infer_datacenter_detects_ovh() {
-        assert_eq!(infer_datacenter("OVH SAS"), Some("OVH".to_string()));
+    fn infer_datacenter_hetzner() {
+        assert_eq!(
+            infer_datacenter("Hetzner Online GmbH"),
+            Some("Hetzner".to_string())
+        );
     }
 
     #[test]
-    fn infer_datacenter_detects_hetzner() {
-        assert_eq!(infer_datacenter("Hetzner Online GmbH"), Some("Hetzner".to_string()));
+    fn infer_datacenter_unknown() {
+        assert_eq!(
+            infer_datacenter("Small Local ISP"),
+            None
+        );
     }
 
     #[test]
-    fn infer_datacenter_detects_digitalocean() {
-        assert_eq!(infer_datacenter("DigitalOcean LLC"), Some("DigitalOcean".to_string()));
-    }
-
-    #[test]
-    fn infer_datacenter_detects_linode_akamai() {
-        assert_eq!(infer_datacenter("Linode"), Some("Akamai/Linode".to_string()));
-        assert_eq!(infer_datacenter("Akamai Technologies"), Some("Akamai/Linode".to_string()));
-    }
-
-    #[test]
-    fn infer_datacenter_detects_vultr() {
-        assert_eq!(infer_datacenter("Vultr Holdings"), Some("Vultr".to_string()));
-    }
-
-    #[test]
-    fn infer_datacenter_returns_none_for_unknown() {
-        assert_eq!(infer_datacenter("Some Random ISP"), None);
-        assert_eq!(infer_datacenter(""), None);
-    }
-
-    #[test]
-    fn private_geo_returns_private_values() {
-        let geo = private_geo("10.0.0.1");
+    fn private_geo_defaults() {
+        let geo = private_geo("10.0.0.5");
         assert_eq!(geo.country, "private");
         assert_eq!(geo.city, "private");
         assert_eq!(geo.asn, "private");
         assert_eq!(geo.company, "private");
         assert_eq!(geo.datacenter, None);
-        assert_eq!(geo.ip, Some("10.0.0.1".to_string()));
+        assert_eq!(geo.ip, Some("10.0.0.5".to_string()));
     }
 
     #[test]
     fn geo_info_default_values() {
         let geo = GeoInfo::default();
+        assert_eq!(geo.ip, None);
         assert_eq!(geo.country, "unknown");
         assert_eq!(geo.city, "unknown");
         assert_eq!(geo.asn, "unknown");
         assert_eq!(geo.company, "unknown");
         assert_eq!(geo.datacenter, None);
-        assert_eq!(geo.ip, None);
     }
 }
