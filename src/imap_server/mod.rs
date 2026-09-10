@@ -39,6 +39,53 @@ fn parse_imap_command_line(command: &str) -> Vec<String> {
     parts
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_imap_command_line_simple() {
+        let parts = parse_imap_command_line("A1 LOGIN user pass");
+        assert_eq!(parts, vec!["A1", "LOGIN", "user", "pass"]);
+    }
+
+    #[test]
+    fn parse_imap_command_line_with_quotes() {
+        let parts = parse_imap_command_line(r#"A1 LOGIN "user name""password""#);
+        assert_eq!(parts, vec!["A1", "LOGIN", "\"user name\"", "\"password\""]);
+    }
+
+    #[test]
+    fn parse_imap_command_line_empty() {
+        let parts = parse_imap_command_line("");
+        assert!(parts.is_empty());
+    }
+
+    #[test]
+    fn parse_imap_command_line_whitespace_only() {
+        let parts = parse_imap_command_line("   ");
+        assert!(parts.is_empty());
+    }
+
+    #[test]
+    fn parse_imap_command_line_single_token() {
+        let parts = parse_imap_command_line("NOOP");
+        assert_eq!(parts, vec!["NOOP"]);
+    }
+
+    #[test]
+    fn parse_imap_command_line_trailing_whitespace() {
+        let parts = parse_imap_command_line("A1 LOGOUT  ");
+        assert_eq!(parts, vec!["A1", "LOGOUT"]);
+    }
+
+    #[test]
+    fn parse_imap_command_line_multiple_spaces() {
+        let parts = parse_imap_command_line("A1  LOGIN   user   pass");
+        assert_eq!(parts, vec!["A1", "LOGIN", "user", "pass"]);
+    }
+}
+
 #[derive(Clone)]
 pub struct ImapServer {
     logic: Arc<Logic>,
