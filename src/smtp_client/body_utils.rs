@@ -255,3 +255,112 @@ pub(crate) fn compose_smtp_payload(email: &Email) -> String {
     email_content
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_crlf_converts_lf_to_crlf() {
+        assert_eq!(normalize_crlf("line1\nline2"), "line1\r\nline2");
+    }
+
+    #[test]
+    fn normalize_crlf_converts_cr_to_crlf() {
+        assert_eq!(normalize_crlf("line1\rline2"), "line1\r\nline2");
+    }
+
+    #[test]
+    fn normalize_crlf_preserves_crlf() {
+        assert_eq!(normalize_crlf("line1\r\nline2"), "line1\r\nline2");
+    }
+
+    #[test]
+    fn strip_tags_simple_removes_html_tags() {
+        assert_eq!(strip_tags_simple("<p>Hello <b>world</b></p>"), "Hello world");
+    }
+
+    #[test]
+    fn strip_tags_simple_handles_no_tags() {
+        assert_eq!(strip_tags_simple("plain text"), "plain text");
+    }
+
+    #[test]
+    fn body_looks_like_html_detects_html() {
+        assert!(body_looks_like_html("<html><body>Hello</body></html>"));
+        assert!(body_looks_like_html("<p>Hello</p>"));
+        assert!(body_looks_like_html("<div>content</div>"));
+    }
+
+    #[test]
+    fn body_looks_like_html_rejects_plain_text() {
+        assert!(!body_looks_like_html("Just plain text"));
+        assert!(!body_looks_like_html("No tags here"));
+    }
+
+    #[test]
+    fn ensure_html_document_wraps_plain_text() {
+        let result = ensure_html_document("Hello world");
+        assert!(result.contains("<html>"));
+        assert!(result.contains("</html>"));
+        assert!(result.contains("Hello world"));
+    }
+
+    #[test]
+    fn ensure_html_document_preserves_existing_html() {
+        let input = "<html><body>Existing</body></html>";
+        assert_eq!(ensure_html_document(input), input);
+    }
+
+    #[test]
+    fn upsert_content_type_adds_new_header() {
+        let mut headers = vec![("From".to_string(), "a@b.com".to_string())];
+        upsert_content_type(&mut headers, "text/html; charset=utf-8".to_string());
+        assert_eq!(headers.len(), 2);
+        assert_eq!(headers[1].0, "Content-Type");
+        assert_eq!(headers[1].1, "text/html; charset=utf-8");
+    }
+
+    #[test]
+    fn upsert_content_type_updates_existing() {
+        let mut headers = vec![
+            ("From".to_string(), "a@b.com".to_string()),
+            ("Content-Type".to_string(), "text/plain".to_string()),
+        ];
+        upsert_content_type(&mut headers, "text/html; charset=utf-8".to_string());
+        assert_eq!(headers.len(), 2);
+        assert_eq!(headers[1].1, "text/html; charset=utf-8");
+    }
+
+    #[test]
+    fn compose_smtp_payload_plain_text() {
+        let email = crate::entities::Email::new(
+            "test-id",
+            "from@example.com",
+            "to@example.com",
+            "Subject",
+            "Plain text body",
+        );
+        let payload = compose_smtp_payload(&email);
+        assert!(payload.contains("From: from@example.com"));
+        assert!(payload.contains("To: to@example.com"));
+        assert!(payload.contains("Subject: Subject"));
+        assert!(payload.contains("Plain text body"));
+        assert!(payload.contains("Content-Type: text/plain"));
+    }
+
+    #[test]
+    fn compose_smtp_payload_html_body() {
+        let email = crate::entities::Email::new(
+            "test-id",
+            "from@example.com",
+            "to@example.com",
+            "Subject",
+            "<p>HTML body</p>",
+        );
+        let payload = compose_smtp_payload(&email);
+        assert!(payload.contains("Content-Type: text/html"));
+        assert!(payload.contains("multipart/alternative"));
+        assert!(payload.contains("HTML body"));
+    }
+}
+
