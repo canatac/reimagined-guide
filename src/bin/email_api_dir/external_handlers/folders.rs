@@ -53,3 +53,15 @@ pub(crate) async fn api_external_folder_mapping_put(
             .json(serde_json::json!({"error": {"code": "EXTERNAL_FOLDER_MAPPING_FAILED", "message": e.to_string()}})),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn external_folder_mapping_input_deserializes() {
+        let json = serde_json::json!({ "localRole": "inbox" });
+        let input: ExternalFolderMappingInput = serde_json::from_value(json).unwrap();
+        assert_eq!(input.local_role, "inbox");
+    }
+}
