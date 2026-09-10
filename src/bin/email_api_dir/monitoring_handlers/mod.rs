@@ -8,6 +8,7 @@ mod dashboard;
 mod security;
 mod shared;
 pub(crate) mod webhook;
+pub(crate) mod webhook_incoming;
 pub(crate) mod mongo_health;
 
 pub(crate) use monitoring::*;
