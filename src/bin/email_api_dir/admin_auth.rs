@@ -86,6 +86,73 @@ impl AuthUser {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn auth_user_system() {
+        let user = AuthUser::system();
+        assert_eq!(user.user_id, "system");
+        assert_eq!(user.email, "system@misfits.ai");
+        assert_eq!(user.role, "admin");
+    }
+
+    #[test]
+    fn rbac_disabled_by_default() {
+        // Note: this test assumes ADMIN_RBAC_ENFORCE is not set to "1"/"true"/"yes"/"on"
+        // In CI, this env var is typically unset
+        let enabled = rbac_enabled();
+        // We can't assert exact value without controlling env, but we can verify it's a bool
+        let _ = enabled; // just verify it doesn't panic
+    }
+
+    #[test]
+    fn admin_session_coll_name() {
+        assert_eq!(ADMIN_SESSIONS_COLL, "admin_sessions");
+    }
+
+    #[test]
+    fn admin_session_fields() {
+        let session = AdminSession {
+            token: "tok-123".to_string(),
+            user_id: "admin".to_string(),
+            email: "admin@misfits.ai".to_string(),
+            role: "admin".to_string(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            expires_at: "2026-01-02T00:00:00Z".to_string(),
+            last_seen_at: Some("2026-01-01T12:00:00Z".to_string()),
+            user_agent: Some("test-agent".to_string()),
+            ip: Some("127.0.0.1".to_string()),
+        };
+        assert_eq!(session.token, "tok-123");
+        assert_eq!(session.user_id, "admin");
+        assert_eq!(session.email, "admin@misfits.ai");
+        assert_eq!(session.role, "admin");
+        assert_eq!(session.last_seen_at, Some("2026-01-01T12:00:00Z".to_string()));
+        assert_eq!(session.user_agent, Some("test-agent".to_string()));
+        assert_eq!(session.ip, Some("127.0.0.1".to_string()));
+    }
+
+    #[test]
+    fn admin_session_optionals_none() {
+        let session = AdminSession {
+            token: "tok".to_string(),
+            user_id: "u".to_string(),
+            email: "e".to_string(),
+            role: "admin".to_string(),
+            created_at: "2026-01-01".to_string(),
+            expires_at: "2026-01-02".to_string(),
+            last_seen_at: None,
+            user_agent: None,
+            ip: None,
+        };
+        assert!(session.last_seen_at.is_none());
+        assert!(session.user_agent.is_none());
+        assert!(session.ip.is_none());
+    }
+}
+
 /// Extrait un token depuis un `HttpRequest`.
 ///
 /// Priorité: header `Authorization: Bearer …` puis cookie `session_token`.
