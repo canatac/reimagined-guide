@@ -40,6 +40,75 @@ fn media_kind(content_type: &str) -> Option<&'static str> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn infer_attachment_kind_image() {
+        assert_eq!(infer_attachment_kind("image/png", "photo.png"), "image");
+        assert_eq!(infer_attachment_kind("image/jpeg", "photo.jpg"), "image");
+    }
+
+    #[test]
+    fn infer_attachment_kind_pdf() {
+        assert_eq!(infer_attachment_kind("application/pdf", "doc.pdf"), "pdf");
+    }
+
+    #[test]
+    fn infer_attachment_kind_doc() {
+        assert_eq!(infer_attachment_kind("application/msword", "doc.doc"), "doc");
+        assert_eq!(infer_attachment_kind("application/vnd.openxmlformats-officedocument.wordprocessingml.document", "doc.docx"), "doc");
+    }
+
+    #[test]
+    fn infer_attachment_kind_spreadsheet() {
+        assert_eq!(infer_attachment_kind("application/vnd.ms-excel", "data.xls"), "spreadsheet");
+        assert_eq!(infer_attachment_kind("text/csv", "data.csv"), "spreadsheet");
+    }
+
+    #[test]
+    fn infer_attachment_kind_presentation() {
+        assert_eq!(infer_attachment_kind("application/vnd.ms-powerpoint", "slides.ppt"), "presentation");
+    }
+
+    #[test]
+    fn infer_attachment_kind_archive() {
+        assert_eq!(infer_attachment_kind("application/zip", "files.zip"), "archive");
+        assert_eq!(infer_attachment_kind("application/gzip", "files.tar.gz"), "archive");
+    }
+
+    #[test]
+    fn infer_attachment_kind_audio() {
+        assert_eq!(infer_attachment_kind("audio/mpeg", "song.mp3"), "audio");
+    }
+
+    #[test]
+    fn infer_attachment_kind_video() {
+        assert_eq!(infer_attachment_kind("video/mp4", "video.mp4"), "video");
+    }
+
+    #[test]
+    fn infer_attachment_kind_other() {
+        assert_eq!(infer_attachment_kind("text/plain", "notes.txt"), "other");
+    }
+
+    #[test]
+    fn media_kind_audio() {
+        assert_eq!(media_kind("audio/mpeg"), Some("audio"));
+    }
+
+    #[test]
+    fn media_kind_video() {
+        assert_eq!(media_kind("video/mp4"), Some("video"));
+    }
+
+    #[test]
+    fn media_kind_none() {
+        assert_eq!(media_kind("text/plain"), None);
+    }
+}
+
 fn kind_matches(content_type: &str, filename: &str, content_type_hints: &[&str], extension_hints: &[&str]) -> bool {
     content_type_hints.iter().any(|hint| content_type.contains(hint))
         || extension_hints

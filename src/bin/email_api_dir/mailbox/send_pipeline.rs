@@ -102,6 +102,48 @@ pub(crate) fn validate_send_request(
     })
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dkim_outcome_default_flags() {
+        let outcome = DkimOutcome {
+            dkim_sig: "sig".into(),
+            message_id_hdr: "mid".into(),
+            already_delivered: false,
+            dkim_remote_accepted: true,
+            dkim_remote_rejected: false,
+            dkim_response: None,
+            dkim_mx_host: None,
+            dkim_remote_ip: None,
+            dkim_remote_port: None,
+        };
+        assert!(outcome.dkim_remote_accepted);
+        assert!(!outcome.already_delivered);
+    }
+
+    #[test]
+    fn validated_send_request_builds() {
+        let req = ValidatedSendRequest {
+            user_id: "admin".into(),
+            from: "<EMAIL>".into(),
+            to: "<EMAIL>".into(),
+            cc: "".into(),
+            bcc: "".into(),
+            subject: "Test".into(),
+            mail_body: "Body".into(),
+            smtp_body: "Body".into(),
+            content_type_header: "text/plain".into(),
+            in_reply_to: None,
+            references: vec![],
+            attachments: vec![],
+        };
+        assert_eq!(req.user_id, "admin");
+        assert_eq!(req.to, "<EMAIL>");
+    }
+}
+
 /// Signe le courriel via le service DKIM partagé et interprète sa réponse.
 pub(crate) async fn apply_dkim_signature(
     v: &ValidatedSendRequest,
