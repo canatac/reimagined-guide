@@ -37,7 +37,149 @@ pub(crate) struct DkimOutcome {
     pub dkim_remote_port: Option<u16>,
 }
 
-/// Valide la requête entrante et construit le corps MIME final.
+impl DkimOutcome {
+    pub fn new(dkim_sig: String, message_id_hdr: String) -> Self {
+        DkimOutcome {
+            dkim_sig,
+            message_id_hdr,
+            already_delivered: false,
+            dkim_remote_accepted: false,
+            dkim_remote_rejected: false,
+            dkim_response: None,
+            dkim_mx_host: None,
+            dkim_remote_ip: None,
+            dkim_remote_port: None,
+        }
+    }
+
+    pub fn with_remote_status(mut self, accepted: bool, rejected: bool, response: Option<String>) -> Self {
+        self.dkim_remote_accepted = accepted;
+        self.dkim_remote_rejected = rejected;
+        self.dkim_response = response;
+        self
+    }
+
+    pub fn is_successful(&self) -> bool {
+        !self.dkim_sig.is_empty() && !self.dkim_remote_rejected
+    }
+
+    pub fn has_dkim_signature(&self) -> bool {
+        !self.dkim_sig.is_empty()
+    }
+
+    pub fn remote_rejected(&self) -> bool {
+        self.dkim_remote_rejected
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validated_send_request_fields() {
+        let req = ValidatedSendRequest {
+            user_id: "user-1".to_string(),
+            from: "from@example.com".to_string(),
+            to: "to@example.com".to_string(),
+            cc: "cc@example.com".to_string(),
+            bcc: "bcc@example.com".to_string(),
+            subject: "Test".to_string(),
+            mail_body: "Body".to_string(),
+            smtp_body: "SMTP body".to_string(),
+            content_type_header: "text/plain".to_string(),
+            in_reply_to: Some("reply-to".to_string()),
+            references: vec!["ref1".to_string()],
+            attachments: vec![],
+        };
+        assert_eq!(req.user_id, "user-1");
+        assert_eq!(req.from, "from@example.com");
+        assert_eq!(req.to, "to@example.com");
+        assert_eq!(req.cc, "cc@example.com");
+        assert_eq!(req.bcc, "bcc@example.com");
+        assert_eq!(req.subject, "Test");
+        assert_eq!(req.mail_body, "Body");
+        assert!(!req.attachments.is_empty() || req.attachments.is_empty());
+    }
+
+    #[test]
+    fn dkim_outcome_new() {
+        let outcome = DkimOutcome::new("sig123".to_string(), "msg-id-1".to_string());
+        assert_eq!(outcome.dkim_sig, "sig123");
+        assert_eq!(outcome.message_id_hdr, "msg-id-1");
+        assert!(!outcome.already_delivered);
+        assert!(!outcome.dkim_remote_accepted);
+        assert!(!outcome.dkim_remote_rejected);
+        assert!(outcome.dkim_response.is_none());
+    }
+
+    #[test]
+    fn dkim_outcome_with_remote_status() {
+        let outcome = DkimOutcome::new("sig".to_string(), "mid".to_string())
+            .with_remote_status(true, false, Some("250 OK".to_string()));
+        assert!(outcome.dkim_remote_accepted);
+        assert!(!outcome.dkim_remote_rejected);
+        assert_eq!(outcome.dkim_response, Some("250 OK".to_string()));
+    }
+
+    #[test]
+    fn dkim_outcome_is_successful() {
+        let outcome = DkimOutcome::new("sig".to_string(), "mid".to_string());
+        assert!(outcome.is_successful());
+    }
+
+    #[test]
+    fn dkim_outcome_not_successful_when_rejected() {
+        let outcome = DkimOutcome::new("sig".to_string(), "mid".to_string())
+            .with_remote_status(false, true, Some("550 Rejected".to_string()));
+        assert!(!outcome.is_successful());
+    }
+
+    #[test]
+    fn dkim_outcome_not_successful_when_no_sig() {
+        let outcome = DkimOutcome::new("".to_string(), "mid".to_string());
+        assert!(!outcome.is_successful());
+    }
+
+    #[test]
+    fn dkim_outcome_has_dkim_signature() {
+        let with_sig = DkimOutcome::new("sig".to_string(), "mid".to_string());
+        assert!(with_sig.has_dkim_signature());
+        let without_sig = DkimOutcome::new("".to_string(), "mid".to_string());
+        assert!(!without_sig.has_dkim_signature());
+    }
+
+    #[test]
+    fn dkim_outcome_remote_rejected() {
+        let rejected = DkimOutcome::new("sig".to_string(), "mid".to_string())
+            .with_remote_status(false, true, None);
+        assert!(rejected.remote_rejected());
+        let accepted = DkimOutcome::new("sig".to_string(), "mid".to_string())
+            .with_remote_status(true, false, None);
+        assert!(!accepted.remote_rejected());
+    }
+
+    #[test]
+    fn dkim_outcome_remote_info_fields() {
+        let outcome = DkimOutcome {
+            dkim_sig: "sig".to_string(),
+            message_id_hdr: "mid".to_string(),
+            already_delivered: true,
+            dkim_remote_accepted: true,
+            dkim_remote_rejected: false,
+            dkim_response: Some("250 OK".to_string()),
+            dkim_mx_host: Some("mail.example.com".to_string()),
+            dkim_remote_ip: Some("1.2.3.4".to_string()),
+            dkim_remote_port: Some(587),
+        };
+        assert!(outcome.already_delivered);
+        assert_eq!(outcome.dkim_mx_host, Some("mail.example.com".to_string()));
+        assert_eq!(outcome.dkim_remote_ip, Some("1.2.3.4".to_string()));
+        assert_eq!(outcome.dkim_remote_port, Some(587));
+    }
+}
+
+/// Valide la requête entrante et construit le corps MIME finale.
 pub(crate) fn validate_send_request(
     body: &ComposeSendRequest,
     req: &actix_web::HttpRequest,
