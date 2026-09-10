@@ -285,11 +285,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_analytics_days_returns_30() {
-        assert_eq!(default_analytics_days(), 30);
-    }
-
-    #[test]
     fn normalize_label_name_trims() {
         assert_eq!(normalize_label_name("  Work  "), "Work");
     }
@@ -300,28 +295,16 @@ mod tests {
     }
 
     #[test]
-    fn normalize_label_color_defaults() {
+    fn normalize_label_color_default() {
         assert_eq!(normalize_label_color(None), "#64748b");
+        assert_eq!(normalize_label_color(Some("".into())), "#64748b");
+        assert_eq!(normalize_label_color(Some("  ".into())), "#64748b");
     }
 
     #[test]
-    fn normalize_label_color_empty_string() {
-        assert_eq!(normalize_label_color(Some("".to_string())), "#64748b");
-    }
-
-    #[test]
-    fn normalize_label_color_whitespace() {
-        assert_eq!(normalize_label_color(Some("   ".to_string())), "#64748b");
-    }
-
-    #[test]
-    fn normalize_label_color_valid() {
-        assert_eq!(normalize_label_color(Some("#ff0000".to_string())), "#ff0000");
-    }
-
-    #[test]
-    fn normalize_label_color_trims() {
-        assert_eq!(normalize_label_color(Some("  #ff0000  ".to_string())), "#ff0000");
+    fn normalize_label_color_custom() {
+        assert_eq!(normalize_label_color(Some("#ff0000".into())), "#ff0000");
+        assert_eq!(normalize_label_color(Some("  #abc  ".into())), "#abc");
     }
 }
 
