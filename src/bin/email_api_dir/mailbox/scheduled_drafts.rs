@@ -113,7 +113,7 @@ pub(crate) async fn api_drafts_schedule(
     match sq_coll
         .insert_one(doc! {
             "id": &id,
-            "user_id", &user_id,
+            "user_id": &user_id,
             "draft_id": &body.draft_id,
             "from": &from,
             "to": &to,
