@@ -1,10 +1,3 @@
-//! Startup helpers for the email_api binary.
-//!
-//! Extracted from `main.rs` to keep `main()` under the 150 LOC budget imposed
-//! by `scripts/arch_guard.sh`. No behaviour change: these helpers reproduce
-//! the exact same logic (env vars, URI shape, CORS config, HTTP route table)
-//! that previously lived inline in `main`.
-
 use actix_cors::Cors;
 use actix_web::web;
 use mongodb::options::ClientOptions;
@@ -122,14 +115,48 @@ async fn warm_up_mongo(client: &Arc<mongodb::Client>) {
     }
 }
 
-/// Build the permissive CORS layer used by both HTTP and HTTPS servers.
+/// Parse allowed CORS origins from env var CORS_ALLOWED_ORIGINS (comma-separated).
+/// Falls back to a secure default (no origins allowed) if not set.
+fn parse_allowed_origins() -> Vec<String> {
+    env::var("CORS_ALLOWED_ORIGINS")
+        .unwrap_or_default()
+        .split(',')
+        .filter_map(|s| {
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        })
+        .collect()
+}
+
+/// Build the CORS layer for the HTTP/HTTPS servers.
+/// 
+/// Issue #514: Replace permissive CORS with origin whitelist.
+/// Only origins listed in CORS_ALLOWED_ORIGINS env var are permitted.
+/// Non-whitelisted origins receive NO Access-Control-Allow-Origin header.
 pub(crate) fn build_cors_layer() -> Cors {
-    Cors::permissive()
-        .allow_any_origin()
-        .allow_any_method()
-        .allow_any_header()
-        .supports_credentials()
-        .max_age(3600)
+    let allowed_origins = parse_allowed_origins();
+
+    if allowed_origins.is_empty() {
+        // Secure default: no CORS allowed (same-origin only)
+        // This prevents cross-origin data exfiltration
+        eprintln!("WARNING: CORS_ALLOWED_ORIGINS not set — using secure default (no cross-origin allowed)");
+        Cors::default()
+    } else {
+        eprintln!("CORS whitelist: {:?}", allowed_origins);
+        let mut cors = Cors::default();
+        for origin in &allowed_origins {
+            cors = cors.allowed_origin(origin);
+        }
+        cors
+            .allow_any_method()
+            .allow_any_header()
+            .supports_credentials()
+            .max_age(3600)
+    }
 }
 
 // Route registration helpers live in `startup_routes.rs`.
@@ -147,4 +174,60 @@ pub(crate) fn register_http_routes(cfg: &mut web::ServiceConfig) {
     register_dmarc_routes(cfg);
     register_webhook_routes(cfg);
     register_mta_sts_routes(cfg);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_allowed_origins_empty_when_unset() {
+        std::env::remove_var("CORS_ALLOWED_ORIGINS");
+        let origins = parse_allowed_origins();
+        assert!(origins.is_empty());
+    }
+
+    #[test]
+    fn parse_allowed_origins_single() {
+        std::env::set_var("CORS_ALLOWED_ORIGINS", "https://mail.misfits.ai");
+        let origins = parse_allowed_origins();
+        assert_eq!(origins, vec!["https://mail.misfits.ai".to_string()]);
+        std::env::remove_var("CORS_ALLOWED_ORIGINS");
+    }
+
+    #[test]
+    fn parse_allowed_origins_multiple() {
+        std::env::set_var(
+            "CORS_ALLOWED_ORIGINS",
+            "https://mail.misfits.ai,https://app.misfits.ai",
+        );
+        let origins = parse_allowed_origins();
+        assert_eq!(
+            origins,
+            vec![
+                "https://mail.misfits.ai".to_string(),
+                "https://app.misfits.ai".to_string()
+            ]
+        );
+        std::env::remove_var("CORS_ALLOWED_ORIGINS");
+    }
+
+    #[test]
+    fn parse_allowed_origins_handles_whitespace() {
+        std::env::set_var(
+            "CORS_ALLOWED_ORIGINS",
+            "  https://a.com , https://b.com  ",
+        );
+        let origins = parse_allowed_origins();
+        assert_eq!(origins, vec!["https://a.com".to_string(), "https://b.com".to_string()]);
+        std::env::remove_var("CORS_ALLOWED_ORIGINS");
+    }
+
+    #[test]
+    fn parse_allowed_origins_skips_empty_entries() {
+        std::env::set_var("CORS_ALLOWED_ORIGINS", "https://a.com,,https://b.com,");
+        let origins = parse_allowed_origins();
+        assert_eq!(origins, vec!["https://a.com".to_string(), "https://b.com".to_string()]);
+        std::env::remove_var("CORS_ALLOWED_ORIGINS");
+    }
 }
