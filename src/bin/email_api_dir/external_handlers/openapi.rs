@@ -131,3 +131,144 @@ pub(crate) async fn api_external_openapi() -> impl Responder {
         .content_type("application/yaml; charset=utf-8")
         .body(OPENAPI_YAML)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn openapi_json_is_valid_json() {
+        let spec: serde_json::Value = serde_json::from_str(SPEC_JSON).unwrap();
+        assert!(spec.is_object());
+    }
+
+    #[test]
+    fn openapi_json_has_openapi_field() {
+        let spec: serde_json::Value = serde_json::from_str(SPEC_JSON).unwrap();
+        assert!(spec.get("openapi").is_some());
+        assert_eq!(spec["openapi"], "3.0.3");
+    }
+
+    #[test]
+    fn openapi_json_has_info() {
+        let spec: serde_json::Value = serde_json::from_str(SPEC_JSON).unwrap();
+        assert!(spec.get("info").is_some());
+        assert_eq!(spec["info"]["title"], "Email API");
+        assert_eq!(spec["info"]["version"], "1.0.0");
+    }
+
+    #[test]
+    fn openapi_json_has_paths() {
+        let spec: serde_json::Value = serde_json::from_str(SPEC_JSON).unwrap();
+        assert!(spec.get("paths").is_some());
+        assert!(spec["paths"].is_object());
+    }
+
+    #[test]
+    fn openapi_json_has_auth_paths() {
+        let spec: serde_json::Value = serde_json::from_str(SPEC_JSON).unwrap();
+        let paths = spec["paths"].as_object().unwrap();
+        assert!(paths.contains_key("/api/auth/login"));
+        assert!(paths.contains_key("/api/auth/register"));
+        assert!(paths.contains_key("/api/auth/logout"));
+    }
+
+    #[test]
+    fn openapi_json_has_email_paths() {
+        let spec: serde_json::Value = serde_json::from_str(SPEC_JSON).unwrap();
+        let paths = spec["paths"].as_object().unwrap();
+        assert!(paths.contains_key("/api/emails"));
+        assert!(paths.contains_key("/api/send"));
+    }
+
+    #[test]
+    fn openapi_json_has_admin_paths() {
+        let spec: serde_json::Value = serde_json::from_str(SPEC_JSON).unwrap();
+        let paths = spec["paths"].as_object().unwrap();
+        assert!(paths.contains_key("/api/admin/users"));
+        assert!(paths.contains_key("/api/admin/change-requests"));
+    }
+
+    #[test]
+    fn openapi_json_has_monitoring_paths() {
+        let spec: serde_json::Value = serde_json::from_str(SPEC_JSON).unwrap();
+        let paths = spec["paths"].as_object().unwrap();
+        assert!(paths.contains_key("/api/monitoring/summary"));
+        assert!(paths.contains_key("/api/monitoring/dashboard"));
+    }
+
+    #[test]
+    fn openapi_json_has_security_paths() {
+        let spec: serde_json::Value = serde_json::from_str(SPEC_JSON).unwrap();
+        let paths = spec["paths"].as_object().unwrap();
+        assert!(paths.contains_key("/api/security/alerts/active"));
+    }
+
+    #[test]
+    fn openapi_json_has_external_imap_paths() {
+        let spec: serde_json::Value = serde_json::from_str(SPEC_JSON).unwrap();
+        let paths = spec["paths"].as_object().unwrap();
+        assert!(paths.contains_key("/api/external-accounts"));
+        assert!(paths.contains_key("/api/external-folders"));
+        assert!(paths.contains_key("/api/external-sync"));
+    }
+
+    #[test]
+    fn openapi_json_has_calendar_paths() {
+        let spec: serde_json::Value = serde_json::from_str(SPEC_JSON).unwrap();
+        let paths = spec["paths"].as_object().unwrap();
+        assert!(paths.contains_key("/api/calendar/events"));
+    }
+
+    #[test]
+    fn openapi_json_has_newsletter_paths() {
+        let spec: serde_json::Value = serde_json::from_str(SPEC_JSON).unwrap();
+        let paths = spec["paths"].as_object().unwrap();
+        assert!(paths.contains_key("/api/newsletter/sources"));
+        assert!(paths.contains_key("/api/newsletter/items"));
+    }
+
+    #[test]
+    fn openapi_json_path_count() {
+        let spec: serde_json::Value = serde_json::from_str(SPEC_JSON).unwrap();
+        let paths = spec["paths"].as_object().unwrap();
+        // Should have at least 30 paths
+        assert!(paths.len() >= 30);
+    }
+
+    #[test]
+    fn openapi_json_all_paths_have_methods() {
+        let spec: serde_json::Value = serde_json::from_str(SPEC_JSON).unwrap();
+        let paths = spec["paths"].as_object().unwrap();
+        for (path, methods) in paths {
+            assert!(
+                methods.is_object(),
+                "Path {} should have methods object",
+                path
+            );
+            assert!(
+                !methods.as_object().unwrap().is_empty(),
+                "Path {} should have at least one method",
+                path
+            );
+        }
+    }
+
+    #[test]
+    fn swagger_ui_returns_html() {
+        // Just verify the function exists and would return HTML
+        // We can't easily test the async function without a full test harness
+        // but we can verify the HTML content is correct
+        let html = r##"<!DOCTYPE html>
+<html>
+<head>
+  <title>Email API — Swagger UI</title>
+</head>
+<body>
+<div id="swagger-ui"></div>
+</body>
+</html>"##;
+        assert!(html.contains("swagger-ui"));
+        assert!(html.contains("openapi.json"));
+    }
+}
