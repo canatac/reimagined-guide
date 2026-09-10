@@ -39,6 +39,66 @@ fn parse_imap_command_line(command: &str) -> Vec<String> {
     parts
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_simple_command() {
+        let result = parse_imap_command_line("A1 LOGIN user pass");
+        assert_eq!(result, vec!["A1", "LOGIN", "user", "pass"]);
+    }
+
+    #[test]
+    fn parse_quoted_argument() {
+        let result = parse_imap_command_line("A2 SELECT \"INBOX\"");
+        assert_eq!(result, vec!["A2", "SELECT", "\"INBOX\""]);
+    }
+
+    #[test]
+    fn parse_empty_string() {
+        let result = parse_imap_command_line("");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn parse_whitespace_only() {
+        let result = parse_imap_command_line("   ");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn parse_multiple_spaces() {
+        let result = parse_imap_command_line("A1  LOGIN   user   pass");
+        assert_eq!(result, vec!["A1", "LOGIN", "user", "pass"]);
+    }
+
+    #[test]
+    fn parse_quoted_with_spaces() {
+        let result = parse_imap_command_line("A3 APPEND \"Drafts\" {100+}");
+        assert_eq!(result, vec!["A3", "APPEND", "\"Drafts\"", "{100+}"]);
+    }
+
+    #[test]
+    fn parse_preserves_quotes_inside_token() {
+        let result = parse_imap_command_line("A4 LOGIN \"user name\" pass");
+        assert_eq!(result.len(), 4);
+        assert_eq!(result[2], "\"user name\"");
+    }
+
+    #[test]
+    fn parse_single_token() {
+        let result = parse_imap_command_line("NOOP");
+        assert_eq!(result, vec!["NOOP"]);
+    }
+
+    #[test]
+    fn parse_tag_command_with_brackets() {
+        let result = parse_imap_command_line("A5 FETCH 1:* (BODY[HEADER])");
+        assert_eq!(result, vec!["A5", "FETCH", "1:*", "(BODY[HEADER])"]);
+    }
+}
+
 #[derive(Clone)]
 pub struct ImapServer {
     logic: Arc<Logic>,
