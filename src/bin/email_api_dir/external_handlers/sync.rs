@@ -12,6 +12,38 @@ pub(crate) struct ExternalMessagesQuery {
     pub(crate) page_size: Option<u64>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn external_messages_query_fields() {
+        let query = ExternalMessagesQuery {
+            account_id: "acc_1".to_string(),
+            folder: Some("INBOX".to_string()),
+            page: Some(1),
+            page_size: Some(50),
+        };
+        assert_eq!(query.account_id, "acc_1");
+        assert_eq!(query.folder, Some("INBOX".to_string()));
+        assert_eq!(query.page, Some(1));
+        assert_eq!(query.page_size, Some(50));
+    }
+
+    #[test]
+    fn external_messages_query_defaults() {
+        let query = ExternalMessagesQuery {
+            account_id: "acc_1".to_string(),
+            folder: None,
+            page: None,
+            page_size: None,
+        };
+        assert!(query.folder.is_none());
+        assert!(query.page.is_none());
+        assert!(query.page_size.is_none());
+    }
+}
+
 pub(crate) async fn api_external_sync_start(
     req: HttpRequest,
     path: web::Path<String>,
