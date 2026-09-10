@@ -164,6 +164,61 @@ fn format_cluster_uri(cluster_url: &str, username: &str, password: &str, app_nam
         username, password, cluster_url, app_name
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_cluster_uri_mongodb_srv() {
+        let result = format_cluster_uri(
+            "mongodb+srv://cluster.example.net",
+            "user",
+            "pass",
+            "myapp"
+        );
+        assert!(result.contains("mongodb+srv://user:pass@cluster.example.net"));
+        assert!(result.contains("appName=myapp"));
+        assert!(result.contains("retryWrites=true"));
+    }
+
+    #[test]
+    fn format_cluster_uri_standard() {
+        let result = format_cluster_uri(
+            "mongodb://host.example.com:27017",
+            "user",
+            "pass",
+            "myapp"
+        );
+        assert!(result.contains("mongodb://user:pass@host.example.com:27017"));
+        assert!(result.contains("authSource=admin"));
+        assert!(result.contains("appName=myapp"));
+    }
+
+    #[test]
+    fn format_cluster_uri_with_existing_params() {
+        let result = format_cluster_uri(
+            "mongodb://host.example.com:27017?replicaSet=rs0",
+            "user",
+            "pass",
+            "myapp"
+        );
+        assert!(result.contains("appName=myapp"));
+        assert!(result.contains("replicaSet=rs0"));
+    }
+
+    #[test]
+    fn format_cluster_uri_atlas_style() {
+        let result = format_cluster_uri(
+            "cluster0.abc123.mongodb.net",
+            "admin",
+            "secret",
+            "testapp"
+        );
+        assert!(result.contains("mongodb+srv://admin:secret@cluster0.abc123.mongodb.net"));
+        assert!(result.contains("appName=testapp"));
+    }
+}
 async fn init_mongo_client(client_uri: &str) -> Result<Arc<mongodb::Client>, MainError> {
     let options = build_mongo_options(client_uri).await.map_err(|e| MainError(format!("MongoDB options parse failed: {e}")))?;
     let client = mongodb::Client::with_options(options)
