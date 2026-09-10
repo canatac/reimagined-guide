@@ -158,3 +158,70 @@ fn format_msg(bs: &Bundles, locale: &str, key: &str, args: &[(&str, &str)]) -> O
 
     Some(value.into_owned())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_rtl_detects_rtl_locales() {
+        assert!(is_rtl("ar"));
+        assert!(is_rtl("he"));
+        assert!(is_rtl("fa"));
+    }
+
+    #[test]
+    fn is_rtl_returns_false_for_ltr() {
+        assert!(!is_rtl("en"));
+        assert!(!is_rtl("fr"));
+        assert!(!is_rtl("es"));
+        assert!(!is_rtl("de"));
+    }
+
+    #[test]
+    fn resolve_locale_uses_user_preference_when_supported() {
+        assert_eq!(resolve_locale("en", Some("fr")), "fr");
+        assert_eq!(resolve_locale("fr", Some("en")), "en");
+    }
+
+    #[test]
+    fn resolve_locale_ignores_unsupported_user_preference() {
+        assert_eq!(resolve_locale("en", Some("xx")), "en");
+    }
+
+    #[test]
+    fn resolve_locale_falls_back_to_default() {
+        assert_eq!(resolve_locale("", None), "fr");
+    }
+
+    #[test]
+    fn resolve_locale_handles_region_prefix() {
+        let result = resolve_locale("fr-CA, en-US", None);
+        assert!(result == "fr" || result == "en");
+    }
+
+    #[test]
+    fn resolve_locale_prioritizes_user_over_accept_language() {
+        assert_eq!(resolve_locale("en", Some("de")), "de");
+    }
+
+    #[test]
+    fn supported_locales_contains_expected() {
+        assert!(SUPPORTED_LOCALES.contains(&"fr"));
+        assert!(SUPPORTED_LOCALES.contains(&"en"));
+        assert!(SUPPORTED_LOCALES.contains(&"ar"));
+        assert!(SUPPORTED_LOCALES.contains(&"he"));
+    }
+
+    #[test]
+    fn default_locale_is_supported() {
+        assert!(SUPPORTED_LOCALES.contains(&DEFAULT_LOCALE));
+    }
+
+    #[test]
+    fn rtl_locales_are_supported() {
+        for locale in RTL_LOCALES {
+            assert!(SUPPORTED_LOCALES.contains(locale), "{} should be supported", locale);
+        }
+    }
+}
