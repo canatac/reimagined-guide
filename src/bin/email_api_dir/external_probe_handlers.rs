@@ -36,6 +36,45 @@ pub(crate) struct ProbeStreamInput {
 
 fn default_true() -> bool { true }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn probe_stream_input_fields() {
+        let input = ProbeStreamInput {
+            host: "imap.example.com".to_string(),
+            port: 993,
+            tls: true,
+            username: "user@example.com".to_string(),
+            password: "secret".to_string(),
+            folder: Some("INBOX".to_string()),
+            since: Some("2026-01-01".to_string()),
+        };
+        assert_eq!(input.host, "imap.example.com");
+        assert_eq!(input.port, 993);
+        assert!(input.tls);
+        assert_eq!(input.folder, Some("INBOX".to_string()));
+        assert_eq!(input.since, Some("2026-01-01".to_string()));
+    }
+
+    #[test]
+    fn probe_stream_input_defaults() {
+        let input = ProbeStreamInput {
+            host: "host".to_string(),
+            port: 143,
+            tls: default_true(),
+            username: "u".to_string(),
+            password: "p".to_string(),
+            folder: None,
+            since: None,
+        };
+        assert!(input.tls);
+        assert!(input.folder.is_none());
+        assert!(input.since.is_none());
+    }
+}
+
 pub(crate) async fn api_external_probe_stream(
     payload: web::Json<ProbeStreamInput>,
 ) -> impl Responder {
