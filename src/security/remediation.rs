@@ -22,6 +22,48 @@ pub struct TenantState {
     pub rolled_back: bool,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tenant_state_creation() {
+        let state = TenantState {
+            tenant_id: "t1".into(),
+            level: 3,
+            action: RemediationAction::Quarantine,
+            reason: "rule-x — test".into(),
+            alert_id: "a1".into(),
+            applied_at: "2026-01-01T00:00:00Z".into(),
+            expires_at: Some("2026-01-01T01:00:00Z".into()),
+            rolled_back: false,
+        };
+        assert_eq!(state.tenant_id, "t1");
+        assert_eq!(state.level, 3);
+        assert!(!state.rolled_back);
+    }
+
+    #[test]
+    fn tenant_state_roundtrip() {
+        let state = TenantState {
+            tenant_id: "t2".into(),
+            level: 4,
+            action: RemediationAction::Block,
+            reason: "test".into(),
+            alert_id: "a2".into(),
+            applied_at: "2026-01-01T00:00:00Z".into(),
+            expires_at: None,
+            rolled_back: true,
+        };
+        let doc = bson::to_document(&state).expect("serialize");
+        let parsed: TenantState = bson::from_document(doc).expect("deserialize");
+        assert_eq!(parsed.tenant_id, "t2");
+        assert_eq!(parsed.level, 4);
+        assert_eq!(parsed.action, RemediationAction::Block);
+        assert!(parsed.rolled_back);
+    }
+}
+
 pub async fn apply_remediation(client: &Client, alert: &mut SecurityAlert) {
     if !super::enforce_mode() {
         // Observe mode: log intent but do not enforce
