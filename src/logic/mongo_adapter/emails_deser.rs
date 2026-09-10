@@ -117,3 +117,118 @@ pub(super) fn deserialize_email_document(doc: bson::Document) -> Option<Email> {
     );
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_converts_i64_sequence_number_to_i32() {
+        let mut doc = bson::Document::new();
+        doc.insert("sequence_number", 42i64);
+        doc.insert("uid", 100i64);
+        let result = normalize_email_document_for_deser(doc);
+        assert_eq!(result.get_i32("sequence_number").unwrap(), 42);
+        assert_eq!(result.get_i32("uid").unwrap(), 100);
+    }
+
+    #[test]
+    fn normalize_handles_missing_fields() {
+        let doc = bson::Document::new();
+        let result = normalize_email_document_for_deser(doc);
+        assert!(result.get_i32("sequence_number").is_err());
+        assert!(result.get_i32("uid").is_err());
+    }
+
+    #[test]
+    fn deserialize_with_minimal_fields() {
+        let mut doc = bson::Document::new();
+        doc.insert("id", "test-123");
+        doc.insert("subject", "Test Subject");
+        doc.insert("from", "sender@example.com");
+        doc.insert("to", "recipient@example.com");
+        doc.insert("body", "Hello World");
+        let result = deserialize_email_document(doc);
+        assert!(result.is_some());
+        let email = result.unwrap();
+        assert_eq!(email.id, "test-123");
+        assert_eq!(email.subject, "Test Subject");
+        assert_eq!(email.from, "sender@example.com");
+        assert_eq!(email.to, "recipient@example.com");
+        assert_eq!(email.body, "Hello World");
+    }
+
+    #[test]
+    fn deserialize_with_array_headers() {
+        let mut doc = bson::Document::new();
+        doc.insert("id", "test-456");
+        let headers = bson::Array::from(vec![
+            bson::Array::from(vec![bson::Bson::String("From".to_string()), bson::Bson::String("a@b.com".to_string())]),
+            bson::Array::from(vec![bson::Bson::String("Subject".to_string()), bson::Bson::String("Hi".to_string())]),
+        ]);
+        doc.insert("headers", headers);
+        let result = deserialize_email_document(doc);
+        assert!(result.is_some());
+        let email = result.unwrap();
+        assert_eq!(email.headers.len(), 2);
+    }
+
+    #[test]
+    fn deserialize_with_string_flags() {
+        let mut doc = bson::Document::new();
+        doc.insert("id", "test-789");
+        let flags = bson::Array::from(vec![
+            bson::Bson::String("\\Seen".to_string()),
+            bson::Bson::String("\\Flagged".to_string()),
+        ]);
+        doc.insert("flags", flags);
+        let result = deserialize_email_document(doc);
+        assert!(result.is_some());
+        let email = result.unwrap();
+        assert_eq!(email.flags.len(), 2);
+    }
+
+    #[test]
+    fn deserialize_empty_document_returns_none() {
+        let doc = bson::Document::new();
+        let result = deserialize_email_document(doc);
+        // Empty doc has no id and no to, so returns None
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn deserialize_with_only_id_returns_none() {
+        let mut doc = bson::Document::new();
+        doc.insert("id", "test-only-id");
+        let result = deserialize_email_document(doc);
+        // Missing "to" field, so returns None
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn deserialize_with_uid_sequence_number() {
+        let mut doc = bson::Document::new();
+        doc.insert("id", "test-uid");
+        doc.insert("to", "recipient@example.com");
+        doc.insert("uid", 42i32);
+        doc.insert("sequence_number", 7i32);
+        let result = deserialize_email_document(doc);
+        assert!(result.is_some());
+        let email = result.unwrap();
+        assert_eq!(email.uid, 42);
+        assert_eq!(email.sequence_number, 7);
+    }
+
+    #[test]
+    fn deserialize_with_dkim_signature() {
+        let mut doc = bson::Document::new();
+        doc.insert("id", "test-dkim");
+        doc.insert("to", "recipient@example.com");
+        doc.insert("dkim_signature", "v=1; a=rsa-sha256; d=example.com;");
+        let result = deserialize_email_document(doc);
+        assert!(result.is_some());
+        let email = result.unwrap();
+        assert!(email.dkim_signature.is_some());
+        assert!(email.dkim_signature.unwrap().contains("v=1"));
+    }
+}
