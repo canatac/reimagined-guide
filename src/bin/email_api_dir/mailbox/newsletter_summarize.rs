@@ -51,6 +51,93 @@ pub(crate) fn compute_signal(summary: &str) -> i32 {
     (65 + boost).clamp(50, 98)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_topic_returns_default_for_none() {
+        assert_eq!(normalize_topic(None), "Tech");
+    }
+
+    #[test]
+    fn normalize_topic_returns_default_for_empty() {
+        assert_eq!(normalize_topic(Some("")), "Tech");
+        assert_eq!(normalize_topic(Some("   ")), "Tech");
+    }
+
+    #[test]
+    fn normalize_topic_preserves_value() {
+        assert_eq!(normalize_topic(Some("AI")), "AI");
+        assert_eq!(normalize_topic(Some("Rust")), "Rust");
+    }
+
+    #[test]
+    fn normalize_url_none() {
+        assert_eq!(normalize_url(None), None);
+    }
+
+    #[test]
+    fn normalize_url_empty() {
+        assert_eq!(normalize_url(Some("")), None);
+        assert_eq!(normalize_url(Some("   ")), None);
+    }
+
+    #[test]
+    fn normalize_url_preserves_http() {
+        assert_eq!(
+            normalize_url(Some("http://example.com")),
+            Some("http://example.com".to_string())
+        );
+    }
+
+    #[test]
+    fn normalize_url_preserves_https() {
+        assert_eq!(
+            normalize_url(Some("https://example.com")),
+            Some("https://example.com".to_string())
+        );
+    }
+
+    #[test]
+    fn normalize_url_adds_scheme() {
+        assert_eq!(
+            normalize_url(Some("example.com")),
+            Some("https://example.com".to_string())
+        );
+    }
+
+    #[test]
+    fn compute_signal_empty() {
+        assert_eq!(compute_signal(""), 65);
+    }
+
+    #[test]
+    fn compute_signal_short() {
+        assert_eq!(compute_signal("short"), 65);
+    }
+
+    #[test]
+    fn compute_signal_longer_text() {
+        let long_text = "a".repeat(400);
+        let signal = compute_signal(&long_text);
+        assert!(signal >= 50 && signal <= 98);
+    }
+
+    #[test]
+    fn compute_signal_clamps_max() {
+        let very_long = "a".repeat(10000);
+        let signal = compute_signal(&very_long);
+        assert_eq!(signal, 98);
+    }
+
+    #[test]
+    fn compute_signal_clamps_min() {
+        let signal = compute_signal("a");
+        assert!(signal >= 50);
+    }
+}
+
 #[path = "newsletter_summarize_links.rs"]
 mod links;
 #[path = "newsletter_summarize_parsing.rs"]
