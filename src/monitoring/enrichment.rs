@@ -142,3 +142,58 @@ fn is_private(ip: &str) -> bool {
 
     PREFIXES.iter().any(|prefix| ip.starts_with(prefix)) || EXACT_VALUES.contains(&ip)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_private_localhost() {
+        assert!(is_private("127.0.0.1"));
+        assert!(is_private("10.0.0.1"));
+        assert!(is_private("192.168.1.1"));
+        assert!(is_private("172.16.0.1"));
+        assert!(is_private("::1"));
+        assert!(is_private("0.0.0.0"));
+    }
+
+    #[test]
+    fn test_is_private_public_ips() {
+        assert!(!is_private("8.8.8.8"));
+        assert!(!is_private("1.1.1.1"));
+        assert!(!is_private("203.0.113.1"));
+    }
+
+    #[test]
+    fn test_infer_datacenter_known_providers() {
+        assert_eq!(infer_datacenter("Amazon Web Services"), Some("AWS".to_string()));
+        assert_eq!(infer_datacenter("Google LLC"), Some("GCP".to_string()));
+        assert_eq!(infer_datacenter("Microsoft Azure"), Some("Azure".to_string()));
+        assert_eq!(infer_datacenter("Cloudflare Inc"), Some("Cloudflare".to_string()));
+        assert_eq!(infer_datacenter("OVH SAS"), Some("OVH".to_string()));
+        assert_eq!(infer_datacenter("Hetzner Online GmbH"), Some("Hetzner".to_string()));
+    }
+
+    #[test]
+    fn test_infer_datacenter_unknown() {
+        assert_eq!(infer_datacenter("Some Small ISP"), None);
+    }
+
+    #[test]
+    fn test_non_empty_with_value() {
+        assert_eq!(non_empty("hello".to_string()), "hello");
+    }
+
+    #[test]
+    fn test_non_empty_empty_string() {
+        assert_eq!(non_empty(String::new()), "unknown");
+    }
+
+    #[test]
+    fn test_private_geo_returns_private_marker() {
+        let geo = private_geo("10.0.0.1");
+        assert_eq!(geo.country, "private");
+        assert_eq!(geo.city, "private");
+        assert_eq!(geo.company, "private");
+    }
+}

@@ -88,3 +88,48 @@ pub fn classify_smtp_reject(code: Option<u16>, reply: &str) -> SmtpRejectTaxonom
 
     SmtpRejectTaxonomy { reason_code: "SMTP_REJECT_UNKNOWN", action: "inspect_smtp_reply" }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_classify_network_failure() {
+        let tax = classify_smtp_reject(Some(421), "421 connection refused by remote host");
+        assert_eq!(tax.reason_code, "SMTP_REJECT_NETWORK_FAILURE");
+        assert_eq!(tax.action, "retry_with_backoff");
+    }
+
+    #[test]
+    fn test_classify_policy_block_554() {
+        let tax = classify_smtp_reject(Some(554), "554 5.7.1 Message rejected due to policy");
+        assert_eq!(tax.reason_code, "SMTP_REJECT_POLICY_BLOCK");
+        assert_eq!(tax.action, "review_provider_policy");
+    }
+
+    #[test]
+    fn test_classify_unknown_fallback() {
+        let tax = classify_smtp_reject(None, "some unrecognized error");
+        assert_eq!(tax.reason_code, "SMTP_REJECT_UNKNOWN");
+        assert_eq!(tax.action, "inspect_smtp_reply");
+    }
+
+    #[test]
+    fn test_parse_smtp_code_with_prefix() {
+        assert_eq!(parse_smtp_code("Error: 421 service not available"), Some(421));
+    }
+
+    #[test]
+    fn test_parse_smtp_code_no_match() {
+        assert_eq!(parse_smtp_code("connection timed out"), None);
+    }
+
+    #[test]
+    fn test_catalog_contains_required_codes() {
+        let codes: Vec<&str> = SMTP_REJECT_TAXONOMY_CATALOG.iter().map(|t| t.reason_code).collect();
+        assert!(codes.contains(&"SMTP_REJECT_INVALID_RECIPIENT"));
+        assert!(codes.contains(&"SMTP_REJECT_DKIM_FAIL"));
+        assert!(codes.contains(&"SMTP_REJECT_BLACKLISTED"));
+        assert!(codes.contains(&"SMTP_REJECT_SPF_FAIL"));
+    }
+}
