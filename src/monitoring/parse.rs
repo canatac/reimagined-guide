@@ -88,3 +88,166 @@ pub fn classify_smtp_reject(code: Option<u16>, reply: &str) -> SmtpRejectTaxonom
 
     SmtpRejectTaxonomy { reason_code: "SMTP_REJECT_UNKNOWN", action: "inspect_smtp_reply" }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- parse_smtp_code tests ---
+
+    #[test]
+    fn parse_smtp_code_extracts_550() {
+        assert_eq!(parse_smtp_code("Unexpected response: 550 mailbox unavailable"), Some(550));
+    }
+
+    #[test]
+    fn parse_smtp_code_extracts_250() {
+        assert_eq!(parse_smtp_code("OK 250 message accepted"), Some(250));
+    }
+
+    #[test]
+    fn parse_smtp_code_returns_none_for_no_code() {
+        assert_eq!(parse_smtp_code("connection failed"), None);
+    }
+
+    #[test]
+    fn parse_smtp_code_filters_out_of_range() {
+        assert_eq!(parse_smtp_code("code 999"), None);
+        assert_eq!(parse_smtp_code("code 100"), None);
+    }
+
+    #[test]
+    fn parse_smtp_code_handles_multiple_codes() {
+        assert_eq!(parse_smtp_code("421 4.7.0 rate limited"), Some(421));
+    }
+
+    // --- classify_smtp_reject tests ---
+
+    #[test]
+    fn classify_invalid_recipient() {
+        let result = classify_smtp_reject(Some(550), "550 user unknown");
+        assert_eq!(result.reason_code, "SMTP_REJECT_INVALID_RECIPIENT");
+        assert_eq!(result.action, "verify_recipient");
+    }
+
+    #[test]
+    fn classify_mailbox_unavailable() {
+        let result = classify_smtp_reject(Some(550), "550 mailbox unavailable");
+        assert_eq!(result.reason_code, "SMTP_REJECT_MAILBOX_UNAVAILABLE");
+    }
+
+    #[test]
+    fn classify_domain_not_found() {
+        let result = classify_smtp_reject(Some(550), "550 domain not found");
+        assert_eq!(result.reason_code, "SMTP_REJECT_DOMAIN_NOT_FOUND");
+        assert_eq!(result.action, "fix_dns_mx");
+    }
+
+    #[test]
+    fn classify_spf_fail() {
+        let result = classify_smtp_reject(Some(550), "550 SPF fail");
+        assert_eq!(result.reason_code, "SMTP_REJECT_SPF_FAIL");
+        assert_eq!(result.action, "fix_spf");
+    }
+
+    #[test]
+    fn classify_dkim_fail() {
+        let result = classify_smtp_reject(Some(550), "550 DKIM fail");
+        assert_eq!(result.reason_code, "SMTP_REJECT_DKIM_FAIL");
+        assert_eq!(result.action, "fix_dkim");
+    }
+
+    #[test]
+    fn classify_dmarc_fail() {
+        let result = classify_smtp_reject(Some(550), "550 DMARC reject");
+        assert_eq!(result.reason_code, "SMTP_REJECT_DMARC_FAIL");
+        assert_eq!(result.action, "fix_dmarc_alignment");
+    }
+
+    #[test]
+    fn classify_blacklisted() {
+        let result = classify_smtp_reject(Some(550), "550 blacklist spamhaus");
+        assert_eq!(result.reason_code, "SMTP_REJECT_BLACKLISTED");
+        assert_eq!(result.action, "delist_sender_ip");
+    }
+
+    #[test]
+    fn classify_rate_limited_by_text() {
+        let result = classify_smtp_reject(None, "too many messages");
+        assert_eq!(result.reason_code, "SMTP_REJECT_RATE_LIMITED");
+        assert_eq!(result.action, "throttle_and_retry");
+    }
+
+    #[test]
+    fn classify_rate_limited_by_code() {
+        let result = classify_smtp_reject(Some(421), "service not available");
+        assert_eq!(result.reason_code, "SMTP_REJECT_RATE_LIMITED");
+    }
+
+    #[test]
+    fn classify_greylisted() {
+        let result = classify_smtp_reject(None, "greylisted try again later");
+        assert_eq!(result.reason_code, "SMTP_REJECT_GREYLISTED");
+        assert_eq!(result.action, "retry_later");
+    }
+
+    #[test]
+    fn classify_temporary_unavailable() {
+        let result = classify_smtp_reject(Some(450), "mailbox busy");
+        assert_eq!(result.reason_code, "SMTP_REJECT_TEMPORARY_UNAVAILABLE");
+    }
+
+    #[test]
+    fn classify_message_too_large() {
+        let result = classify_smtp_reject(Some(552), "message size exceeds");
+        assert_eq!(result.reason_code, "SMTP_REJECT_MESSAGE_TOO_LARGE");
+        assert_eq!(result.action, "reduce_message_size");
+    }
+
+    #[test]
+    fn classify_storage_exceeded() {
+        let result = classify_smtp_reject(None, "mailbox full quota exceeded");
+        assert_eq!(result.reason_code, "SMTP_REJECT_STORAGE_EXCEEDED");
+        assert_eq!(result.action, "notify_recipient_quota");
+    }
+
+    #[test]
+    fn classify_tls_required() {
+        let result = classify_smtp_reject(Some(530), "must issue a starttls");
+        assert_eq!(result.reason_code, "SMTP_REJECT_TLS_REQUIRED");
+        assert_eq!(result.action, "enforce_tls");
+    }
+
+    #[test]
+    fn classify_auth_required() {
+        let result = classify_smtp_reject(None, "relay access denied");
+        assert_eq!(result.reason_code, "SMTP_REJECT_AUTH_REQUIRED");
+        assert_eq!(result.action, "authenticate_sender");
+    }
+
+    #[test]
+    fn classify_network_failure() {
+        let result = classify_smtp_reject(None, "connection timeout");
+        assert_eq!(result.reason_code, "SMTP_REJECT_NETWORK_FAILURE");
+        assert_eq!(result.action, "retry_with_backoff");
+    }
+
+    #[test]
+    fn classify_policy_block() {
+        let result = classify_smtp_reject(Some(554), "policy rejected");
+        assert_eq!(result.reason_code, "SMTP_REJECT_POLICY_BLOCK");
+        assert_eq!(result.action, "review_provider_policy");
+    }
+
+    #[test]
+    fn classify_unknown() {
+        let result = classify_smtp_reject(None, "some random error");
+        assert_eq!(result.reason_code, "SMTP_REJECT_UNKNOWN");
+        assert_eq!(result.action, "inspect_smtp_reply");
+    }
+
+    #[test]
+    fn taxonomy_catalog_has_15_entries() {
+        assert_eq!(SMTP_REJECT_TAXONOMY_CATALOG.len(), 15);
+    }
+}
