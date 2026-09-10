@@ -99,3 +99,52 @@ pub struct GenerateRequest {
     pub max_age: u64,
     pub mx: Vec<String>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_response_serializes() {
+        let resp = ValidateResponse {
+            domain: "example.com".into(),
+            mx: "mail.example.com".into(),
+            result: "Valid".into(),
+            enforce: true,
+            block_on_failure: false,
+        };
+        let json = serde_json::to_value(&resp).unwrap();
+        assert_eq!(json["domain"], "example.com");
+        assert_eq!(json["mx"], "mail.example.com");
+        assert_eq!(json["enforce"], true);
+        assert_eq!(json["block_on_failure"], false);
+    }
+
+    #[test]
+    fn policy_query_deserializes() {
+        let json = serde_json::json!({ "domain": "example.com" });
+        let query: PolicyQuery = serde_json::from_value(json).unwrap();
+        assert_eq!(query.domain, "example.com");
+    }
+
+    #[test]
+    fn validate_query_deserializes() {
+        let json = serde_json::json!({ "domain": "example.com", "mx": "mail.example.com" });
+        let query: ValidateQuery = serde_json::from_value(json).unwrap();
+        assert_eq!(query.domain, "example.com");
+        assert_eq!(query.mx, "mail.example.com");
+    }
+
+    #[test]
+    fn generate_request_deserializes() {
+        let json = serde_json::json!({
+            "mode": "enforce",
+            "max_age": 86400,
+            "mx": ["mail.example.com"]
+        });
+        let req: GenerateRequest = serde_json::from_value(json).unwrap();
+        assert_eq!(req.mode, "enforce");
+        assert_eq!(req.max_age, 86400);
+        assert_eq!(req.mx, vec!["mail.example.com"]);
+    }
+}
