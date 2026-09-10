@@ -50,3 +50,41 @@ pub(crate) async fn revoke_all_sessions(mongo: &Arc<mongodb::Client>, user_id: &
         eprintln!("reset_password: revoke sessions error: {}", e);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generate_temp_password_has_min_length() {
+        let pw = generate_temp_password();
+        assert!(pw.len() >= 10);
+    }
+
+    #[test]
+    fn generate_temp_password_contains_special_chars() {
+        let pw = generate_temp_password();
+        assert!(pw.contains('!') || pw.contains('#'));
+    }
+
+    #[test]
+    fn resolve_new_password_provided() {
+        let (pw, generated) = resolve_new_password(&Some("secret123".to_string()));
+        assert_eq!(pw, "secret123");
+        assert!(!generated);
+    }
+
+    #[test]
+    fn resolve_new_password_empty() {
+        let (pw, generated) = resolve_new_password(&Some("  ".to_string()));
+        assert!(!pw.is_empty());
+        assert!(generated);
+    }
+
+    #[test]
+    fn resolve_new_password_none() {
+        let (pw, generated) = resolve_new_password(&None);
+        assert!(!pw.is_empty());
+        assert!(generated);
+    }
+}
