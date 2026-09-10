@@ -41,3 +41,25 @@ pub(crate) fn imap_probe(
         run_imap_dialog_plain(tcp, username, password, include_list)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn imap_probe_rejects_empty_password() {
+        let result = imap_probe("localhost", 993, true, "user", "", false);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Missing credential"));
+    }
+
+    #[test]
+    fn imap_probe_empty_password_variants() {
+        let result_plain = imap_probe("localhost", 143, false, "user", "", true);
+        let result_tls = imap_probe("localhost", 993, true, "user", "", true);
+        assert!(result_plain.is_err());
+        assert!(result_tls.is_err());
+        assert!(result_plain.unwrap_err().contains("Missing credential"));
+        assert!(result_tls.unwrap_err().contains("Missing credential"));
+    }
+}
