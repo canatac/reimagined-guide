@@ -54,8 +54,8 @@ pub(crate) fn normalize_oauth_provider(provider: &str) -> Option<String> {
 pub(crate) fn req_ip_str(req: &actix_web::HttpRequest) -> String {
     // realip_remote_addr is derived from headers an attacker can set, so we must
     // bound the output length before any allocation.
-    let raw = req
-        .connection_info()
+    let conn = req.connection_info();
+    let raw = conn
         .realip_remote_addr()
         .unwrap_or("unknown")
         .split(':')
