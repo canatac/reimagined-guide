@@ -32,6 +32,53 @@ pub fn extract_email_address(content: &str, header: &str) -> Option<String> {
     Some(value.to_string())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_email_address_simple() {
+        let content = "From: sender@example.com";
+        assert_eq!(
+            extract_email_address(content, "From:"),
+            Some("sender@example.com".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_email_address_with_display_name() {
+        let content = "From: John Doe <john@example.com>";
+        assert_eq!(
+            extract_email_address(content, "From:"),
+            Some("john@example.com".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_email_address_missing_header() {
+        let content = "Subject: Test";
+        assert_eq!(extract_email_address(content, "From:"), None);
+    }
+
+    #[test]
+    fn extract_email_address_to_header() {
+        let content = "To: recipient@example.com";
+        assert_eq!(
+            extract_email_address(content, "To:"),
+            Some("recipient@example.com".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_email_address_without_angle_brackets() {
+        let content = "From: plainaddress@example.com";
+        assert_eq!(
+            extract_email_address(content, "From:"),
+            Some("plainaddress@example.com".to_string())
+        );
+    }
+}
+
 async fn send_email_content_inner<T: AsyncWriteExt + AsyncReadExt + Unpin>(
     stream: &mut T,
     from: &str,
