@@ -187,3 +187,205 @@ pub(crate) fn compute_procedure_diff(checklist: &[serde_json::Value], gmail_bloc
     };
     (done_count, overall_status)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dns_findings_fields() {
+        let findings = DnsFindings {
+            dmarc_policy: "reject",
+            spf_apex_ok: true,
+            dkim_dns_ok: true,
+            helo_spf_ok: true,
+            smtp_public_ip: "1.2.3.4".to_string(),
+        };
+        assert_eq!(findings.dmarc_policy, "reject");
+        assert!(findings.spf_apex_ok);
+        assert!(findings.dkim_dns_ok);
+        assert!(findings.helo_spf_ok);
+        assert_eq!(findings.smtp_public_ip, "1.2.3.4");
+    }
+
+    #[test]
+    fn procedure_state_fields() {
+        let state = ProcedureState {
+            reminder_enabled: true,
+            reminder_cadence_hours: 24,
+            reminder_anchor: Utc::now(),
+            checklist_overrides: bson::Document::new(),
+        };
+        assert!(state.reminder_enabled);
+        assert_eq!(state.reminder_cadence_hours, 24);
+    }
+
+    #[test]
+    fn procedure_state_with_overrides() {
+        let mut overrides = bson::Document::new();
+        overrides.insert("checklist_overrides", bson::Document::new());
+        let state = ProcedureState {
+            reminder_enabled: false,
+            reminder_cadence_hours: 12,
+            reminder_anchor: Utc::now(),
+            checklist_overrides: overrides.clone(),
+        };
+        assert!(!state.reminder_enabled);
+        assert_eq!(state.reminder_cadence_hours, 12);
+        assert!(!state.checklist_overrides.is_empty());
+    }
+
+    #[test]
+    fn build_checklist_returns_6_items() {
+        let dns = DnsFindings {
+            dmarc_policy: "reject",
+            spf_apex_ok: true,
+            dkim_dns_ok: true,
+            helo_spf_ok: true,
+            smtp_public_ip: "51.158.114.182".to_string(),
+        };
+        let checklist = build_checklist(&dns, "example.com", "default", "7d", 0, 0);
+        assert_eq!(checklist.len(), 6);
+    }
+
+    #[test]
+    fn build_checklist_with_reject_policy() {
+        let dns = DnsFindings {
+            dmarc_policy: "reject",
+            spf_apex_ok: true,
+            dkim_dns_ok: true,
+            helo_spf_ok: true,
+            smtp_public_ip: "51.158.114.182".to_string(),
+        };
+        let checklist = build_checklist(&dns, "example.com", "default", "7d", 0, 0);
+        let first = &checklist[0];
+        assert_eq!(first.get("id").unwrap().as_str().unwrap(), "dmarc-enforcement");
+        assert_eq!(first.get("status").unwrap().as_str().unwrap(), "done");
+    }
+
+    #[test]
+    fn build_checklist_with_missing_policy() {
+        let dns = DnsFindings {
+            dmarc_policy: "missing",
+            spf_apex_ok: false,
+            dkim_dns_ok: false,
+            helo_spf_ok: false,
+            smtp_public_ip: "51.158.114.182".to_string(),
+        };
+        let checklist = build_checklist(&dns, "example.com", "default", "7d", 0, 0);
+        let first = &checklist[0];
+        assert_eq!(first.get("status").unwrap().as_str().unwrap(), "todo");
+    }
+
+    #[test]
+    fn build_checklist_with_gmail_blocks() {
+        let dns = DnsFindings {
+            dmarc_policy: "reject",
+            spf_apex_ok: true,
+            dkim_dns_ok: true,
+            helo_spf_ok: true,
+            smtp_public_ip: "51.158.114.182".to_string(),
+        };
+        let checklist = build_checklist(&dns, "example.com", "default", "7d", 5, 0);
+        let gmail_item = checklist.iter().find(|i| i.get("id").unwrap().as_str().unwrap() == "gmail-policy").unwrap();
+        assert_eq!(gmail_item.get("status").unwrap().as_str().unwrap(), "blocked");
+    }
+
+    #[test]
+    fn apply_checklist_overrides_checked() {
+        let dns = DnsFindings {
+            dmarc_policy: "missing",
+            spf_apex_ok: false,
+            dkim_dns_ok: false,
+            helo_spf_ok: false,
+            smtp_public_ip: "51.158.114.182".to_string(),
+        };
+        let mut checklist = build_checklist(&dns, "example.com", "default", "7d", 0, 0);
+        let mut overrides = bson::Document::new();
+        let mut dmarc_override = bson::Document::new();
+        dmarc_override.insert("checked", true);
+        overrides.insert("dmarc-enforcement", dmarc_override);
+
+        apply_checklist_overrides(&mut checklist, &overrides);
+        assert_eq!(checklist[0].get("status").unwrap().as_str().unwrap(), "done_manual");
+    }
+
+    #[test]
+    fn apply_checklist_overrides_note() {
+        let dns = DnsFindings {
+            dmarc_policy: "missing",
+            spf_apex_ok: false,
+            dkim_dns_ok: false,
+            helo_spf_ok: false,
+            smtp_public_ip: "51.158.114.182".to_string(),
+        };
+        let mut checklist = build_checklist(&dns, "example.com", "default", "7d", 0, 0);
+        let mut overrides = bson::Document::new();
+        let mut dmarc_override = bson::Document::new();
+        dmarc_override.insert("note", "Fixed DNS");
+        overrides.insert("dmarc-enforcement", dmarc_override);
+
+        apply_checklist_overrides(&mut checklist, &overrides);
+        assert_eq!(checklist[0].get("operator_note").unwrap().as_str().unwrap(), "Fixed DNS");
+    }
+
+    #[test]
+    fn compute_procedure_diff_all_done() {
+        let dns = DnsFindings {
+            dmarc_policy: "reject",
+            spf_apex_ok: true,
+            dkim_dns_ok: true,
+            helo_spf_ok: true,
+            smtp_public_ip: "51.158.114.182".to_string(),
+        };
+        let checklist = build_checklist(&dns, "example.com", "default", "7d", 0, 0);
+        let (done, status) = compute_procedure_diff(&checklist, 0);
+        assert_eq!(done, 6);
+        assert_eq!(status, "ready_for_reject");
+    }
+
+    #[test]
+    fn compute_procedure_diff_in_progress() {
+        let dns = DnsFindings {
+            dmarc_policy: "missing",
+            spf_apex_ok: false,
+            dkim_dns_ok: false,
+            helo_spf_ok: false,
+            smtp_public_ip: "51.158.114.182".to_string(),
+        };
+        let checklist = build_checklist(&dns, "example.com", "default", "7d", 0, 0);
+        let (done, status) = compute_procedure_diff(&checklist, 0);
+        assert!(done < 6);
+        assert_eq!(status, "in_progress");
+    }
+
+    #[test]
+    fn compute_procedure_diff_blocked_by_gmail() {
+        let dns = DnsFindings {
+            dmarc_policy: "reject",
+            spf_apex_ok: true,
+            dkim_dns_ok: true,
+            helo_spf_ok: true,
+            smtp_public_ip: "51.158.114.182".to_string(),
+        };
+        let checklist = build_checklist(&dns, "example.com", "default", "7d", 0, 0);
+        let (_, status) = compute_procedure_diff(&checklist, 5);
+        assert_eq!(status, "blocked_gmail_policy");
+    }
+
+    #[test]
+    fn compute_procedure_diff_manual_done_counted() {
+        let dns = DnsFindings {
+            dmarc_policy: "missing",
+            spf_apex_ok: false,
+            dkim_dns_ok: false,
+            helo_spf_ok: false,
+            smtp_public_ip: "51.158.114.182".to_string(),
+        };
+        let mut checklist = build_checklist(&dns, "example.com", "default", "7d", 0, 0);
+        // Override one item to done_manual
+        checklist[0]["status"] = serde_json::json!("done_manual");
+        let (done, _) = compute_procedure_diff(&checklist, 0);
+        assert_eq!(done, 1);
+    }
+}
