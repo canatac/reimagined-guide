@@ -120,3 +120,81 @@ pub(crate) fn ehlo_hostname() -> String {
     "mail.misfits.ai".to_string()
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ehlo_uses_smtp_hostname_when_set() {
+        std::env::set_var("SMTP_HOSTNAME", "custom.example.com");
+        std::env::remove_var("DOMAIN_NAME");
+        assert_eq!(ehlo_hostname(), "custom.example.com");
+        std::env::remove_var("SMTP_HOSTNAME");
+    }
+
+    #[test]
+    fn ehlo_trims_smtp_hostname() {
+        std::env::set_var("SMTP_HOSTNAME", "  custom.example.com  ");
+        std::env::remove_var("DOMAIN_NAME");
+        assert_eq!(ehlo_hostname(), "custom.example.com");
+        std::env::remove_var("SMTP_HOSTNAME");
+    }
+
+    #[test]
+    fn ehlo_falls_back_to_domain_name() {
+        std::env::remove_var("SMTP_HOSTNAME");
+        std::env::set_var("DOMAIN_NAME", "example.com");
+        assert_eq!(ehlo_hostname(), "mail.example.com");
+        std::env::remove_var("DOMAIN_NAME");
+    }
+
+    #[test]
+    fn ehlo_domain_misfits_ai() {
+        std::env::remove_var("SMTP_HOSTNAME");
+        std::env::set_var("DOMAIN_NAME", "misfits.ai");
+        assert_eq!(ehlo_hostname(), "mail.misfits.ai");
+        std::env::remove_var("DOMAIN_NAME");
+    }
+
+    #[test]
+    fn ehlo_domain_already_mail_prefix() {
+        std::env::remove_var("SMTP_HOSTNAME");
+        std::env::set_var("DOMAIN_NAME", "mail.example.com");
+        assert_eq!(ehlo_hostname(), "mail.example.com");
+        std::env::remove_var("DOMAIN_NAME");
+    }
+
+    #[test]
+    fn ehlo_default_when_no_env() {
+        std::env::remove_var("SMTP_HOSTNAME");
+        std::env::remove_var("DOMAIN_NAME");
+        assert_eq!(ehlo_hostname(), "mail.misfits.ai");
+    }
+
+    #[test]
+    fn ehlo_smtp_hostname_takes_priority() {
+        std::env::set_var("SMTP_HOSTNAME", "priority.example.com");
+        std::env::set_var("DOMAIN_NAME", "example.com");
+        assert_eq!(ehlo_hostname(), "priority.example.com");
+        std::env::remove_var("SMTP_HOSTNAME");
+        std::env::remove_var("DOMAIN_NAME");
+    }
+
+    #[test]
+    fn ehlo_ignores_empty_smtp_hostname() {
+        std::env::set_var("SMTP_HOSTNAME", "   ");
+        std::env::set_var("DOMAIN_NAME", "example.com");
+        assert_eq!(ehlo_hostname(), "mail.example.com");
+        std::env::remove_var("SMTP_HOSTNAME");
+        std::env::remove_var("DOMAIN_NAME");
+    }
+
+    #[test]
+    fn ehlo_ignores_empty_domain_name() {
+        std::env::remove_var("SMTP_HOSTNAME");
+        std::env::set_var("DOMAIN_NAME", "   ");
+        assert_eq!(ehlo_hostname(), "mail.misfits.ai");
+        std::env::remove_var("DOMAIN_NAME");
+    }
+}
+

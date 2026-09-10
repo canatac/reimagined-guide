@@ -66,3 +66,80 @@ pub(crate) fn resolve_user_id(req: &actix_web::HttpRequest) -> String {
     }
     env::var("SMTP_USERNAME").unwrap_or_else(|_| "admin".to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn folder_to_mailboxes_inbox() {
+        assert_eq!(folder_to_mailboxes("inbox"), vec!["inbox", "INBOX"]);
+    }
+
+    #[test]
+    fn folder_to_mailboxes_sent() {
+        assert_eq!(folder_to_mailboxes("sent"), vec!["sent", "SENT", "Sent"]);
+    }
+
+    #[test]
+    fn folder_to_mailboxes_spam() {
+        assert_eq!(
+            folder_to_mailboxes("spam"),
+            vec!["spam", "SPAM", "Spam", "Junk"]
+        );
+    }
+
+    #[test]
+    fn folder_to_mailboxes_unknown() {
+        assert_eq!(
+            folder_to_mailboxes("custom_folder"),
+            vec!["custom_folder", "CUSTOM_FOLDER"]
+        );
+    }
+
+    #[test]
+    fn folder_to_mailboxes_trims_input() {
+        assert_eq!(folder_to_mailboxes("  inbox  "), vec!["inbox", "INBOX"]);
+    }
+
+    #[test]
+    fn folder_to_mailboxes_case_insensitive() {
+        assert_eq!(folder_to_mailboxes("INBOX"), vec!["inbox", "INBOX"]);
+        assert_eq!(folder_to_mailboxes("Sent"), vec!["sent", "SENT", "Sent"]);
+    }
+
+    #[test]
+    fn canonical_folder_valid() {
+        assert_eq!(canonical_folder("inbox"), Some("inbox".to_string()));
+        assert_eq!(canonical_folder("sent"), Some("sent".to_string()));
+        assert_eq!(canonical_folder("drafts"), Some("drafts".to_string()));
+        assert_eq!(canonical_folder("archive"), Some("archive".to_string()));
+        assert_eq!(canonical_folder("trash"), Some("trash".to_string()));
+        assert_eq!(canonical_folder("spam"), Some("spam".to_string()));
+    }
+
+    #[test]
+    fn canonical_folder_invalid() {
+        assert_eq!(canonical_folder("custom"), None);
+        assert_eq!(canonical_folder(""), None);
+        assert_eq!(canonical_folder("unknown"), None);
+    }
+
+    #[test]
+    fn canonical_folder_trims() {
+        assert_eq!(canonical_folder("  inbox  "), Some("inbox".to_string()));
+    }
+
+    #[test]
+    fn canonical_folder_case_insensitive() {
+        assert_eq!(canonical_folder("INBOX"), Some("inbox".to_string()));
+        assert_eq!(canonical_folder("Sent"), Some("sent".to_string()));
+    }
+
+    #[test]
+    fn email_list_query_defaults() {
+        assert_eq!(default_folder(), "inbox");
+        assert_eq!(default_page(), 1);
+        assert_eq!(default_page_size(), 50);
+    }
+}
