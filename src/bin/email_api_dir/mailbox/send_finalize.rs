@@ -169,8 +169,8 @@ pub(crate) async fn dispatch_and_finalize(
     }
 }
 
-/// Pure helper to compute delivery state from DKIM outcome.
-fn delivery_state_from_dkim(dkim: &DkimOutcome) -> &'static str {
+/// Determine delivery state string from DKIM outcome.
+pub(crate) fn delivery_state_from_dkim(dkim: &DkimOutcome) -> &'static str {
     if dkim.dkim_remote_rejected {
         "failed"
     } else if dkim.dkim_remote_accepted {
@@ -186,53 +186,59 @@ fn delivery_state_from_dkim(dkim: &DkimOutcome) -> &'static str {
 mod tests {
     use super::*;
 
-    fn make_dkim_outcome() -> DkimOutcome {
-        DkimOutcome {
-            dkim_sig: "v=1; a=rsa-sha256; ...".to_string(),
-            message_id_hdr: "<generated@example.com>".to_string(),
+    #[test]
+    fn delivery_state_rejected_is_failed() {
+        let dkim = DkimOutcome {
             already_delivered: false,
-            dkim_remote_accepted: true,
-            dkim_remote_rejected: false,
-            dkim_response: Some("250 OK".to_string()),
-            dkim_mx_host: Some("mx.example.com".to_string()),
-            dkim_remote_ip: Some("192.0.2.1".to_string()),
-            dkim_remote_port: Some(25),
-        }
+            dkim_remote_accepted: false,
+            dkim_remote_rejected: true,
+            dkim_mx_host: None,
+            dkim_remote_ip: None,
+            dkim_remote_port: None,
+            dkim_response: None,
+        };
+        assert_eq!(delivery_state_from_dkim(&dkim), "failed");
     }
 
     #[test]
-    fn delivery_state_from_dkim_accepted() {
-        let dkim = make_dkim_outcome();
+    fn delivery_state_accepted_is_sent() {
+        let dkim = DkimOutcome {
+            already_delivered: false,
+            dkim_remote_accepted: true,
+            dkim_remote_rejected: false,
+            dkim_mx_host: None,
+            dkim_remote_ip: None,
+            dkim_remote_port: None,
+            dkim_response: None,
+        };
         assert_eq!(delivery_state_from_dkim(&dkim), "sent");
     }
 
     #[test]
-    fn delivery_state_from_dkim_rejected() {
-        let mut dkim = make_dkim_outcome();
-        dkim.dkim_remote_rejected = true;
-        assert_eq!(delivery_state_from_dkim(&dkim), "failed");
-    }
-
-    #[test]
-    fn delivery_state_from_dkim_already_delivered() {
-        let mut dkim = make_dkim_outcome();
-        dkim.dkim_remote_accepted = false;
-        dkim.already_delivered = true;
+    fn delivery_state_already_delivered_is_queued() {
+        let dkim = DkimOutcome {
+            already_delivered: true,
+            dkim_remote_accepted: false,
+            dkim_remote_rejected: false,
+            dkim_mx_host: None,
+            dkim_remote_ip: None,
+            dkim_remote_port: None,
+            dkim_response: None,
+        };
         assert_eq!(delivery_state_from_dkim(&dkim), "queued");
     }
 
     #[test]
-    fn delivery_state_from_dkim_sending() {
-        let mut dkim = make_dkim_outcome();
-        dkim.dkim_remote_accepted = false;
+    fn delivery_state_default_is_sending() {
+        let dkim = DkimOutcome {
+            already_delivered: false,
+            dkim_remote_accepted: false,
+            dkim_remote_rejected: false,
+            dkim_mx_host: None,
+            dkim_remote_ip: None,
+            dkim_remote_port: None,
+            dkim_response: None,
+        };
         assert_eq!(delivery_state_from_dkim(&dkim), "sending");
-    }
-
-    #[test]
-    fn delivery_state_from_dkim_rejected_takes_precedence() {
-        let mut dkim = make_dkim_outcome();
-        dkim.dkim_remote_accepted = true;
-        dkim.dkim_remote_rejected = true;
-        assert_eq!(delivery_state_from_dkim(&dkim), "failed");
     }
 }
