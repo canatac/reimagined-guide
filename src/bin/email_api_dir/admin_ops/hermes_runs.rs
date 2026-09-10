@@ -5,6 +5,19 @@ pub(crate) struct HermesRunPath {
     pub(crate) run_id: String,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hermes_run_path_fields() {
+        let path = HermesRunPath {
+            run_id: "run-123".to_string(),
+        };
+        assert_eq!(path.run_id, "run-123");
+    }
+}
+
 pub(crate) async fn api_hermes_runs(
     req: HttpRequest,
     body: web::Json<HermesRunsProxyRequest>,
