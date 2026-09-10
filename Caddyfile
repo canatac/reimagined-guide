@@ -1,7 +1,22 @@
 mail.misfits.ai {
-    # Route l'API vers email-api
+    # Sensitive APIs: route through Next.js for auth middleware enforcement
+    reverse_proxy /api/hermes/* localhost:3001
+    reverse_proxy /api/admin/* localhost:3001
+    reverse_proxy /api/external-accounts/* localhost:3001
+    reverse_proxy /api/emails/*/attachments/* localhost:3001
+
+    # Public APIs: direct to backend (no auth needed)
+    reverse_proxy /api/auth/* localhost:8000
+    reverse_proxy /api/health localhost:8000
+    reverse_proxy /api/emails localhost:8000
+    reverse_proxy /api/emails/* localhost:8000
+    reverse_proxy /api/monitoring/* localhost:8000
+    reverse_proxy /api/security/* localhost:8000
+    reverse_proxy /api/ai/* localhost:8000
+
+    # Remaining API routes: direct to backend
     reverse_proxy /api/* localhost:8000
 
-    # Route le reste vers le frontend Next.js
+    # Frontend
     reverse_proxy * localhost:3001
 }
