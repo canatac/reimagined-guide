@@ -1,6 +1,26 @@
 mail.misfits.ai {
-    # Route l'API vers email-api
-    reverse_proxy /api/* localhost:8000
+    # Handle CORS preflight at Caddy level — strip permissive headers from backend
+    @cors_preflight {
+        method OPTIONS
+        path /api/*
+    }
+    respond @cors_preflight 204 {
+        header Access-Control-Allow-Origin "https://mail.misfits.ai"
+        header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
+        header Access-Control-Allow-Headers "Authorization, Content-Type, X-Requested-With"
+        header Access-Control-Allow-Credentials "true"
+        header Access-Control-Max-Age "3600"
+    }
+
+    # Route l'API vers email-api (strip backend CORS headers, enforce whitelist)
+    reverse_proxy /api/* localhost:8000 {
+        header_down -Access-Control-Allow-Origin
+        header_down -Access-Control-Allow-Credentials
+        header_down -Access-Control-Allow-Methods
+        header_down -Access-Control-Expose-Headers
+        header_down Access-Control-Allow-Origin "https://mail.misfits.ai"
+        header_down Access-Control-Allow-Credentials "true"
+    }
 
     # Route le reste vers le frontend Next.js
     reverse_proxy * localhost:3001
