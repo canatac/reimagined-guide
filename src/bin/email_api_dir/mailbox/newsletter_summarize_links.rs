@@ -16,6 +16,51 @@ pub(crate) fn is_html_payload(content_type: &str, raw_body: &str) -> bool {
     content_type.contains("text/html") || raw_body.to_ascii_lowercase().contains("<html")
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_plain_text_collapses_whitespace() {
+        assert_eq!(normalize_plain_text("  hello   world  "), "hello world");
+    }
+
+    #[test]
+    fn normalize_plain_text_empty() {
+        assert_eq!(normalize_plain_text(""), "");
+    }
+
+    #[test]
+    fn truncate_chars_within_limit() {
+        assert_eq!(truncate_chars("hello", 10), "hello");
+    }
+
+    #[test]
+    fn truncate_chars_exceeds_limit() {
+        assert_eq!(truncate_chars("hello world", 5), "hello");
+    }
+
+    #[test]
+    fn truncate_chars_unicode() {
+        assert_eq!(truncate_chars("héllo world", 5), "héllo");
+    }
+
+    #[test]
+    fn is_html_payload_by_content_type() {
+        assert!(is_html_payload("text/html; charset=utf-8", "plain"));
+    }
+
+    #[test]
+    fn is_html_payload_by_body() {
+        assert!(is_html_payload("text/plain", "<html><body>hi</body></html>"));
+    }
+
+    #[test]
+    fn is_html_payload_not_html() {
+        assert!(!is_html_payload("text/plain", "just plain text"));
+    }
+}
+
 fn normalize_discovered_link(base_url: &str, candidate: &str) -> Option<String> {
     let raw = candidate
         .trim()
