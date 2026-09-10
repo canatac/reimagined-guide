@@ -23,6 +23,44 @@ pub(crate) fn default_color_str() -> String {
     "#3788d8".to_string()
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_event_type_str_is_default() {
+        assert_eq!(default_event_type_str(), "default");
+    }
+
+    #[test]
+    fn default_color_str_is_blue() {
+        assert_eq!(default_color_str(), "#3788d8");
+    }
+
+    #[test]
+    fn default_agenda_days_is_14() {
+        assert_eq!(default_agenda_days(), 14);
+    }
+
+    #[test]
+    fn parse_iso_to_bson_valid() {
+        let result = parse_iso_to_bson("2026-09-10T12:00:00Z");
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn parse_iso_to_bson_with_offset() {
+        let result = parse_iso_to_bson("2026-09-10T12:00:00+02:00");
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn parse_iso_to_bson_invalid() {
+        assert!(parse_iso_to_bson("not-a-date").is_none());
+        assert!(parse_iso_to_bson("").is_none());
+    }
+}
+
 #[derive(Deserialize)]
 pub(crate) struct UpdateCalendarEventRequest {
     #[serde(default)]
