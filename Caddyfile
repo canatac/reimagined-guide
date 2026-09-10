@@ -1,21 +1,32 @@
 mail.misfits.ai {
+    # Handle CORS preflight at Caddy level — strip permissive headers from backend
+    @cors_preflight {
+        method OPTIONS
+        path /api/*
+    }
+    respond @cors_preflight 204 {
+        header Access-Control-Allow-Origin "https://mail.misfits.ai"
+        header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
+        header Access-Control-Allow-Headers "Authorization, Content-Type, X-Requested-With"
+        header Access-Control-Allow-Credentials "true"
+        header Access-Control-Max-Age "3600"
+    }
+
     # Sensitive APIs: route through Next.js for auth middleware enforcement
     reverse_proxy /api/hermes/* localhost:3001
     reverse_proxy /api/admin/* localhost:3001
     reverse_proxy /api/external-accounts/* localhost:3001
     reverse_proxy /api/emails/*/attachments/* localhost:3001
 
-    # Public APIs: direct to backend (no auth needed)
-    reverse_proxy /api/auth/* localhost:8000
-    reverse_proxy /api/health localhost:8000
-    reverse_proxy /api/emails localhost:8000
-    reverse_proxy /api/emails/* localhost:8000
-    reverse_proxy /api/monitoring/* localhost:8000
-    reverse_proxy /api/security/* localhost:8000
-    reverse_proxy /api/ai/* localhost:8000
-
-    # Remaining API routes: direct to backend
-    reverse_proxy /api/* localhost:8000
+    # Public APIs + remaining: direct to backend (strip backend CORS headers, enforce whitelist)
+    reverse_proxy /api/* localhost:8000 {
+        header_down -Access-Control-Allow-Origin
+        header_down -Access-Control-Allow-Credentials
+        header_down -Access-Control-Allow-Methods
+        header_down -Access-Control-Expose-Headers
+        header_down Access-Control-Allow-Origin "https://mail.misfits.ai"
+        header_down Access-Control-Allow-Credentials "true"
+    }
 
     # Frontend
     reverse_proxy * localhost:3001

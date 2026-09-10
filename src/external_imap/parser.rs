@@ -221,3 +221,186 @@ type HeaderFields = (
     Option<chrono::DateTime<Utc>>,
     Option<String>,
 );
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_capabilities_extracts_from_wildcard_line() {
+        let lines = vec![
+            "* IMAP4rev1".to_string(),
+            "* CAPABILITY IMAP4rev1 STARTTLS AUTH=PLAIN".to_string(),
+            "a1 OK".to_string(),
+        ];
+        let caps = parse_capabilities(&lines);
+        assert_eq!(caps, vec!["IMAP4rev1", "STARTTLS", "AUTH=PLAIN"]);
+    }
+
+    #[test]
+    fn parse_capabilities_returns_empty_when_missing() {
+        let lines = vec!["* IMAP4rev1".to_string(), "a1 OK".to_string()];
+        assert!(parse_capabilities(&lines).is_empty());
+    }
+
+    #[test]
+    fn tag_status_ok_detects_ok() {
+        let lines = vec![
+            "* CAPABILITY IMAP4rev1".to_string(),
+            "a1 OK LOGIN completed".to_string(),
+        ];
+        assert!(tag_status_ok(&lines, "a1"));
+    }
+
+    #[test]
+    fn tag_status_ok_returns_false_on_no_match() {
+        let lines = vec!["* CAPABILITY IMAP4rev1".to_string()];
+        assert!(!tag_status_ok(&lines, "a1"));
+    }
+
+    #[test]
+    fn tag_status_ok_differentiates_tags() {
+        let lines = vec!["a2 OK completed".to_string()];
+        assert!(!tag_status_ok(&lines, "a1"));
+        assert!(tag_status_ok(&lines, "a2"));
+    }
+
+    #[test]
+    fn parse_list_folders_extracts_folder_names() {
+        let lines = vec![
+            "* LIST (\\HasNoChildren) \"INBOX\"".to_string(),
+            "* LIST (\\HasNoChildren) \"Sent\"".to_string(),
+            "* LIST (\\HasChildren) \"Archive\"".to_string(),
+            "a1 OK LIST completed".to_string(),
+        ];
+        let folders = parse_list_folders(&lines);
+        assert_eq!(folders, vec!["Archive", "INBOX", "Sent"]);
+    }
+
+    #[test]
+    fn parse_list_folders_deduplicates() {
+        let lines = vec![
+            "* LIST (\\HasNoChildren) \"INBOX\"".to_string(),
+            "* LIST (\\HasNoChildren) \"INBOX\"".to_string(),
+        ];
+        let folders = parse_list_folders(&lines);
+        assert_eq!(folders, vec!["INBOX"]);
+    }
+
+    #[test]
+    fn parse_uid_search_extracts_uids() {
+        let lines = vec![
+            "* SEARCH 1 3 5 7".to_string(),
+            "a1 OK SEARCH completed".to_string(),
+        ];
+        assert_eq!(parse_uid_search(&lines), vec![1, 3, 5, 7]);
+    }
+
+    #[test]
+    fn parse_uid_search_returns_empty_when_missing() {
+        let lines = vec!["a1 OK".to_string()];
+        assert!(parse_uid_search(&lines).is_empty());
+    }
+
+    #[test]
+    fn parse_uid_search_handles_empty_search() {
+        let lines = vec!["* SEARCH".to_string()];
+        assert!(parse_uid_search(&lines).is_empty());
+    }
+
+    #[test]
+    fn escape_imap_escapes_backslash_and_quote() {
+        assert_eq!(escape_imap(r#"foo"bar"#), r#"foo\"bar"#);
+        assert_eq!(escape_imap("foo\\bar"), "foo\\\\bar");
+        assert_eq!(escape_imap(r#"a\b"c"#), r#"a\\b\"c"#);
+    }
+
+    #[test]
+    fn format_imap_date_formats_correctly() {
+        let dt = chrono::DateTime::parse_from_rfc3339("2026-09-10T12:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        assert_eq!(format_imap_date(&dt), "10-Sep-2026");
+    }
+
+    #[test]
+    fn parse_fetch_headers_extracts_uid() {
+        let lines = vec![
+            "* 1 FETCH (UID 42 FLAGS (\\Seen) INTERNALDATE \"10-Sep-2026 12:00:00 +0000\")".to_string(),
+            "a1 OK FETCH completed".to_string(),
+        ];
+        let headers = parse_fetch_headers(&lines);
+        assert_eq!(headers.len(), 1);
+        assert_eq!(headers[0].uid, 42);
+    }
+
+    #[test]
+    fn parse_fetch_headers_extracts_flags() {
+        let lines = vec![
+            "* 1 FETCH (UID 1 FLAGS (\\Seen \\Answered))".to_string(),
+            "a1 OK".to_string(),
+        ];
+        let headers = parse_fetch_headers(&lines);
+        assert_eq!(headers[0].flags, vec!["\\Seen", "\\Answered"]);
+    }
+
+    #[test]
+    fn parse_fetch_headers_skips_zero_uid() {
+        let lines = vec![
+            "* 1 FETCH (UID 0 FLAGS ())".to_string(),
+            "a1 OK".to_string(),
+        ];
+        let headers = parse_fetch_headers(&lines);
+        assert!(headers.is_empty());
+    }
+
+    #[test]
+    fn parse_fetch_headers_extracts_header_fields() {
+        let lines = vec![
+            "* 1 FETCH (UID 10 BODY[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)] {123})\r\nFrom: alice@example.com\r\nTo: bob@example.com\r\nSubject: Test Subject\r\nDate: Thu, 10 Sep 2026 12:00:00 +0000\r\nMessage-ID: <abc-123@example.com>".to_string(),
+            "a1 OK".to_string(),
+        ];
+        let headers = parse_fetch_headers(&lines);
+        assert_eq!(headers.len(), 1);
+        assert_eq!(headers[0].uid, 10);
+        assert_eq!(headers[0].from.as_deref(), Some("alice@example.com"));
+        assert_eq!(headers[0].to.as_deref(), Some("bob@example.com"));
+        assert_eq!(headers[0].subject.as_deref(), Some("Test Subject"));
+        assert_eq!(headers[0].message_id.as_deref(), Some("abc-123@example.com"));
+    }
+
+    #[test]
+    fn parse_fetch_headers_extracts_internal_date() {
+        let lines = vec![
+            "* 1 FETCH (UID 5 INTERNALDATE \"10-Sep-2026 14:30:00 +0000\")".to_string(),
+            "a1 OK".to_string(),
+        ];
+        let headers = parse_fetch_headers(&lines);
+        assert_eq!(headers.len(), 1);
+        assert!(headers[0].internal_date.is_some());
+    }
+
+    #[test]
+    fn parse_fetch_headers_handles_multiple_blocks() {
+        let lines = vec![
+            "* 1 FETCH (UID 1 FLAGS (\\Seen))".to_string(),
+            "* 2 FETCH (UID 2 FLAGS ())".to_string(),
+            "a1 OK".to_string(),
+        ];
+        let headers = parse_fetch_headers(&lines);
+        assert_eq!(headers.len(), 2);
+        assert_eq!(headers[0].uid, 1);
+        assert_eq!(headers[1].uid, 2);
+    }
+
+    #[test]
+    fn parse_fetch_headers_skips_non_fetch_lines() {
+        let lines = vec![
+            "* 1 EXISTS".to_string(),
+            "* 1 FETCH (UID 1)".to_string(),
+            "a1 OK".to_string(),
+        ];
+        let headers = parse_fetch_headers(&lines);
+        assert_eq!(headers.len(), 1);
+    }
+}

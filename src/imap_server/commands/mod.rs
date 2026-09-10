@@ -30,7 +30,7 @@ impl ImapServer {
         let start = std::time::Instant::now();
         let result = match command_name.as_str() {
             "APPEND" => self.handle_append(tag, command_parts),
-            "CAPABILITY" => format!("* CAPABILITY IMAP4rev1 AUTH=PLAIN LOGIN NAMESPACE\r\n{} OK CAPABILITY completed\r\n", tag),
+            "CAPABILITY" => format!("* CAPABILITY IMAP4rev1 AUTH=PLAIN LOGIN NAMESPACE IDLE\r\n{} OK CAPABILITY completed\r\n", tag),
             "NOOP" => format!("{} OK NOOP completed\r\n", tag),
             "LOGOUT" => Self::handle_logout(tag, sessions, session_id),
             "NAMESPACE" => format!("* NAMESPACE ((\"\" \"/\")) NIL NIL\r\n{} OK NAMESPACE completed\r\n", tag),

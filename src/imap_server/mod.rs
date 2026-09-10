@@ -116,7 +116,7 @@ impl ImapServer {
         command: &[u8],
         sessions: &Arc<Mutex<HashMap<String, String>>>,
         session_id: &mut Option<String>,
-        _socket: &mut tokio::net::TcpStream,
+        socket: &mut tokio::net::TcpStream,
     ) -> String {
         let command_str = String::from_utf8_lossy(command);
         println!("Processing command: {}", command_str.trim());
@@ -135,6 +135,57 @@ impl ImapServer {
         if command_parts.len() < 2 {
             return "BAD Command not recognized\r\n".to_string();
         }
+
+        // IDLE requires special handling — send + idling, then wait for DONE
+        if command_parts[1].to_uppercase() == "IDLE" {
+            return self.handle_idle(command_parts[0], sessions, session_id, socket).await;
+        }
+
         self.dispatch_command(&command_parts, sessions, session_id).await
+    }
+
+    /// Handle IMAP IDLE command (RFC 2177).
+    /// Sends `+ idling`, then waits for `DONE` from client or timeout.
+    async fn handle_idle(
+        &mut self,
+        tag: &str,
+        _sessions: &Arc<Mutex<HashMap<String, String>>>,
+        _session_id: &mut Option<String>,
+        socket: &mut tokio::net::TcpStream,
+    ) -> String {
+        // Send continuation response
+        let idling = format!("+ idling\r\n");
+        if let Err(e) = socket.write_all(idling.as_bytes()).await {
+            eprintln!("Failed to send IDLE continuation: {}", e);
+            return format!("{} NO IDLE failed\r\n", tag);
+        }
+
+        // Wait for DONE or timeout (29 minutes per RFC 2177)
+        let mut buffer = [0; 1024];
+        let timeout = std::time::Duration::from_secs(29 * 60);
+        
+        match tokio::time::timeout(timeout, socket.read(&mut buffer)).await {
+            Ok(Ok(0)) => {
+                // Client disconnected
+                format!("{} OK IDLE completed\r\n", tag)
+            }
+            Ok(Ok(n)) => {
+                let response = String::from_utf8_lossy(&buffer[..n]);
+                let trimmed = response.trim();
+                if trimmed.eq_ignore_ascii_case("DONE") {
+                    format!("{} OK IDLE completed\r\n", tag)
+                } else {
+                    format!("{} BAD Expected DONE\r\n", tag)
+                }
+            }
+            Ok(Err(e)) => {
+                eprintln!("Error reading from socket during IDLE: {}", e);
+                format!("{} NO IDLE failed\r\n", tag)
+            }
+            Err(_) => {
+                // Timeout — graceful completion
+                format!("{} OK IDLE timed out\r\n", tag)
+            }
+        }
     }
 }
