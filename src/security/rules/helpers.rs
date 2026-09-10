@@ -58,6 +58,94 @@ pub struct RuleContext<'a> {
     pub tenant_id: Option<String>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn since_returns_rfc3339_in_past() {
+        let s = since(60);
+        let dt = chrono::DateTime::parse_from_rfc3339(&s).unwrap();
+        assert!(dt < chrono::Utc::now());
+        let sixty_mins_ago = chrono::Utc::now() - chrono::Duration::minutes(60);
+        let diff = (dt - sixty_mins_ago).num_seconds().abs();
+        assert!(diff <= 2);
+    }
+
+    #[test]
+    fn env_u64_default_when_unset() {
+        std::env::remove_var("SEC_TEST_U64");
+        assert_eq!(env_u64("SEC_TEST_U64", 123), 123);
+    }
+
+    #[test]
+    fn env_u64_reads_valid_value() {
+        std::env::set_var("SEC_TEST_U64", "456");
+        assert_eq!(env_u64("SEC_TEST_U64", 0), 456);
+        std::env::remove_var("SEC_TEST_U64");
+    }
+
+    #[test]
+    fn env_u64_falls_back_on_invalid() {
+        std::env::set_var("SEC_TEST_U64", "not-a-number");
+        assert_eq!(env_u64("SEC_TEST_U64", 789), 789);
+        std::env::remove_var("SEC_TEST_U64");
+    }
+
+    #[test]
+    fn env_f64_default_when_unset() {
+        std::env::remove_var("SEC_TEST_F64");
+        assert_eq!(env_f64("SEC_TEST_F64", 3.14), 3.14);
+    }
+
+    #[test]
+    fn env_f64_reads_valid_value() {
+        std::env::set_var("SEC_TEST_F64", "2.718");
+        assert_eq!(env_f64("SEC_TEST_F64", 0.0), 2.718);
+        std::env::remove_var("SEC_TEST_F64");
+    }
+
+    #[test]
+    fn env_f64_falls_back_on_invalid() {
+        std::env::set_var("SEC_TEST_F64", "nope");
+        assert_eq!(env_f64("SEC_TEST_F64", 1.23), 1.23);
+        std::env::remove_var("SEC_TEST_F64");
+    }
+
+    #[test]
+    fn env_list_empty_when_unset() {
+        std::env::remove_var("SEC_TEST_LIST");
+        assert!(env_list("SEC_TEST_LIST").is_empty());
+    }
+
+    #[test]
+    fn env_list_splits_and_trims() {
+        std::env::set_var("SEC_TEST_LIST", " a , , b ,c ");
+        assert_eq!(env_list("SEC_TEST_LIST"), vec!["a", "b", "c"]);
+        std::env::remove_var("SEC_TEST_LIST");
+    }
+
+    #[test]
+    fn env_list_skips_empty_entries() {
+        std::env::set_var("SEC_TEST_LIST", ",,,");
+        assert!(env_list("SEC_TEST_LIST").is_empty());
+        std::env::remove_var("SEC_TEST_LIST");
+    }
+
+    #[test]
+    fn db_name_defaults_to_mailserver() {
+        std::env::remove_var("MONGODB_DATABASE");
+        assert_eq!(db_name(), "mailserver");
+    }
+
+    #[test]
+    fn db_name_reads_from_env() {
+        std::env::set_var("MONGODB_DATABASE", "rules_test_db");
+        assert_eq!(db_name(), "rules_test_db");
+        std::env::remove_var("MONGODB_DATABASE");
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Rule 1 — ABUSE_VOLUME_SPIKE
 // Spike anormal du volume sortant par tenant.
