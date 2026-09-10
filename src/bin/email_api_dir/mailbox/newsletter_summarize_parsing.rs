@@ -92,6 +92,88 @@ pub(crate) fn extract_http_urls(text: &str, max_urls: usize) -> Vec<String> {
     out
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_completion_content_string() {
+        let payload = serde_json::json!({
+            "choices": [{"message": {"content": "Hello world"}}]
+        });
+        assert_eq!(extract_completion_content(&payload), Some("Hello world".to_string()));
+    }
+
+    #[test]
+    fn extract_completion_content_array() {
+        let payload = serde_json::json!({
+            "choices": [{"message": {"content": [{"type": "text", "text": "Part 1"}, {"type": "text", "text": "Part 2"}]}}]
+        });
+        assert_eq!(extract_completion_content(&payload), Some("Part 1\nPart 2".to_string()));
+    }
+
+    #[test]
+    fn extract_completion_content_empty() {
+        let payload = serde_json::json!({
+            "choices": [{"message": {"content": ""}}]
+        });
+        assert_eq!(extract_completion_content(&payload), None);
+    }
+
+    #[test]
+    fn extract_completion_content_missing() {
+        let payload = serde_json::json!({"other": "value"});
+        assert_eq!(extract_completion_content(&payload), None);
+    }
+
+    #[test]
+    fn extract_json_object_direct() {
+        let text = r#"{"key": "value"}"#;
+        let result = extract_json_object(text);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap()["key"], "value");
+    }
+
+    #[test]
+    fn extract_json_object_with_surrounding_text() {
+        let text = r#"Here is the JSON: {"key": "value"} and more text"#;
+        let result = extract_json_object(text);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap()["key"], "value");
+    }
+
+    #[test]
+    fn extract_json_object_invalid() {
+        let text = r#"not json at all"#;
+        assert_eq!(extract_json_object(text), None);
+    }
+
+    #[test]
+    fn ensure_sources_block_empty_summary() {
+        assert_eq!(ensure_sources_block("", &[]), "");
+    }
+
+    #[test]
+    fn ensure_sources_block_no_curated_links() {
+        assert_eq!(ensure_sources_block("Summary", &[]), "Summary");
+    }
+
+    #[test]
+    fn ensure_sources_block_existing_sources() {
+        let summary = "Summary\n\nSources:\n1. A — https://a.com";
+        assert_eq!(ensure_sources_block(summary, &[("B".into(), "https://b.com".into())]), summary);
+    }
+
+    #[test]
+    fn ensure_sources_block_adds_sources() {
+        let summary = "Summary text";
+        let curated = vec![("A".into(), "https://a.com".into())];
+        let result = ensure_sources_block(summary, &curated);
+        assert!(result.contains("Sources:"));
+        assert!(result.contains("1. A — https://a.com"));
+    }
+}
+
 pub(crate) fn build_summary_from_article_digests(
     parsed_json: &Option<serde_json::Value>,
 ) -> Option<String> {
