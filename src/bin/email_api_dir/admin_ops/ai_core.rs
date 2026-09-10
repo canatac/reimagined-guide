@@ -69,6 +69,87 @@ pub(crate) fn mongo_db_name() -> String {
     env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_ai_feature_models_contains_expected_keys() {
+        let models = default_ai_feature_models();
+        assert!(models.contains_key("compose"));
+        assert!(models.contains_key("translate"));
+        assert!(models.contains_key("triage"));
+        assert!(models.contains_key("security"));
+        assert!(models.contains_key("rewrite"));
+        assert!(models.contains_key("subject"));
+        assert!(models.contains_key("complete"));
+    }
+
+    #[test]
+    fn default_ai_feature_models_uses_default_model() {
+        let models = default_ai_feature_models();
+        for (_, model) in models {
+            assert_eq!(model, DEFAULT_AI_MODEL);
+        }
+    }
+
+    #[test]
+    fn ai_settings_doc_defaults() {
+        let doc = AiSettingsDoc::defaults();
+        assert_eq!(doc.id, AI_SETTINGS_ID);
+        assert_eq!(doc.default_model, DEFAULT_AI_MODEL);
+        assert!(doc.features.contains_key("compose"));
+    }
+
+    #[test]
+    fn ai_settings_doc_merge_with_defaults_adds_missing() {
+        let doc = AiSettingsDoc {
+            id: AI_SETTINGS_ID.to_string(),
+            default_model: "custom-model".to_string(),
+            features: HashMap::new(),
+            updated_at: None,
+        };
+        let merged = doc.merge_with_defaults();
+        assert_eq!(merged.default_model, "custom-model");
+        assert!(merged.features.contains_key("compose"));
+        assert!(merged.features.contains_key("translate"));
+    }
+
+    #[test]
+    fn ai_settings_doc_merge_with_defaults_fills_empty_model() {
+        let doc = AiSettingsDoc {
+            id: AI_SETTINGS_ID.to_string(),
+            default_model: "".to_string(),
+            features: HashMap::new(),
+            updated_at: None,
+        };
+        let merged = doc.merge_with_defaults();
+        assert_eq!(merged.default_model, DEFAULT_AI_MODEL);
+    }
+
+    #[test]
+    fn ai_settings_doc_to_public_json() {
+        let doc = AiSettingsDoc::defaults();
+        let json = doc.to_public_json();
+        assert!(json.get("defaultModel").is_some());
+        assert!(json.get("features").is_some());
+        assert!(json.get("updatedAt").is_some());
+    }
+
+    #[test]
+    fn mongo_db_name_defaults_to_mailserver() {
+        std::env::remove_var("MONGODB_DATABASE");
+        assert_eq!(mongo_db_name(), "mailserver");
+    }
+
+    #[test]
+    fn mongo_db_name_reads_from_env() {
+        std::env::set_var("MONGODB_DATABASE", "test_db");
+        assert_eq!(mongo_db_name(), "test_db");
+        std::env::remove_var("MONGODB_DATABASE");
+    }
+}
+
 pub(crate) async fn load_ai_settings(client: &mongodb::Client) -> AiSettingsDoc {
     let coll = client
         .database(&mongo_db_name())
