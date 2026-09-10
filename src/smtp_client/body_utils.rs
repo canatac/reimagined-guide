@@ -59,6 +59,106 @@ pub(crate) fn upsert_content_type(headers: &mut Vec<(String, String)>, value: St
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_crlf_converts_lf_to_crlf() {
+        assert_eq!(normalize_crlf("line1\nline2"), "line1\r\nline2");
+    }
+
+    #[test]
+    fn normalize_crlf_converts_cr_to_crlf() {
+        assert_eq!(normalize_crlf("line1\rline2"), "line1\r\nline2");
+    }
+
+    #[test]
+    fn normalize_crlf_preserves_crlf() {
+        assert_eq!(normalize_crlf("line1\r\nline2"), "line1\r\nline2");
+    }
+
+    #[test]
+    fn normalize_crlf_handles_mixed() {
+        assert_eq!(normalize_crlf("a\nb\rc\r\nd"), "a\r\nb\r\nc\r\nd");
+    }
+
+    #[test]
+    fn strip_tags_simple_removes_html() {
+        assert_eq!(strip_tags_simple("<p>Hello <b>World</b></p>"), "Hello World");
+    }
+
+    #[test]
+    fn strip_tags_simple_handles_empty() {
+        assert_eq!(strip_tags_simple(""), "");
+    }
+
+    #[test]
+    fn strip_tags_simple_handles_no_tags() {
+        assert_eq!(strip_tags_simple("plain text"), "plain text");
+    }
+
+    #[test]
+    fn strip_tags_simple_collapses_whitespace() {
+        assert_eq!(strip_tags_simple("<p>  hello   world  </p>"), "hello world");
+    }
+
+    #[test]
+    fn body_looks_like_html_detects_html() {
+        assert!(body_looks_like_html("<html><body>Hello</body></html>"));
+        assert!(body_looks_like_html("<p>text</p>"));
+        assert!(body_looks_like_html("<div>content</div>"));
+        assert!(body_looks_like_html("</table>"));
+    }
+
+    #[test]
+    fn body_looks_like_html_rejects_plain() {
+        assert!(!body_looks_like_html("Just plain text"));
+        assert!(!body_looks_like_html(""));
+    }
+
+    #[test]
+    fn ensure_html_document_wraps_plain() {
+        let result = ensure_html_document("Hello World");
+        assert!(result.contains("<html>"));
+        assert!(result.contains("<body>"));
+        assert!(result.contains("Hello World"));
+    }
+
+    #[test]
+    fn ensure_html_document_preserves_html() {
+        let input = "<html><body>Hi</body></html>";
+        assert_eq!(ensure_html_document(input), input);
+    }
+
+    #[test]
+    fn upsert_content_type_adds_new() {
+        let mut headers = vec![("From".to_string(), "a@b.com".to_string())];
+        upsert_content_type(&mut headers, "text/html; charset=utf-8".to_string());
+        assert_eq!(headers.len(), 2);
+        assert_eq!(headers[1].0, "Content-Type");
+        assert_eq!(headers[1].1, "text/html; charset=utf-8");
+    }
+
+    #[test]
+    fn upsert_content_type_updates_existing() {
+        let mut headers = vec![
+            ("From".to_string(), "a@b.com".to_string()),
+            ("Content-Type".to_string(), "text/plain".to_string()),
+        ];
+        upsert_content_type(&mut headers, "text/html".to_string());
+        assert_eq!(headers.len(), 2);
+        assert_eq!(headers[1].1, "text/html");
+    }
+
+    #[test]
+    fn upsert_content_type_case_insensitive() {
+        let mut headers = vec![("content-type".to_string(), "text/plain".to_string())];
+        upsert_content_type(&mut headers, "text/html".to_string());
+        assert_eq!(headers[0].1, "text/html");
+    }
+}
+
 pub(crate) fn compose_smtp_payload(email: &Email) -> String {
     let mut headers = email.headers.clone();
 
