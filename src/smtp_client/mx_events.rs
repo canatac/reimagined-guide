@@ -144,3 +144,130 @@ pub(super) fn emit_final_event(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn send_context_from_email_with_message_id() {
+        let email = crate::entities::Email {
+            id: "fallback-id".to_string(),
+            from: "a@b.com".to_string(),
+            to: "c@d.com".to_string(),
+            subject: "Test".to_string(),
+            body: "Body".to_string(),
+            headers: vec![("Message-ID".to_string(), "<msg-123@example.com>".to_string())],
+            flags: vec![],
+            sequence_number: 0,
+            uid: 0,
+            internal_date: chrono::Utc::now(),
+            dkim_signature: None,
+        };
+        let ctx = SendContext::from_email(&email);
+        assert_eq!(ctx.message_id, "msg-123@example.com");
+        assert_eq!(ctx.from, "a@b.com");
+        assert_eq!(ctx.to, "c@d.com");
+    }
+
+    #[test]
+    fn send_context_from_email_without_message_id() {
+        let email = crate::entities::Email {
+            id: "fallback-id".to_string(),
+            from: "a@b.com".to_string(),
+            to: "c@d.com".to_string(),
+            subject: "Test".to_string(),
+            body: "Body".to_string(),
+            headers: vec![],
+            flags: vec![],
+            sequence_number: 0,
+            uid: 0,
+            internal_date: chrono::Utc::now(),
+            dkim_signature: None,
+        };
+        let ctx = SendContext::from_email(&email);
+        assert_eq!(ctx.message_id, "fallback-id");
+    }
+
+    #[test]
+    fn send_context_from_email_lowercase_message_id() {
+        let email = crate::entities::Email {
+            id: "fallback-id".to_string(),
+            from: "a@b.com".to_string(),
+            to: "c@d.com".to_string(),
+            subject: "Test".to_string(),
+            body: "Body".to_string(),
+            headers: vec![("message-id".to_string(), "<msg-456@example.com>".to_string())],
+            flags: vec![],
+            sequence_number: 0,
+            uid: 0,
+            internal_date: chrono::Utc::now(),
+            dkim_signature: None,
+        };
+        let ctx = SendContext::from_email(&email);
+        assert_eq!(ctx.message_id, "msg-456@example.com");
+    }
+
+    #[test]
+    fn send_context_correlation_id_is_uuid() {
+        let email = crate::entities::Email {
+            id: "test".to_string(),
+            from: "a@b.com".to_string(),
+            to: "c@d.com".to_string(),
+            subject: "Test".to_string(),
+            body: "Body".to_string(),
+            headers: vec![],
+            flags: vec![],
+            sequence_number: 0,
+            uid: 0,
+            internal_date: chrono::Utc::now(),
+            dkim_signature: None,
+        };
+        let ctx = SendContext::from_email(&email);
+        assert_eq!(ctx.correlation_id.len(), 36);
+        assert!(ctx.correlation_id.contains('-'));
+    }
+
+    #[test]
+    fn send_context_emit_creates_event() {
+        let email = crate::entities::Email {
+            id: "test".to_string(),
+            from: "a@b.com".to_string(),
+            to: "c@d.com".to_string(),
+            subject: "Test".to_string(),
+            body: "Body".to_string(),
+            headers: vec![],
+            flags: vec![],
+            sequence_number: 0,
+            uid: 0,
+            internal_date: chrono::Utc::now(),
+            dkim_signature: None,
+        };
+        let ctx = SendContext::from_email(&email);
+        let ev = ctx.emit(crate::monitoring::SmtpEventType::DnsLookup);
+        assert_eq!(ev.message_id, ctx.message_id);
+        assert_eq!(ev.correlation_id, ctx.correlation_id);
+        assert_eq!(ev.from, "a@b.com");
+        assert_eq!(ev.to, "c@d.com");
+    }
+
+    #[test]
+    fn send_context_unique_correlation_ids() {
+        let email = crate::entities::Email {
+            id: "test".to_string(),
+            from: "a@b.com".to_string(),
+            to: "c@d.com".to_string(),
+            subject: "Test".to_string(),
+            body: "Body".to_string(),
+            headers: vec![],
+            flags: vec![],
+            sequence_number: 0,
+            uid: 0,
+            internal_date: chrono::Utc::now(),
+            dkim_signature: None,
+        };
+        let ctx1 = SendContext::from_email(&email);
+        let ctx2 = SendContext::from_email(&email);
+        assert_ne!(ctx1.correlation_id, ctx2.correlation_id);
+    }
+}
