@@ -73,6 +73,82 @@ pub(crate) fn get_accept_language(req: &actix_web::HttpRequest) -> String {
     raw.chars().take(MAX_ACCEPT_LANGUAGE_LEN).collect()
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_segment_strips_accents() {
+        assert_eq!(normalize_segment("José"), "jose");
+        assert_eq!(normalize_segment("François"), "francois");
+        assert_eq!(normalize_segment("Müller"), "muller");
+    }
+
+    #[test]
+    fn normalize_segment_keeps_alphanumeric() {
+        assert_eq!(normalize_segment("abc123"), "abc123");
+    }
+
+    #[test]
+    fn normalize_segment_removes_special_chars() {
+        assert_eq!(normalize_segment("a-b_c!"), "abc");
+    }
+
+    #[test]
+    fn normalize_segment_lowercases() {
+        assert_eq!(normalize_segment("ABC"), "abc");
+    }
+
+    #[test]
+    fn normalize_segment_handles_empty() {
+        assert_eq!(normalize_segment(""), "");
+    }
+
+    #[test]
+    fn normalize_segment_limits_length() {
+        let long = "a".repeat(1000);
+        assert_eq!(normalize_segment(&long).len(), MAX_SEGMENT_LEN);
+    }
+
+    #[test]
+    fn build_misfits_local_valid() {
+        assert_eq!(build_misfits_local("John", "Doe"), Some("john.doe".to_string()));
+    }
+
+    #[test]
+    fn build_misfits_local_with_accents() {
+        assert_eq!(build_misfits_local("José", "García"), Some("jose.garcia".to_string()));
+    }
+
+    #[test]
+    fn build_misfits_local_empty_first() {
+        assert_eq!(build_misfits_local("", "Doe"), None);
+    }
+
+    #[test]
+    fn build_misfits_local_empty_last() {
+        assert_eq!(build_misfits_local("John", ""), None);
+    }
+
+    #[test]
+    fn build_misfits_local_whitespace_only() {
+        assert_eq!(build_misfits_local("   ", "Doe"), None);
+    }
+
+    #[test]
+    fn normalize_oauth_provider_github() {
+        assert_eq!(normalize_oauth_provider("github"), Some("github".to_string()));
+        assert_eq!(normalize_oauth_provider("GitHub"), Some("github".to_string()));
+        assert_eq!(normalize_oauth_provider("  github  "), Some("github".to_string()));
+    }
+
+    #[test]
+    fn normalize_oauth_provider_unknown() {
+        assert_eq!(normalize_oauth_provider("gitlab"), None);
+        assert_eq!(normalize_oauth_provider(""), None);
+    }
+}
+
 pub(crate) fn welcome_email_html(
     locale: &str,
     display_name: &str,
