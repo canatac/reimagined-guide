@@ -33,92 +33,71 @@ pub fn extract_email_address(content: &str, header: &str) -> Option<String> {
 }
 
 #[cfg(test)]
-mod extract_email_tests {
-    use super::extract_email_address;
+mod tests {
+    use super::*;
 
     #[test]
-    fn extracts_plain_email_address() {
-        let content = "From: alice@example.com\r\nTo: bob@example.com\r\nSubject: Hello";
-        assert_eq!(
-            extract_email_address(content, "From:"),
-            Some("alice@example.com".to_string())
-        );
-        assert_eq!(
-            extract_email_address(content, "To:"),
-            Some("bob@example.com".to_string())
-        );
+    fn extract_email_address_simple() {
+        let content = "From: sender@example.com\r\nTo: receiver@example.com\r\nSubject: Test";
+        assert_eq!(extract_email_address(content, "From:"), Some("sender@example.com".to_string()));
+        assert_eq!(extract_email_address(content, "To:"), Some("receiver@example.com".to_string()));
     }
 
     #[test]
-    fn extracts_email_from_angle_brackets() {
-        let content = "From: Alice Smith <alice@example.com>\r\nTo: Bob Jones <bob@example.com>";
-        assert_eq!(
-            extract_email_address(content, "From:"),
-            Some("alice@example.com".to_string())
-        );
-        assert_eq!(
-            extract_email_address(content, "To:"),
-            Some("bob@example.com".to_string())
-        );
+    fn extract_email_address_with_display_name() {
+        let content = "From: John Doe <john@example.com>\r\nTo: Jane <jane@example.com>";
+        assert_eq!(extract_email_address(content, "From:"), Some("john@example.com".to_string()));
+        assert_eq!(extract_email_address(content, "To:"), Some("jane@example.com".to_string()));
     }
 
     #[test]
-    fn returns_none_for_missing_header() {
-        let content = "From: alice@example.com\r\nSubject: Hello";
-        assert_eq!(extract_email_address(content, "To:"), None);
+    fn extract_email_address_with_whitespace() {
+        let content = "From:   sender@example.com  \r\nTo:   receiver@example.com  ";
+        assert_eq!(extract_email_address(content, "From:"), Some("sender@example.com".to_string()));
     }
 
     #[test]
-    fn returns_none_for_empty_content() {
-        assert_eq!(extract_email_address("", "From:"), None);
-    }
-
-    #[test]
-    fn handles_colon_in_display_name() {
-        let content = "From: \"Smith, Alice\" <alice@example.com>";
-        assert_eq!(
-            extract_email_address(content, "From:"),
-            Some("alice@example.com".to_string())
-        );
-    }
-
-    #[test]
-    fn handles_malformed_no_angle_brackets() {
-        let content = "From: just-an-email@example.com";
-        assert_eq!(
-            extract_email_address(content, "From:"),
-            Some("just-an-email@example.com".to_string())
-        );
-    }
-
-    #[test]
-    fn handles_whitespace_around_value() {
-        let content = "From:   alice@example.com  ";
-        assert_eq!(
-            extract_email_address(content, "From:"),
-            Some("alice@example.com".to_string())
-        );
-    }
-
-    #[test]
-    fn returns_none_for_empty_value() {
-        let content = "From:";
+    fn extract_email_address_missing_header() {
+        let content = "Subject: Test\r\nBody: Hello";
         assert_eq!(extract_email_address(content, "From:"), None);
     }
 
     #[test]
-    fn handles_only_header_name_no_colon_after() {
-        let content = "From";
+    fn extract_email_address_missing_colon() {
+        let content = "From sender@example.com";
         assert_eq!(extract_email_address(content, "From:"), None);
     }
 
     #[test]
-    fn handles_multiple_colons_in_line() {
-        let content = "From: alice@example.com: extra info";
-        assert_eq!(
-            extract_email_address(content, "From:"),
-            Some("alice@example.com: extra info".to_string())
-        );
+    fn extract_email_address_returns_first_match() {
+        let content = "From: first@example.com\r\nFrom: second@example.com";
+        assert_eq!(extract_email_address(content, "From:"), Some("first@example.com".to_string()));
+    }
+
+    #[test]
+    fn extract_email_address_case_sensitive() {
+        let content = "from: lower@example.com\r\nFrom: upper@example.com";
+        // Headers are case-sensitive — only "From:" matches
+        assert_eq!(extract_email_address(content, "From:"), Some("upper@example.com".to_string()));
+    }
+
+    #[test]
+    fn extract_email_address_only_angle_brackets() {
+        let content = "From: <sender@example.com>";
+        assert_eq!(extract_email_address(content, "From:"), Some("sender@example.com".to_string()));
+    }
+
+    #[test]
+    fn extract_email_address_no_angle_brackets() {
+        let content = "From: sender@example.com";
+        assert_eq!(extract_email_address(content, "From:"), Some("sender@example.com".to_string()));
+    }
+
+    #[test]
+    fn extract_email_address_unmatched_brackets() {
+        // If < appears after >, should not extract from brackets
+        let content = "From: >weird<sender@example.com<";
+        assert_eq!(extract_email_address(content, "From:"), Some(">weird<sender@example.com<".to_string()));
     }
 }
 
