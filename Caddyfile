@@ -12,7 +12,13 @@ mail.misfits.ai {
         header Access-Control-Max-Age "3600"
     }
 
-    # Route l'API vers email-api (strip backend CORS headers, enforce whitelist)
+    # Sensitive APIs: route through Next.js for auth middleware enforcement
+    reverse_proxy /api/hermes/* localhost:3001
+    reverse_proxy /api/admin/* localhost:3001
+    reverse_proxy /api/external-accounts/* localhost:3001
+    reverse_proxy /api/emails/*/attachments/* localhost:3001
+
+    # Public APIs + remaining: direct to backend (strip backend CORS headers, enforce whitelist)
     reverse_proxy /api/* localhost:8000 {
         header_down -Access-Control-Allow-Origin
         header_down -Access-Control-Allow-Credentials
@@ -22,6 +28,6 @@ mail.misfits.ai {
         header_down Access-Control-Allow-Credentials "true"
     }
 
-    # Route le reste vers le frontend Next.js
+    # Frontend
     reverse_proxy * localhost:3001
 }
