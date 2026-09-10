@@ -62,7 +62,7 @@ mod tests {
     }
 
     #[test]
-    fn security_enabled_false_string() {
+    fn security_enabled_false() {
         std::env::set_var("SECURITY_MONITORING_ENABLED", "false");
         assert!(!security_enabled());
         std::env::remove_var("SECURITY_MONITORING_ENABLED");
@@ -89,14 +89,20 @@ mod tests {
     }
 
     #[test]
-    fn init_bus_returns_sender() {
+    fn init_bus_creates_channel() {
         let bus = init_bus();
-        assert!(bus.receiver_count() >= 0);
+        // Just verify it doesn't panic and returns a valid sender
+        let _ = bus.send(crate::security::alert::SecurityAlert::new(
+            "TEST",
+            "Test",
+            crate::security::alert::SecuritySeverity::Low,
+            crate::security::alert::RemediationLevel::ALERT,
+        ));
     }
 
     #[test]
     fn get_bus_returns_some_after_init() {
-        let _ = init_bus();
+        init_bus();
         assert!(get_bus().is_some());
     }
 }
