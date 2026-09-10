@@ -234,3 +234,154 @@ pub(crate) fn is_internal_delivery_hop(
 
     host_internal || ip_internal || (company_internal && relay_port)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_recipient_with_name() {
+        let r = ComposerRecipient { email: "<EMAIL>".into(), name: Some("John".into()) };
+        assert_eq!(format_recipient(&r), Some("John <<EMAIL>>".to_string()));
+    }
+
+    #[test]
+    fn format_recipient_no_name() {
+        let r = ComposerRecipient { email: "<EMAIL>".into(), name: None };
+        assert_eq!(format_recipient(&r), Some("<EMAIL>".to_string()));
+    }
+
+    #[test]
+    fn format_recipient_empty_email() {
+        let r = ComposerRecipient { email: "".into(), name: Some("John".into()) };
+        assert_eq!(format_recipient(&r), None);
+    }
+
+    #[test]
+    fn format_recipient_empty_name_becomes_none() {
+        let r = ComposerRecipient { email: "<EMAIL>".into(), name: Some("  ".into()) };
+        assert_eq!(format_recipient(&r), Some("<EMAIL>".to_string()));
+    }
+
+    #[test]
+    fn join_recipients_comma_separated() {
+        let recipients = vec![
+            ComposerRecipient { email: "<EMAIL>".into(), name: Some("A".into()) },
+            ComposerRecipient { email: "<EMAIL>".into(), name: None },
+        ];
+        assert_eq!(join_recipients(&recipients), "A <<EMAIL>>, <EMAIL>");
+    }
+
+    #[test]
+    fn join_recipients_skips_empty() {
+        let recipients = vec![
+            ComposerRecipient { email: "".into(), name: Some("A".into()) },
+            ComposerRecipient { email: "<EMAIL>".into(), name: None },
+        ];
+        assert_eq!(join_recipients(&recipients), "<EMAIL>");
+    }
+
+    #[test]
+    fn domain_from_env_default() {
+        std::env::remove_var("DOMAIN_NAME");
+        assert_eq!(domain_from_env(), "misfits.ai");
+    }
+
+    #[test]
+    fn domain_from_env_from_env() {
+        std::env::set_var("DOMAIN_NAME", "example.com");
+        assert_eq!(domain_from_env(), "example.com");
+        std::env::remove_var("DOMAIN_NAME");
+    }
+
+    #[test]
+    fn from_address_for_user_with_at() {
+        assert_eq!(from_address_for_user("<EMAIL>"), "<EMAIL>");
+    }
+
+    #[test]
+    fn from_address_for_user_without_at() {
+        std::env::remove_var("DOMAIN_NAME");
+        assert_eq!(from_address_for_user("user"), "<EMAIL>");
+    }
+
+    #[test]
+    fn normalize_message_id_strips_brackets() {
+        assert_eq!(normalize_message_id("<msg-123>"), "msg-123");
+    }
+
+    #[test]
+    fn normalize_message_id_no_brackets() {
+        assert_eq!(normalize_message_id("msg-123"), "msg-123");
+    }
+
+    #[test]
+    fn canonical_message_id_wraps_brackets() {
+        assert_eq!(canonical_message_id("msg-123"), Some("<msg-123>".to_string()));
+    }
+
+    #[test]
+    fn canonical_message_id_empty() {
+        assert_eq!(canonical_message_id(""), None);
+    }
+
+    #[test]
+    fn sanitize_filename_removes_special_chars() {
+        assert_eq!(sanitize_filename("file/name.txt", 0), "file_name.txt");
+        assert_eq!(sanitize_filename("file:name.txt", 0), "file_name.txt");
+        assert_eq!(sanitize_filename("file*name?.txt", 0), "file_name_.txt");
+    }
+
+    #[test]
+    fn sanitize_filename_fallback_when_empty() {
+        assert_eq!(sanitize_filename("", 0), "attachment-1");
+        assert_eq!(sanitize_filename("...", 2), "attachment-3");
+    }
+
+    #[test]
+    fn is_private_or_local_ip_loopback() {
+        assert!(is_private_or_local_ip("127.0.0.1"));
+        assert!(is_private_or_local_ip("::1"));
+    }
+
+    #[test]
+    fn is_private_or_local_ip_private() {
+        assert!(is_private_or_local_ip("10.0.0.1"));
+        assert!(is_private_or_local_ip("192.168.1.1"));
+        assert!(is_private_or_local_ip("172.16.0.1"));
+    }
+
+    #[test]
+    fn is_private_or_local_ip_public() {
+        assert!(!is_private_or_local_ip("8.8.8.8"));
+        assert!(!is_private_or_local_ip("1.1.1.1"));
+    }
+
+    #[test]
+    fn is_private_or_local_ip_invalid() {
+        assert!(!is_private_or_local_ip("not-an-ip"));
+    }
+
+    #[test]
+    fn is_internal_delivery_hop_local_host() {
+        assert!(is_internal_delivery_hop(Some("smtp-server"), None, None, None));
+        assert!(is_internal_delivery_hop(Some("host.local"), None, None, None));
+        assert!(is_internal_delivery_hop(Some("host.internal"), None, None, None));
+    }
+
+    #[test]
+    fn is_internal_delivery_hop_private_ip() {
+        assert!(is_internal_delivery_hop(None, Some("10.0.0.1"), None, None));
+    }
+
+    #[test]
+    fn is_internal_delivery_hop_company_relay() {
+        assert!(is_internal_delivery_hop(None, None, Some(8025), Some("dkim-service")));
+        assert!(is_internal_delivery_hop(None, None, Some(8465), Some("dkim-service")));
+    }
+
+    #[test]
+    fn is_internal_delivery_hop_not_internal() {
+        assert!(!is_internal_delivery_hop(Some("mail.google.com"), Some("8.8.8.8"), Some(587), Some("Google")));
+    }
+}
