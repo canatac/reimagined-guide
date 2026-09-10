@@ -56,60 +56,73 @@ mod tests {
     use super::*;
 
     #[test]
-    fn normalize_topic_trims_whitespace() {
-        assert_eq!(normalize_topic(Some("  Rust  ")), "Rust");
+    fn summarize_input_deserializes() {
+        let json = serde_json::json!({ "topic": "AI" });
+        let input: SummarizeNewsletterSourceInput = serde_json::from_value(json).unwrap();
+        assert_eq!(input.topic, Some("AI".to_string()));
     }
 
     #[test]
-    fn normalize_topic_defaults_for_empty() {
-        assert_eq!(normalize_topic(Some("")), "Tech");
+    fn summarize_input_default() {
+        let json = serde_json::json!({});
+        let input: SummarizeNewsletterSourceInput = serde_json::from_value(json).unwrap();
+        assert_eq!(input.topic, None);
     }
 
     #[test]
-    fn normalize_topic_defaults_for_none() {
+    fn normalize_topic_default() {
         assert_eq!(normalize_topic(None), "Tech");
+        assert_eq!(normalize_topic(Some("")), "Tech");
+        assert_eq!(normalize_topic(Some("  ")), "Tech");
     }
 
     #[test]
-    fn normalize_url_adds_https_prefix() {
-        assert_eq!(
-            normalize_url(Some("example.com")),
-            Some("https://example.com".to_string())
-        );
+    fn normalize_topic_custom() {
+        assert_eq!(normalize_topic(Some("AI")), "AI");
+        assert_eq!(normalize_topic(Some("Blockchain")), "Blockchain");
     }
 
     #[test]
-    fn normalize_url_keeps_https() {
-        assert_eq!(
-            normalize_url(Some("https://example.com")),
-            Some("https://example.com".to_string())
-        );
+    fn normalize_url_adds_https() {
+        assert_eq!(normalize_url(Some("example.com")), Some("https://example.com".to_string()));
     }
 
     #[test]
-    fn normalize_url_returns_none_for_empty() {
+    fn normalize_url_preserves_http() {
+        assert_eq!(normalize_url(Some("http://example.com")), Some("http://example.com".to_string()));
+    }
+
+    #[test]
+    fn normalize_url_preserves_https() {
+        assert_eq!(normalize_url(Some("https://example.com")), Some("https://example.com".to_string()));
+    }
+
+    #[test]
+    fn normalize_url_empty_is_none() {
+        assert_eq!(normalize_url(None), None);
         assert_eq!(normalize_url(Some("")), None);
+        assert_eq!(normalize_url(Some("  ")), None);
     }
 
     #[test]
-    fn compute_signal_short_summary() {
+    fn compute_signal_short() {
         assert_eq!(compute_signal("short"), 65);
     }
 
     #[test]
-    fn compute_signal_long_summary() {
-        let long = "a".repeat(100);
-        assert_eq!(compute_signal(&long), 70);
+    fn compute_signal_long() {
+        let long = "a".repeat(400);
+        assert_eq!(compute_signal(&long), 85);
     }
 
     #[test]
     fn compute_signal_clamps_max() {
-        let very_long = "a".repeat(1000);
-        assert_eq!(compute_signal(&very_long), 98);
+        let huge = "a".repeat(1000);
+        assert_eq!(compute_signal(&huge), 98);
     }
 }
 
-#[path = "newsletter_summarize_links.rs"]
+#[path = "newsletter_summarize_links.rs"]\
 mod links;
 #[path = "newsletter_summarize_parsing.rs"]
 mod parsing;
