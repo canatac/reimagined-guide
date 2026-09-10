@@ -32,6 +32,75 @@ pub(crate) struct UpdateNewsletterSourceInput {
 }
 
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn create_newsletter_source_input_deserializes() {
+        let json = serde_json::json!({ "name": "TechCrunch", "url": "https://techcrunch.com" });
+        let input: CreateNewsletterSourceInput = serde_json::from_value(json).unwrap();
+        assert_eq!(input.name, "TechCrunch");
+        assert_eq!(input.url, Some("https://techcrunch.com".to_string()));
+    }
+
+    #[test]
+    fn create_newsletter_source_input_without_url() {
+        let json = serde_json::json!({ "name": "Hacker News" });
+        let input: CreateNewsletterSourceInput = serde_json::from_value(json).unwrap();
+        assert_eq!(input.name, "Hacker News");
+        assert_eq!(input.url, None);
+    }
+
+    #[test]
+    fn create_newsletter_item_input_deserializes() {
+        let json = serde_json::json!({
+            "sourceId": "src-1",
+            "title": "Test",
+            "summary": "Summary",
+            "topic": "AI",
+            "link": "https://example.com",
+            "signal": 5
+        });
+        let input: CreateNewsletterItemInput = serde_json::from_value(json).unwrap();
+        assert_eq!(input.source_id, "src-1");
+        assert_eq!(input.title, "Test");
+        assert_eq!(input.summary, "Summary");
+        assert_eq!(input.topic, Some("AI".to_string()));
+        assert_eq!(input.link, Some("https://example.com".to_string()));
+        assert_eq!(input.signal, Some(5));
+    }
+
+    #[test]
+    fn create_newsletter_item_input_defaults() {
+        let json = serde_json::json!({
+            "sourceId": "src-1",
+            "title": "Test",
+            "summary": "Summary"
+        });
+        let input: CreateNewsletterItemInput = serde_json::from_value(json).unwrap();
+        assert_eq!(input.topic, None);
+        assert_eq!(input.link, None);
+        assert_eq!(input.signal, None);
+    }
+
+    #[test]
+    fn update_newsletter_source_input_deserializes() {
+        let json = serde_json::json!({ "name": "New Name", "url": "https://new.com" });
+        let input: UpdateNewsletterSourceInput = serde_json::from_value(json).unwrap();
+        assert_eq!(input.name, Some("New Name".to_string()));
+        assert_eq!(input.url, Some("https://new.com".to_string()));
+    }
+
+    #[test]
+    fn update_newsletter_source_input_empty() {
+        let json = serde_json::json!({});
+        let input: UpdateNewsletterSourceInput = serde_json::from_value(json).unwrap();
+        assert_eq!(input.name, None);
+        assert_eq!(input.url, None);
+    }
+}
+
 pub(crate) async fn api_newsletter_sources_create(
     req: actix_web::HttpRequest,
     mongo: web::Data<Arc<mongodb::Client>>,
