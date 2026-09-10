@@ -58,7 +58,7 @@ mod tests {
             "subject": "Hello",
             "body": "World",
             "attachments": [
-                {"file": "a.txt", "contentType": "text/plain", "dataBase64": "SGVsbG8="}
+                {"filename": "a.txt", "contentType": "text/plain", "dataBase64": "SGVsbG8="}
             ]
         });
         let req: EmailRequest = serde_json::from_value(json).unwrap();
