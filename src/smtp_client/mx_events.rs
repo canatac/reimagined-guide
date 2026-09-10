@@ -144,3 +144,109 @@ pub(super) fn emit_final_event(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn send_context_from_email_with_message_id() {
+        let email = Email {
+            id: "fallback-id".into(),
+            from: "from@example.com".into(),
+            to: "to@example.com".into(),
+            subject: "Test".into(),
+            body: "Body".into(),
+            headers: vec![("Message-ID".into(), "<msg-123@example.com>".into())],
+            flags: vec![],
+            sequence_number: 0,
+            uid: 0,
+            internal_date: chrono::Utc::now(),
+            dkim_signature: None,
+        };
+        let ctx = SendContext::from_email(&email);
+        assert_eq!(ctx.message_id, "msg-123@example.com");
+        assert_eq!(ctx.from, "from@example.com");
+        assert_eq!(ctx.to, "to@example.com");
+    }
+
+    #[test]
+    fn send_context_from_email_without_message_id() {
+        let email = Email {
+            id: "my-id".into(),
+            from: "a@b.com".into(),
+            to: "c@d.com".into(),
+            subject: "Sub".into(),
+            body: "Body".into(),
+            headers: vec![],
+            flags: vec![],
+            sequence_number: 0,
+            uid: 0,
+            internal_date: chrono::Utc::now(),
+            dkim_signature: None,
+        };
+        let ctx = SendContext::from_email(&email);
+        assert_eq!(ctx.message_id, "my-id");
+    }
+
+    #[test]
+    fn send_context_uses_uuid_for_correlation() {
+        let email = Email {
+            id: "test".into(),
+            from: "a@b.com".into(),
+            to: "c@d.com".into(),
+            subject: "Sub".into(),
+            body: "Body".into(),
+            headers: vec![],
+            flags: vec![],
+            sequence_number: 0,
+            uid: 0,
+            internal_date: chrono::Utc::now(),
+            dkim_signature: None,
+        };
+        let ctx = SendContext::from_email(&email);
+        assert!(!ctx.correlation_id.is_empty());
+    }
+
+    #[test]
+    fn send_context_emit_sets_correlation_id() {
+        let email = Email {
+            id: "test".into(),
+            from: "a@b.com".into(),
+            to: "c@d.com".into(),
+            subject: "Sub".into(),
+            body: "Body".into(),
+            headers: vec![],
+            flags: vec![],
+            sequence_number: 0,
+            uid: 0,
+            internal_date: chrono::Utc::now(),
+            dkim_signature: None,
+        };
+        let ctx = SendContext::from_email(&email);
+        let ev = ctx.emit(crate::monitoring::SmtpEventType::Delivered);
+        assert_eq!(ev.correlation_id, ctx.correlation_id);
+        assert_eq!(ev.message_id, ctx.message_id);
+    }
+
+    #[test]
+    fn send_context_emit_bounce_soft_no_op_when_mon_disabled() {
+        let email = Email {
+            id: "test".into(),
+            from: "a@b.com".into(),
+            to: "c@d.com".into(),
+            subject: "Sub".into(),
+            body: "Body".into(),
+            headers: vec![],
+            flags: vec![],
+            sequence_number: 0,
+            uid: 0,
+            internal_date: chrono::Utc::now(),
+            dkim_signature: None,
+        };
+        let mut ctx = SendContext::from_email(&email);
+        ctx.mon = false;
+        // Should not panic or do anything
+        ctx.emit_bounce_soft("test reason".into(), None, None, None, None);
+    }
+}
