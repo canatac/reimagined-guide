@@ -364,3 +364,297 @@ fn is_completed_status(status: &str) -> bool {
 fn is_failed_status(status: &str) -> bool {
     matches!(status, "failed" | "error" | "cancelled" | "expired")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_run_facts_basic() {
+        let run = serde_json::json!({
+            "status": "completed",
+            "model": "gpt-4",
+            "feature": "compose",
+            "userId": "user1",
+            "sessionId": "sess1",
+            "startedAt": "2026-09-10T12:00:00Z",
+            "usage": {
+                "promptTokens": 100,
+                "completionTokens": 50,
+                "totalTokens": 150
+            },
+            "latencyMs": 200
+        });
+        let facts = extract_run_facts(&run);
+        assert_eq!(facts.status, "completed");
+        assert_eq!(facts.model, "gpt-4");
+        assert_eq!(facts.feature, "compose");
+        assert_eq!(facts.user_id, Some("user1".to_string()));
+        assert_eq!(facts.session_id, Some("sess1".to_string()));
+        assert_eq!(facts.day_bucket, "2026-09-10");
+        assert_eq!(facts.prompt_tokens, 100);
+        assert_eq!(facts.completion_tokens, 50);
+        assert_eq!(facts.total_tokens, 150);
+        assert_eq!(facts.latency_ms, 200);
+    }
+
+    #[test]
+    fn extract_run_facts_total_fallback() {
+        let run = serde_json::json!({
+            "status": "completed",
+            "model": "gpt-4",
+            "feature": "compose",
+            "usage": {
+                "prompt_tokens": 100,
+                "completion_tokens": 50
+            }
+        });
+        let facts = extract_run_facts(&run);
+        assert_eq!(facts.total_tokens, 150);
+    }
+
+    #[test]
+    fn extract_run_facts_defaults() {
+        let run = serde_json::json!({});
+        let facts = extract_run_facts(&run);
+        assert_eq!(facts.status, "unknown");
+        assert_eq!(facts.model, "unknown");
+        assert_eq!(facts.feature, "unknown");
+        assert_eq!(facts.user_id, None);
+        assert_eq!(facts.session_id, None);
+        assert_eq!(facts.day_bucket, "unknown");
+        assert_eq!(facts.prompt_tokens, 0);
+        assert_eq!(facts.completion_tokens, 0);
+        assert_eq!(facts.total_tokens, 0);
+        assert_eq!(facts.latency_ms, 0);
+    }
+
+    #[test]
+    fn extract_run_facts_status_lowercase() {
+        let run = serde_json::json!({ "status": "COMPLETED" });
+        let facts = extract_run_facts(&run);
+        assert_eq!(facts.status, "completed");
+    }
+
+    #[test]
+    fn extract_run_facts_model_trim() {
+        let run = serde_json::json!({ "model": "  gpt-4  " });
+        let facts = extract_run_facts(&run);
+        assert_eq!(facts.model, "gpt-4");
+    }
+
+    #[test]
+    fn normalized_user_key_valid() {
+        assert_eq!(normalized_user_key(Some("user123".to_string())), "user123");
+    }
+
+    #[test]
+    fn normalized_user_key_none() {
+        assert_eq!(normalized_user_key(None), "unknown");
+    }
+
+    #[test]
+    fn normalized_user_key_empty() {
+        assert_eq!(normalized_user_key(Some("".to_string())), "unknown");
+    }
+
+    #[test]
+    fn normalized_user_key_whitespace() {
+        assert_eq!(normalized_user_key(Some("   ".to_string())), "unknown");
+    }
+
+    #[test]
+    fn is_completed_status_true() {
+        assert!(is_completed_status("completed"));
+        assert!(is_completed_status("success"));
+    }
+
+    #[test]
+    fn is_completed_status_false() {
+        assert!(!is_completed_status("pending"));
+        assert!(!is_completed_status("running"));
+    }
+
+    #[test]
+    fn is_failed_status_true() {
+        assert!(is_failed_status("failed"));
+        assert!(is_failed_status("error"));
+    }
+
+    #[test]
+    fn is_failed_status_false() {
+        assert!(!is_failed_status("completed"));
+        assert!(!is_failed_status("pending"));
+    }
+
+    #[test]
+    fn iso_day_prefix_valid() {
+        assert_eq!(iso_day_prefix("2026-09-10T12:00:00Z"), Some("2026-09-10".to_string()));
+    }
+
+    #[test]
+    fn iso_day_prefix_short() {
+        assert_eq!(iso_day_prefix("2026"), None);
+    }
+
+    #[test]
+    fn iso_day_prefix_empty() {
+        assert_eq!(iso_day_prefix(""), None);
+    }
+
+    #[test]
+    fn day_bucket_for_run_valid() {
+        let run = serde_json::json!({"started_at": "2026-09-10T12:00:00Z"});
+        assert_eq!(day_bucket_for_run(&run), "2026-09-10");
+    }
+
+    #[test]
+    fn day_bucket_for_run_alias() {
+        let run = serde_json::json!({"startedAt": "2026-09-10T12:00:00Z"});
+        assert_eq!(day_bucket_for_run(&run), "2026-09-10");
+    }
+
+    #[test]
+    fn day_bucket_for_run_unknown() {
+        let run = serde_json::json!({});
+        assert_eq!(day_bucket_for_run(&run), "unknown");
+    }
+
+    #[test]
+    fn estimate_run_cost_zero() {
+        let rate = PricingRate { input_per_1m_usd: 0.0, output_per_1m_usd: 0.0 };
+        assert_eq!(estimate_run_cost(1000, 1000, rate), 0.0);
+    }
+
+    #[test]
+    fn estimate_run_cost_with_pricing() {
+        let rate = PricingRate { input_per_1m_usd: 1.0, output_per_1m_usd: 2.0 };
+        let cost = estimate_run_cost(500_000, 500_000, rate);
+        assert!(cost > 0.0);
+    }
+
+    #[test]
+    fn estimate_run_cost_rounds() {
+        let rate = PricingRate { input_per_1m_usd: 0.123456, output_per_1m_usd: 0.0 };
+        let cost = estimate_run_cost(1000, 0, rate);
+        assert_eq!(cost, 0.000123);
+    }
+
+    #[test]
+    fn apply_bucket_for_run_increments() {
+        let mut bucket = Bucket::default();
+        let facts = RunFacts {
+            status: "completed".to_string(),
+            model: "test".to_string(),
+            feature: "compose".to_string(),
+            user_id: None,
+            session_id: None,
+            day_bucket: "2026-09-10".to_string(),
+            prompt_tokens: 100,
+            completion_tokens: 50,
+            total_tokens: 150,
+            latency_ms: 200,
+        };
+        apply_bucket_for_run(&mut bucket, &facts, 0.001);
+        assert_eq!(bucket.runs, 1);
+        assert_eq!(bucket.total_tokens, 150);
+        assert_eq!(bucket.completed_runs, 1);
+        assert!((bucket.total_cost_usd - 0.001).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn apply_bucket_for_run_failed() {
+        let mut bucket = Bucket::default();
+        let facts = RunFacts {
+            status: "failed".to_string(),
+            model: "test".to_string(),
+            feature: "compose".to_string(),
+            user_id: None,
+            session_id: None,
+            day_bucket: "2026-09-10".to_string(),
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            total_tokens: 0,
+            latency_ms: 0,
+        };
+        apply_bucket_for_run(&mut bucket, &facts, 0.0);
+        assert_eq!(bucket.failed_runs, 1);
+        assert_eq!(bucket.completed_runs, 0);
+    }
+
+    #[test]
+    fn update_pricing_counters_priced() {
+        let mut total = 0.0;
+        let mut priced = 0;
+        let mut unpriced = 0;
+        update_pricing_counters(&mut total, &mut priced, &mut unpriced, 0.01);
+        assert!((total - 0.01).abs() < f64::EPSILON);
+        assert_eq!(priced, 1);
+        assert_eq!(unpriced, 0);
+    }
+
+    #[test]
+    fn update_pricing_counters_unpriced() {
+        let mut total = 0.0;
+        let mut priced = 0;
+        let mut unpriced = 0;
+        update_pricing_counters(&mut total, &mut priced, &mut unpriced, 0.0);
+        assert_eq!(unpriced, 1);
+        assert_eq!(priced, 0);
+    }
+
+    #[test]
+    fn update_global_counters_completed() {
+        let mut completed = 0;
+        let mut failed = 0;
+        let mut prompt = 0;
+        let mut completion = 0;
+        let mut total = 0;
+        let mut latencies = vec![];
+        let facts = RunFacts {
+            status: "completed".to_string(),
+            model: "test".to_string(),
+            feature: "compose".to_string(),
+            user_id: None,
+            session_id: None,
+            day_bucket: "2026-09-10".to_string(),
+            prompt_tokens: 100,
+            completion_tokens: 50,
+            total_tokens: 150,
+            latency_ms: 200,
+        };
+        update_global_counters(&mut completed, &mut failed, &mut prompt, &mut completion, &mut total, &mut latencies, &facts);
+        assert_eq!(completed, 1);
+        assert_eq!(failed, 0);
+        assert_eq!(prompt, 100);
+        assert_eq!(completion, 50);
+        assert_eq!(total, 150);
+        assert_eq!(latencies, vec![200]);
+    }
+
+    #[test]
+    fn update_global_counters_failed() {
+        let mut completed = 0;
+        let mut failed = 0;
+        let mut prompt = 0;
+        let mut completion = 0;
+        let mut total = 0;
+        let mut latencies = vec![];
+        let facts = RunFacts {
+            status: "failed".to_string(),
+            model: "test".to_string(),
+            feature: "compose".to_string(),
+            user_id: None,
+            session_id: None,
+            day_bucket: "2026-09-10".to_string(),
+            prompt_tokens: 100,
+            completion_tokens: 0,
+            total_tokens: 100,
+            latency_ms: 0,
+        };
+        update_global_counters(&mut completed, &mut failed, &mut prompt, &mut completion, &mut total, &mut latencies, &facts);
+        assert_eq!(completed, 0);
+        assert_eq!(failed, 1);
+        assert!(latencies.is_empty());
+    }
+}
