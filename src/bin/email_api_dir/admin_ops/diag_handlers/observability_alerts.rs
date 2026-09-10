@@ -134,10 +134,9 @@ mod tests {
 
     #[test]
     fn rbl_sources_default() {
-        std::env::remove_var("RBL_CHECK_HOSTS");
         let sources = rbl_sources();
-        assert!(!sources.is_empty());
-        assert!(sources.iter().any(|s| s.contains("spamhaus")));
+        assert!(sources.contains(&"zen.spamhaus.org".to_string()));
+        assert!(sources.contains(&"bl.spamcop.net".to_string()));
     }
 
     #[test]
@@ -151,9 +150,18 @@ mod tests {
     }
 
     #[test]
-    fn rbl_sources_trims_whitespace() {
+    fn rbl_sources_empty() {
+        std::env::set_var("RBL_CHECK_HOSTS", "");
+        let sources = rbl_sources();
+        assert!(sources.is_empty());
+        std::env::remove_var("RBL_CHECK_HOSTS");
+    }
+
+    #[test]
+    fn rbl_sources_whitespace_trimmed() {
         std::env::set_var("RBL_CHECK_HOSTS", " host1 , host2 ");
         let sources = rbl_sources();
+        assert_eq!(sources.len(), 2);
         assert_eq!(sources[0], "host1");
         assert_eq!(sources[1], "host2");
         std::env::remove_var("RBL_CHECK_HOSTS");
@@ -168,20 +176,47 @@ mod tests {
 
     #[test]
     fn rbl_listed_by_custom() {
-        std::env::set_var("RBL_LISTED_BY", "provider1,provider2");
+        std::env::set_var("RBL_LISTED_BY", "source1,source2");
         let listed = rbl_listed_by();
         assert_eq!(listed.len(), 2);
-        assert_eq!(listed[0], "provider1");
-        assert_eq!(listed[1], "provider2");
+        assert_eq!(listed[0], "source1");
+        assert_eq!(listed[1], "source2");
         std::env::remove_var("RBL_LISTED_BY");
     }
 
     #[test]
-    fn rbl_listed_by_trims_whitespace() {
-        std::env::set_var("RBL_LISTED_BY", " p1 , p2 ");
-        let listed = rbl_listed_by();
-        assert_eq!(listed[0], "p1");
-        assert_eq!(listed[1], "p2");
-        std::env::remove_var("RBL_LISTED_BY");
+    fn alerts_snapshot_new() {
+        let snapshot = AlertsSnapshot {
+            monitoring: vec![],
+            security: vec![],
+            queue_growth: 5,
+            auth_failures: 3,
+            anomalies: 2,
+        };
+        assert!(snapshot.monitoring.is_empty());
+        assert!(snapshot.security.is_empty());
+        assert_eq!(snapshot.queue_growth, 5);
+        assert_eq!(snapshot.auth_failures, 3);
+        assert_eq!(snapshot.anomalies, 2);
+    }
+
+    #[test]
+    fn alerts_snapshot_with_data() {
+        let snapshot = AlertsSnapshot {
+            monitoring: vec![monitoring::alerts::ActiveAlert {
+                id: "alert-1".to_string(),
+                kind: "queue_growth".to_string(),
+                message: "Queue depth exceeds threshold".to_string(),
+                severity: "warning".to_string(),
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+            }],
+            security: vec![],
+            queue_growth: 1,
+            auth_failures: 0,
+            anomalies: 0,
+        };
+        assert_eq!(snapshot.monitoring.len(), 1);
+        assert_eq!(snapshot.monitoring[0].id, "alert-1");
+        assert_eq!(snapshot.queue_growth, 1);
     }
 }
