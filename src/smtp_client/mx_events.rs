@@ -144,3 +144,100 @@ pub(super) fn emit_final_event(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::entities::Email;
+
+    fn make_email_with_message_id(id: &str) -> Email {
+        Email::new(id, "alice@a.com", "bob@b.com", "Subj", "Body")
+    }
+
+    #[test]
+    fn send_context_extracts_message_id_from_headers() {
+        let email = Email {
+            id: "fallback-id".to_string(),
+            from: "a@a.com".to_string(),
+            to: "b@b.com".to_string(),
+            subject: "S".to_string(),
+            body: "B".to_string(),
+            headers: vec![
+                ("Message-ID".to_string(), "<abc-123@misfits.ai>".to_string()),
+            ],
+        };
+        let ctx = SendContext::from_email(&email);
+        assert_eq!(ctx.message_id, "abc-123@misfits.ai");
+    }
+
+    #[test]
+    fn send_context_falls_back_to_email_id_when_no_message_id_header() {
+        let email = Email {
+            id: "email-uuid-456".to_string(),
+            from: "a@a.com".to_string(),
+            to: "b@b.com".to_string(),
+            subject: "S".to_string(),
+            body: "B".to_string(),
+            headers: vec![("From".to_string(), "a@a.com".to_string())],
+        };
+        let ctx = SendContext::from_email(&email);
+        assert_eq!(ctx.message_id, "email-uuid-456");
+    }
+
+    #[test]
+    fn send_context_correlation_id_is_unique() {
+        let email = make_email_with_message_id("id1");
+        let ctx1 = SendContext::from_email(&email);
+        let ctx2 = SendContext::from_email(&email);
+        assert_ne!(ctx1.correlation_id, ctx2.correlation_id);
+    }
+
+    #[test]
+    fn send_context_strips_angle_brackets_from_message_id() {
+        let email = Email {
+            id: "x".to_string(),
+            from: "a@a.com".to_string(),
+            to: "b@b.com".to_string(),
+            subject: "S".to_string(),
+            body: "B".to_string(),
+            headers: vec![
+                ("message-id".to_string(), "<with-dots.and+plus@host.example.com>".to_string()),
+            ],
+        };
+        let ctx = SendContext::from_email(&email);
+        assert_eq!(ctx.message_id, "with-dots.and+plus@host.example.com");
+    }
+
+    #[test]
+    fn send_context_fields_propagated() {
+        let email = Email {
+            id: "e1".to_string(),
+            from: "sender@misfits.ai".to_string(),
+            to: "rcpt@example.com".to_string(),
+            subject: "Hi".to_string(),
+            body: "Body".to_string(),
+            headers: vec![],
+        };
+        let ctx = SendContext::from_email(&email);
+        assert_eq!(ctx.from, "sender@misfits.ai");
+        assert_eq!(ctx.to, "rcpt@example.com");
+        assert!(!ctx.message_id.is_empty());
+        assert!(!ctx.correlation_id.is_empty());
+    }
+
+    #[test]
+    fn send_context_message_id_case_insensitive_header_lookup() {
+        let email = Email {
+            id: "fallback".to_string(),
+            from: "a@a.com".to_string(),
+            to: "b@b.com".to_string(),
+            subject: "S".to_string(),
+            body: "B".to_string(),
+            headers: vec![
+                ("MESSAGE-ID".to_string(), "<UPPERCASE@host>".to_string()),
+            ],
+        };
+        let ctx = SendContext::from_email(&email);
+        assert_eq!(ctx.message_id, "UPPERCASE@host");
+    }
+}
