@@ -158,6 +158,72 @@ impl ExternalImapService {
             .database(&Self::db_name())
             .collection::<ExternalSyncRun>("external_imap_sync_runs")
     }
+
+    #[cfg(test)]
+    fn test_instance() -> Self {
+        // Helper for unit tests — creates a mock-like instance
+        // Note: This is just for testing the helper methods that don't need DB
+        unimplemented!("Use mock-based tests for DB operations")
+    }
+}
+
+#[cfg(test)]
+mod account_ops_tests {
+    use super::*;
+
+    #[test]
+    fn redact_account_clears_secret() {
+        let account = ExternalImapAccount {
+            id: "acct-1".into(),
+            owner_user_id: "user-1".into(),
+            provider: "gmail".into(),
+            email: "a@gmail.com".into(),
+            auth_type: "oauth2".into(),
+            secret_ref: Some("ref-1".into()),
+            secret_value: Some("super-secret".into()),
+            imap_host: "imap.gmail.com".into(),
+            imap_port: 993,
+            imap_tls: true,
+            smtp_host: Some("smtp.gmail.com".into()),
+            smtp_port: Some(587),
+            smtp_tls: Some(true),
+            status: "active".into(),
+            last_sync_at: None,
+            last_error: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        let redacted = redact_account(account);
+        assert_eq!(redacted.secret_value, None);
+        assert_eq!(redacted.secret_ref, Some("ref-1".into()));
+        assert_eq!(redacted.id, "acct-1");
+    }
+
+    #[test]
+    fn redact_account_already_redacted() {
+        let account = ExternalImapAccount {
+            id: "acct-2".into(),
+            owner_user_id: "user-2".into(),
+            provider: "outlook".into(),
+            email: "b@outlook.com".into(),
+            auth_type: "password".into(),
+            secret_ref: None,
+            secret_value: None,
+            imap_host: "outlook.office365.com".into(),
+            imap_port: 993,
+            imap_tls: true,
+            smtp_host: None,
+            smtp_port: None,
+            smtp_tls: None,
+            status: "active".into(),
+            last_sync_at: None,
+            last_error: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        let redacted = redact_account(account);
+        assert_eq!(redacted.secret_value, None);
+    }
 }
 
 // Helpers Sprint 14
