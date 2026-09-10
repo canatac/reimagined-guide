@@ -98,3 +98,25 @@ pub(crate) async fn persist_summary_item(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_compute_signal_short_summary() {
+        assert_eq!(compute_signal("short"), 65);
+    }
+
+    #[test]
+    fn test_compute_signal_long_summary() {
+        let long = "a".repeat(400);
+        assert_eq!(compute_signal(&long), 85);
+    }
+
+    #[test]
+    fn test_compute_signal_clamps_max() {
+        let huge = "a".repeat(1000);
+        assert_eq!(compute_signal(&huge), 98);
+    }
+}
