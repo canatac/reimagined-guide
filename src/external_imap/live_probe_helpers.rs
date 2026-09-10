@@ -9,3 +9,35 @@ pub fn escape_imap(s: &str) -> String {
 pub fn sse_line_frame(payload: &str) -> String {
     format!("event: line\ndata: {payload}\n\n")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn escape_imap_backslash() {
+        assert_eq!(escape_imap(r"a\b"), r"a\\b");
+    }
+
+    #[test]
+    fn escape_imap_double_quote() {
+        assert_eq!(escape_imap(r#"a"b"#), r#"a\"b"#);
+    }
+
+    #[test]
+    fn escape_imap_no_special_chars() {
+        assert_eq!(escape_imap("plain"), "plain");
+    }
+
+    #[test]
+    fn sse_line_frame_format() {
+        let frame = sse_line_frame("hello");
+        assert_eq!(frame, "event: line\ndata: hello\n\n");
+    }
+
+    #[test]
+    fn sse_line_frame_empty_payload() {
+        let frame = sse_line_frame("");
+        assert_eq!(frame, "event: line\ndata: \n\n");
+    }
+}
