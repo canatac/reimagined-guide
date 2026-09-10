@@ -35,10 +35,16 @@ pub(crate) fn check_credentials(username: &[u8], password: &[u8]) -> std::io::Re
 mod tests {
     use super::*;
 
+    // Test-only credential values — not production secrets.
+    // lgtm [rust/hard-coded-credential]
+    const TEST_USERNAME: &str = "testuser";
+    // lgtm [rust/hard-coded-credential]
+    const TEST_PASSWORD: &str = "testpass";
+
     #[test]
     fn check_credentials_valid() {
-        std::env::set_var("SMTP_USERNAME", "testuser");
-        std::env::set_var("SMTP_PASSWORD", "testpass");
+        std::env::set_var("SMTP_USERNAME", TEST_USERNAME);
+        std::env::set_var("SMTP_PASSWORD", TEST_PASSWORD);
         assert!(check_credentials(b"testuser", b"testpass").unwrap());
         std::env::remove_var("SMTP_USERNAME");
         std::env::remove_var("SMTP_PASSWORD");
@@ -46,8 +52,8 @@ mod tests {
 
     #[test]
     fn check_credentials_wrong_username() {
-        std::env::set_var("SMTP_USERNAME", "testuser");
-        std::env::set_var("SMTP_PASSWORD", "testpass");
+        std::env::set_var("SMTP_USERNAME", TEST_USERNAME);
+        std::env::set_var("SMTP_PASSWORD", TEST_PASSWORD);
         assert!(!check_credentials(b"wronguser", b"testpass").unwrap());
         std::env::remove_var("SMTP_USERNAME");
         std::env::remove_var("SMTP_PASSWORD");
@@ -55,8 +61,8 @@ mod tests {
 
     #[test]
     fn check_credentials_wrong_password() {
-        std::env::set_var("SMTP_USERNAME", "testuser");
-        std::env::set_var("SMTP_PASSWORD", "testpass");
+        std::env::set_var("SMTP_USERNAME", TEST_USERNAME);
+        std::env::set_var("SMTP_PASSWORD", TEST_PASSWORD);
         assert!(!check_credentials(b"testuser", b"wrongpass").unwrap());
         std::env::remove_var("SMTP_USERNAME");
         std::env::remove_var("SMTP_PASSWORD");
@@ -64,8 +70,8 @@ mod tests {
 
     #[test]
     fn check_credentials_both_wrong() {
-        std::env::set_var("SMTP_USERNAME", "testuser");
-        std::env::set_var("SMTP_PASSWORD", "testpass");
+        std::env::set_var("SMTP_USERNAME", TEST_USERNAME);
+        std::env::set_var("SMTP_PASSWORD", TEST_PASSWORD);
         assert!(!check_credentials(b"wrong", b"wrong").unwrap());
         std::env::remove_var("SMTP_USERNAME");
         std::env::remove_var("SMTP_PASSWORD");
@@ -73,8 +79,8 @@ mod tests {
 
     #[test]
     fn check_credentials_empty_username() {
-        std::env::set_var("SMTP_USERNAME", "testuser");
-        std::env::set_var("SMTP_PASSWORD", "testpass");
+        std::env::set_var("SMTP_USERNAME", TEST_USERNAME);
+        std::env::set_var("SMTP_PASSWORD", TEST_PASSWORD);
         assert!(!check_credentials(b"", b"testpass").unwrap());
         std::env::remove_var("SMTP_USERNAME");
         std::env::remove_var("SMTP_PASSWORD");
@@ -82,8 +88,8 @@ mod tests {
 
     #[test]
     fn check_credentials_empty_password() {
-        std::env::set_var("SMTP_USERNAME", "testuser");
-        std::env::set_var("SMTP_PASSWORD", "testpass");
+        std::env::set_var("SMTP_USERNAME", TEST_USERNAME);
+        std::env::set_var("SMTP_PASSWORD", TEST_PASSWORD);
         assert!(!check_credentials(b"testuser", b"").unwrap());
         std::env::remove_var("SMTP_USERNAME");
         std::env::remove_var("SMTP_PASSWORD");
@@ -92,14 +98,14 @@ mod tests {
     #[test]
     fn check_credentials_missing_env_username() {
         std::env::remove_var("SMTP_USERNAME");
-        std::env::set_var("SMTP_PASSWORD", "testpass");
+        std::env::set_var("SMTP_PASSWORD", TEST_PASSWORD);
         assert!(check_credentials(b"testuser", b"testpass").is_err());
         std::env::remove_var("SMTP_PASSWORD");
     }
 
     #[test]
     fn check_credentials_missing_env_password() {
-        std::env::set_var("SMTP_USERNAME", "testuser");
+        std::env::set_var("SMTP_USERNAME", TEST_USERNAME);
         std::env::remove_var("SMTP_PASSWORD");
         assert!(check_credentials(b"testuser", b"testpass").is_err());
         std::env::remove_var("SMTP_USERNAME");
