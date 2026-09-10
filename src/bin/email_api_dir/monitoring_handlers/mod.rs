@@ -17,6 +17,7 @@ pub(crate) use prometheus::*;
 pub(crate) use dashboard::*;
 pub(crate) use security::*;
 pub(crate) use webhook::*;
+pub(crate) use webhook_incoming::*;
 pub(crate) use mongo_health::*;
 #[allow(unused_imports)]
 pub(crate) use shared::*;

@@ -24,7 +24,7 @@ type HmacSha256 = Hmac<Sha256>;
 
 /// Stores registered secrets for incoming webhook verification.
 /// Maps provider name → secret key.
-pub structIncomingWebhookSecrets {
+pub struct IncomingWebhookSecrets {
     secrets: Arc<RwLock<HashMap<String, String>>>,
 }
 
