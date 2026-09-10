@@ -59,6 +59,67 @@ pub(crate) fn use_mongodb_env() -> bool {
     env::var("USE_MONGODB").unwrap_or_else(|_| "false".to_string()) == "true"
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn use_mongodb_env_default_false() {
+        std::env::remove_var("USE_MONGODB");
+        assert!(!use_mongodb_env());
+    }
+
+    #[test]
+    fn use_mongodb_env_true_values() {
+        for val in &["true", "True", "TRUE", "1"] {
+            std::env::set_var("USE_MONGODB", val);
+            assert!(use_mongodb_env(), "expected true for {val}");
+        }
+        std::env::remove_var("USE_MONGODB");
+    }
+
+    #[test]
+    fn use_mongodb_env_false_values() {
+        for val in &["false", "0", "no", "off", ""] {
+            std::env::set_var("USE_MONGODB", val);
+            assert!(!use_mongodb_env(), "expected false for {val}");
+        }
+        std::env::remove_var("USE_MONGODB");
+    }
+
+    #[test]
+    fn email_from_current_clones_fields() {
+        let current = CustomEmail {
+            email: Email {
+                id: "id-1".into(),
+                from: "<EMAIL>".into(),
+                to: "<EMAIL>".into(),
+                subject: "Test".into(),
+                body: "Body".into(),
+                headers: vec![("X-Test".into(), "val".into())],
+                flags: vec!["\\Seen".into()],
+                sequence_number: 42,
+                uid: 100,
+                internal_date: chrono::Utc::now(),
+                dkim_signature: Some("sig".into()),
+            },
+            raw_content: "raw".into(),
+            dkim_signature: Some("sig".into()),
+        };
+        let email = email_from_current(&current);
+        assert_eq!(email.id, "id-1");
+        assert_eq!(email.from, "<EMAIL>");
+        assert_eq!(email.to, "<EMAIL>");
+        assert_eq!(email.subject, "Test");
+        assert_eq!(email.body, "Body");
+        assert_eq!(email.headers.len(), 1);
+        assert_eq!(email.flags.len(), 1);
+        assert_eq!(email.sequence_number, 42);
+        assert_eq!(email.uid, 100);
+        assert_eq!(email.dkim_signature, Some("sig".into()));
+    }
+}
+
 /// Persiste + forward un mail via MongoDB. Écrit la réponse SMTP appropriée.
 pub(crate) async fn store_and_forward_mongo(
     stream: &mut StreamType,
