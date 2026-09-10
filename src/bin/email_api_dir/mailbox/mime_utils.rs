@@ -82,6 +82,59 @@ pub(crate) fn strip_tags(html: &str) -> String {
     out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_address_extracts_name_and_address() {
+        let dto = parse_address("Alice Smith <alice@example.com>");
+        assert_eq!(dto.name, "Alice Smith");
+        assert_eq!(dto.address, "alice@example.com");
+    }
+
+    #[test]
+    fn parse_address_handles_plain_email() {
+        let dto = parse_address("bob@example.com");
+        assert_eq!(dto.address, "bob@example.com");
+        assert_eq!(dto.name, "bob");
+    }
+
+    #[test]
+    fn parse_address_handles_quoted_name() {
+        let dto = parse_address("\"Smith, Alice\" <alice@example.com>");
+        assert_eq!(dto.address, "alice@example.com");
+        assert!(dto.name.contains("Alice"));
+    }
+
+    #[test]
+    fn parse_address_handles_empty() {
+        let dto = parse_address("");
+        assert_eq!(dto.address, "");
+        assert_eq!(dto.name, "");
+    }
+
+    #[test]
+    fn strip_tags_removes_html() {
+        assert_eq!(strip_tags("<p>Hello <b>World</b></p>"), "Hello World");
+    }
+
+    #[test]
+    fn strip_tags_handles_no_tags() {
+        assert_eq!(strip_tags("plain text"), "plain text");
+    }
+
+    #[test]
+    fn strip_tags_handles_empty() {
+        assert_eq!(strip_tags(""), "");
+    }
+
+    #[test]
+    fn strip_tags_collapses_whitespace() {
+        assert_eq!(strip_tags("<p>  hello   world  </p>"), "hello world");
+    }
+}
+
 pub(crate) fn email_to_dto(email: &Email, folder: &str, include_body: bool) -> EmailDto {
     let flags_l: Vec<String> = email.flags.iter().map(|f| f.to_ascii_lowercase()).collect();
     let is_read = flags_l.iter().any(|f| f == "seen" || f == "\\seen");
