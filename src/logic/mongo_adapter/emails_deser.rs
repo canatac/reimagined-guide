@@ -117,3 +117,148 @@ pub(super) fn deserialize_email_document(doc: bson::Document) -> Option<Email> {
     );
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_email_document_for_deser_i64_to_i32() {
+        let doc = bson::doc! { "sequence_number": 42i64, "uid": 100i64 };
+        let result = normalize_email_document_for_deser(doc);
+        assert_eq!(result.get_i32("sequence_number").unwrap(), 42);
+        assert_eq!(result.get_i32("uid").unwrap(), 100);
+    }
+
+    #[test]
+    fn normalize_email_document_for_deser_negative_i64_preserved() {
+        let doc = bson::doc! { "sequence_number": -1i64, "uid": -5i64 };
+        let result = normalize_email_document_for_deser(doc);
+        // Negative values should NOT be converted to i32
+        assert!(result.get_i64("sequence_number").is_ok());
+        assert!(result.get_i64("uid").is_ok());
+    }
+
+    #[test]
+    fn deserialize_email_document_full() {
+        let doc = bson::doc! {
+            "id": "email-1",
+            "from": "a@b.com",
+            "to": "c@d.com",
+            "subject": "Test",
+            "body": "Hello",
+            "internal_date": bson::DateTime::from_millis(1700000000000i64),
+            "headers": [],
+            "flags": [],
+            "sequence_number": 5i64,
+            "uid": 42i64,
+        };
+        let email = deserialize_email_document(doc).unwrap();
+        assert_eq!(email.id, "email-1");
+        assert_eq!(email.from, "a@b.com");
+        assert_eq!(email.to, "c@d.com");
+        assert_eq!(email.subject, "Test");
+        assert_eq!(email.body, "Hello");
+        assert_eq!(email.sequence_number, 5);
+        assert_eq!(email.uid, 42);
+    }
+
+    #[test]
+    fn deserialize_email_document_missing_optional_fields() {
+        let doc = bson::doc! {
+            "id": "email-2",
+            "from": "a@b.com",
+            "to": "c@d.com",
+            "subject": "Test",
+            "body": "Body",
+        };
+        let email = deserialize_email_document(doc).unwrap();
+        assert_eq!(email.id, "email-2");
+        assert_eq!(email.sequence_number, 0);
+        assert_eq!(email.uid, 0);
+        assert!(email.flags.is_empty());
+        assert!(email.headers.is_empty());
+    }
+
+    #[test]
+    fn deserialize_email_document_with_headers_array() {
+        let doc = bson::doc! {
+            "id": "email-3",
+            "from": "a@b.com",
+            "to": "c@d.com",
+            "subject": "Test",
+            "body": "Body",
+            "headers": [
+                ["X-Foo", "bar"],
+                ["X-Baz", "qux"],
+            ],
+        };
+        let email = deserialize_email_document(doc).unwrap();
+        assert_eq!(email.headers.len(), 2);
+        assert_eq!(email.headers[0], ("X-Foo".to_string(), "bar".to_string()));
+    }
+
+    #[test]
+    fn deserialize_email_document_with_flags() {
+        let doc = bson::doc! {
+            "id": "email-4",
+            "from": "a@b.com",
+            "to": "c@d.com",
+            "subject": "Test",
+            "body": "Body",
+            "flags": ["\\Seen", "\\Flagged"],
+        };
+        let email = deserialize_email_document(doc).unwrap();
+        assert_eq!(email.flags, vec!["\\Seen".to_string(), "\\Flagged".to_string()]);
+    }
+
+    #[test]
+    fn deserialize_email_document_internal_date_string() {
+        let doc = bson::doc! {
+            "id": "email-5",
+            "from": "a@b.com",
+            "to": "c@d.com",
+            "subject": "Test",
+            "body": "Body",
+            "internal_date": "2026-01-01T00:00:00Z",
+        };
+        let email = deserialize_email_document(doc).unwrap();
+        assert_eq!(email.id, "email-5");
+    }
+
+    #[test]
+    fn deserialize_email_document_missing_id_returns_none() {
+        let doc = bson::doc! {
+            "from": "a@b.com",
+            "to": "c@d.com",
+            "subject": "Test",
+            "body": "Body",
+        };
+        assert!(deserialize_email_document(doc).is_none());
+    }
+
+    #[test]
+    fn deserialize_email_document_missing_to_returns_none() {
+        let doc = bson::doc! {
+            "id": "email-6",
+            "from": "a@b.com",
+            "subject": "Test",
+            "body": "Body",
+        };
+        assert!(deserialize_email_document(doc).is_none());
+    }
+
+    #[test]
+    fn deserialize_email_document_dkim_signature() {
+        let doc = bson::doc! {
+            "id": "email-7",
+            "from": "a@b.com",
+            "to": "c@d.com",
+            "subject": "Test",
+            "body": "Body",
+            "dkim_signature": "v=1; ...",
+        };
+        let email = deserialize_email_document(doc).unwrap();
+        assert_eq!(email.dkim_signature, Some("v=1; ...".to_string()));
+    }
+}
