@@ -93,6 +93,67 @@ pub(crate) fn canonical_message_id(raw: &str) -> Option<String> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_recipient_with_name() {
+        let r = ComposerRecipient {
+            email: "<EMAIL>".into(),
+            name: Some("John".into()),
+        };
+        assert_eq!(format_recipient(&r), Some("John <<EMAIL>>".to_string()));
+    }
+
+    #[test]
+    fn format_recipient_without_name() {
+        let r = ComposerRecipient {
+            email: "<EMAIL>".into(),
+            name: None,
+        };
+        assert_eq!(format_recipient(&r), Some("<EMAIL>".to_string()));
+    }
+
+    #[test]
+    fn format_recipient_empty_email() {
+        let r = ComposerRecipient {
+            email: "".into(),
+            name: Some("John".into()),
+        };
+        assert_eq!(format_recipient(&r), None);
+    }
+
+    #[test]
+    fn join_recipients_comma_separated() {
+        let list = vec![
+            ComposerRecipient { email: "<EMAIL>".into(), name: None },
+            ComposerRecipient { email: "<EMAIL>".into(), name: Some("Bob".into()) },
+        ];
+        assert_eq!(join_recipients(&list), "<EMAIL>, Bob <<EMAIL>>");
+    }
+
+    #[test]
+    fn from_address_for_user_with_at() {
+        assert_eq!(from_address_for_user("admin@misfits.ai"), "admin@misfits.ai");
+    }
+
+    #[test]
+    fn normalize_message_id_strips_brackets() {
+        assert_eq!(normalize_message_id("<msg-123>"), "msg-123");
+    }
+
+    #[test]
+    fn canonical_message_id_wraps_brackets() {
+        assert_eq!(canonical_message_id("msg-123"), Some("<msg-123>".to_string()));
+    }
+
+    #[test]
+    fn canonical_message_id_empty() {
+        assert_eq!(canonical_message_id(""), None);
+    }
+}
+
 fn sanitize_filename(name: &str, fallback_index: usize) -> String {
     let cleaned = name
         .trim()
