@@ -25,12 +25,7 @@ pub(crate) async fn api_send_status(
             {
                 Ok(Some(q)) => {
                     let status = q.get_str("status").unwrap_or("pending");
-                    let delivery_state = match status {
-                        "sent" => "sent",
-                        "failed" | "sent_copy_failed" => "failed",
-                        "cancelled" => "cancelled",
-                        _ => "queued",
-                    };
+                    let delivery_state = queue_delivery_state(status);
                     HttpResponse::Ok().json(serde_json::json!({
                         "id": email_id,
                         "deliveryState": delivery_state,
@@ -142,15 +137,7 @@ pub(crate) async fn api_send_status(
             )
         })
         .or_else(|| events.first());
-    let delivery_state = if accepted_by_remote_mx {
-        "sent"
-    } else if bounced_or_failed {
-        "failed"
-    } else if handoff_only {
-        "queued"
-    } else {
-        "sending"
-    };
+    let delivery_state = delivery_state_from_flags(accepted_by_remote_mx, bounced_or_failed, handoff_only);
 
     HttpResponse::Ok().json(serde_json::json!({
         "id": email.id,
@@ -181,4 +168,92 @@ pub(crate) async fn api_send_status(
             }
         }
     }))
+}
+
+/// Pure helper to compute delivery state from SMTP event flags.
+fn delivery_state_from_flags(accepted_by_remote_mx: bool, bounced_or_failed: bool, handoff_only: bool) -> &'static str {
+    if accepted_by_remote_mx {
+        "sent"
+    } else if bounced_or_failed {
+        "failed"
+    } else if handoff_only {
+        "queued"
+    } else {
+        "sending"
+    }
+}
+
+/// Pure helper to compute queue delivery status from queue document status string.
+fn queue_delivery_state(status: &str) -> &'static str {
+    match status {
+        "sent" => "sent",
+        "failed" | "sent_copy_failed" => "failed",
+        "cancelled" => "cancelled",
+        _ => "queued",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn delivery_state_from_flags_accepted() {
+        assert_eq!(delivery_state_from_flags(true, false, false), "sent");
+    }
+
+    #[test]
+    fn delivery_state_from_flags_bounced() {
+        assert_eq!(delivery_state_from_flags(false, true, false), "failed");
+    }
+
+    #[test]
+    fn delivery_state_from_flags_handoff() {
+        assert_eq!(delivery_state_from_flags(false, false, true), "queued");
+    }
+
+    #[test]
+    fn delivery_state_from_flags_sending() {
+        assert_eq!(delivery_state_from_flags(false, false, false), "sending");
+    }
+
+    #[test]
+    fn delivery_state_from_flags_accepted_takes_precedence() {
+        assert_eq!(delivery_state_from_flags(true, true, true), "sent");
+    }
+
+    #[test]
+    fn delivery_state_from_flags_bounced_takes_precedence_over_handoff() {
+        assert_eq!(delivery_state_from_flags(false, true, true), "failed");
+    }
+
+    #[test]
+    fn queue_delivery_state_sent() {
+        assert_eq!(queue_delivery_state("sent"), "sent");
+    }
+
+    #[test]
+    fn queue_delivery_state_failed() {
+        assert_eq!(queue_delivery_state("failed"), "failed");
+    }
+
+    #[test]
+    fn queue_delivery_state_sent_copy_failed() {
+        assert_eq!(queue_delivery_state("sent_copy_failed"), "failed");
+    }
+
+    #[test]
+    fn queue_delivery_state_cancelled() {
+        assert_eq!(queue_delivery_state("cancelled"), "cancelled");
+    }
+
+    #[test]
+    fn queue_delivery_state_pending() {
+        assert_eq!(queue_delivery_state("pending"), "queued");
+    }
+
+    #[test]
+    fn queue_delivery_state_unknown() {
+        assert_eq!(queue_delivery_state("unknown"), "queued");
+    }
 }
