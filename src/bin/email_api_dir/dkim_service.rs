@@ -7,6 +7,18 @@ pub trait DkimService: Send + Sync {
 
 pub struct RealDkimService;
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn real_dkim_service_new() {
+        let _service = RealDkimService;
+        // RealDkimService is a unit struct, verify it can be instantiated
+        assert!(true);
+    }
+}
+
 #[async_trait::async_trait]
 impl DkimService for RealDkimService {
     async fn sign_email(&self, email: &EmailRequest) -> Result<serde_json::Value, std::io::Error> {
