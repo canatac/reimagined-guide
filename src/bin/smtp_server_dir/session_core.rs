@@ -59,6 +59,22 @@ impl SessionState {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_state_new_initializes_defaults() {
+        let state = SessionState::new();
+        assert!(!state.in_data_mode);
+        assert!(!state.in_body);
+        assert!(state.authenticated_session_id.is_none());
+        assert_eq!(state.current_email.email.from, "");
+        assert!(state.current_email.raw_content.is_empty());
+        assert!(state.current_email.dkim_signature.is_none());
+    }
+}
+
 /// Fin de la commande DATA : persiste (MongoDB ou local) et écrit la réponse.
 pub(crate) async fn finish_data(
     state: &mut SessionState,
