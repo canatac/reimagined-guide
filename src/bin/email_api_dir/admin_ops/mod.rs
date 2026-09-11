@@ -247,3 +247,146 @@ pub use hermes_handlers::*;
 pub use hermes_runs::*;
 pub use hermes_events::*;
 pub use diag_handlers::*;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn now_iso_returns_rfc3339() {
+        let s = now_iso();
+        let dt = chrono::DateTime::parse_from_rfc3339(&s).unwrap();
+        assert!(dt <= chrono::Utc::now());
+    }
+
+    #[test]
+    fn admin_workflow_order_contains_expected() {
+        let order = admin_workflow_order();
+        assert!(order.contains(&"submitted"));
+        assert!(order.contains(&"triaged"));
+        assert!(order.contains(&"planned"));
+        assert!(order.contains(&"in_progress"));
+        assert!(order.contains(&"qa"));
+        assert!(order.contains(&"released"));
+    }
+
+    #[test]
+    fn compute_priority_p0() {
+        assert_eq!(compute_priority("high", "high"), "P0");
+    }
+
+    #[test]
+    fn compute_priority_p1_high_urgency() {
+        assert_eq!(compute_priority("high", "medium"), "P1");
+        assert_eq!(compute_priority("high", "small"), "P1");
+    }
+
+    #[test]
+    fn compute_priority_p1_high_impact() {
+        assert_eq!(compute_priority("medium", "high"), "P1");
+        assert_eq!(compute_priority("low", "high"), "P1");
+    }
+
+    #[test]
+    fn compute_priority_p2() {
+        assert_eq!(compute_priority("medium", "medium"), "P2");
+        assert_eq!(compute_priority("low", "small"), "P2");
+    }
+
+    #[test]
+    fn build_initial_stages_len() {
+        let stages = build_initial_stages();
+        assert!(stages.len() >= 4);
+    }
+
+    #[test]
+    fn build_initial_stages_first_active() {
+        let stages = build_initial_stages();
+        assert_eq!(stages[0].status, "active");
+        for stage in &stages[1..] {
+            assert_eq!(stage.status, "pending");
+        }
+    }
+
+    #[test]
+    fn build_acceptance_criteria_base() {
+        let criteria = build_acceptance_criteria("ux");
+        assert!(criteria.len() >= 3);
+    }
+
+    #[test]
+    fn build_acceptance_criteria_ux_adds_criterion() {
+        let criteria = build_acceptance_criteria("ux");
+        assert!(criteria.iter().any(|c| c.contains("UX") || c.contains("ux") || c.contains("parcours")));
+    }
+
+    #[test]
+    fn build_acceptance_criteria_backend_adds_criterion() {
+        let criteria = build_acceptance_criteria("backend");
+        assert!(criteria.iter().any(|c| c.contains("API") || c.contains("api") || c.contains("contrat")));
+    }
+
+    #[test]
+    fn build_acceptance_criteria_security_adds_criterion() {
+        let criteria = build_acceptance_criteria("security");
+        assert!(criteria.iter().any(|c| c.contains("Audit") || c.contains("audit")));
+    }
+
+    #[test]
+    fn build_acceptance_criteria_fullstack() {
+        let criteria = build_acceptance_criteria("fullstack");
+        assert!(criteria.len() >= 4);
+    }
+
+    #[test]
+    fn advance_workflow_first_to_second() {
+        let stages = build_initial_stages();
+        assert_eq!(stages[0].status, "active");
+        let advanced = advance_workflow(&stages);
+        assert_eq!(advanced[0].status, "done");
+        assert!(advanced[0].done_at.is_some());
+        assert_eq!(advanced[1].status, "active");
+    }
+
+    #[test]
+    fn advance_workflow_no_active_returns_unchanged() {
+        let stages = vec![
+            WorkflowStage { key: "a".to_string(), label: "A".to_string(), owner: "x".to_string(), status: "done".to_string(), checklist: vec![], done_at: None },
+            WorkflowStage { key: "b".to_string(), label: "B".to_string(), owner: "x".to_string(), status: "done".to_string(), checklist: vec![], done_at: None },
+        ];
+        let result = advance_workflow(&stages);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].status, "done");
+        assert_eq!(result[1].status, "done");
+    }
+
+    #[test]
+    fn status_counts_empty() {
+        let items: Vec<ChangeRequestItem> = vec![];
+        let counts = status_counts(&items);
+        let obj = counts.as_object().unwrap();
+        assert_eq!(obj.get("submitted").unwrap().as_i64().unwrap(), 0);
+        assert_eq!(obj.get("released").unwrap().as_i64().unwrap(), 0);
+    }
+
+    #[test]
+    fn status_counts_with_items() {
+        let items = vec![
+            ChangeRequestItem {
+                id: "cr_1".to_string(), title: "T".to_string(), problem: "P".to_string(),
+                desired_outcome: "D".to_string(), scope: "backend".to_string(),
+                priority: "P1".to_string(), status: "submitted".to_string(),
+                requested_by: "a".to_string(), linked_repo: "reimagined-guide".to_string(),
+                created_at: "2026-01-01".to_string(), updated_at: "2026-01-01".to_string(),
+                taken_in_charge_at: None, taken_in_charge_by: None, target_release_window: "next-72h".to_string(),
+                acceptance_criteria: vec![], workflow: vec![], workflow_events: vec![],
+                execution_state: "idle".to_string(), execution_run_id: None,
+                execution_started_at: None, execution_last_heartbeat_at: None,
+                execution_finished_at: None, execution_last_error: None, changelog_entry: None,
+            },
+        ];
+        let counts = status_counts(&items);
+        let obj = counts.as_object().unwrap();
+        assert_eq!(obj.get("submitted").unwrap().as_i64().unwrap(), 1);
+    }
+}

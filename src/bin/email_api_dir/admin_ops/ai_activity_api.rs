@@ -21,6 +21,32 @@ struct ActivityState {
     normalized_runs: Vec<serde_json::Value>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn activity_state_default() {
+        let state = ActivityState::default();
+        assert_eq!(state.total_runs, 0);
+        assert_eq!(state.completed_runs, 0);
+        assert_eq!(state.failed_runs, 0);
+        assert_eq!(state.prompt_tokens, 0);
+        assert_eq!(state.completion_tokens, 0);
+        assert_eq!(state.total_tokens, 0);
+        assert!(state.latencies.is_empty());
+        assert_eq!(state.total_cost_usd, 0.0);
+        assert_eq!(state.priced_runs, 0);
+        assert_eq!(state.unpriced_runs, 0);
+        assert!(state.by_user.is_empty());
+        assert!(state.by_model.is_empty());
+        assert!(state.by_feature.is_empty());
+        assert!(state.trend_global.is_empty());
+        assert!(state.trend_by_user.is_empty());
+        assert!(state.normalized_runs.is_empty());
+    }
+}
+
 pub(crate) async fn api_admin_ai_activity(
     query: web::Query<AdminAiActivityQuery>,
     mongo: web::Data<Arc<mongodb::Client>>,

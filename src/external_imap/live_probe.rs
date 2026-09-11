@@ -93,6 +93,67 @@ fn parse_iso_to_imap_date(iso: &str) -> Option<String> {
     Some(dt.format("%d-%b-%Y").to_string())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn json_str_escapes_quotes() {
+        assert_eq!(json_str("hello \"world\""), "\"hello \\\"world\\\"\"");
+    }
+
+    #[test]
+    fn json_str_escapes_backslash() {
+        assert_eq!(json_str("a\\b"), "\"a\\\\b\"");
+    }
+
+    #[test]
+    fn json_str_escapes_newline() {
+        assert_eq!(json_str("line1\nline2"), "\"line1\\nline2\"");
+    }
+
+    #[test]
+    fn json_str_escapes_tab() {
+        assert_eq!(json_str("a\tb"), "\"a\\tb\"");
+    }
+
+    #[test]
+    fn json_str_empty() {
+        assert_eq!(json_str(""), "\"\"");
+    }
+
+    #[test]
+    fn json_str_no_escaping_needed() {
+        assert_eq!(json_str("hello"), "\"hello\"");
+    }
+
+    #[test]
+    fn parse_iso_to_imap_date_valid() {
+        let result = parse_iso_to_imap_date("2024-03-15T10:30:00Z");
+        assert!(result.is_ok());
+        let date = result.unwrap();
+        assert!(date.contains("15"));
+        assert!(date.contains("2024"));
+    }
+
+    #[test]
+    fn parse_iso_to_imap_date_invalid() {
+        let result = parse_iso_to_imap_date("not-a-date");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_iso_to_imap_date_format() {
+        let result = parse_iso_to_imap_date("2024-01-05T00:00:00Z");
+        assert!(result.is_ok());
+        let date = result.unwrap();
+        // Should be in format "05-Jan-2024"
+        assert!(date.contains("05"));
+        assert!(date.contains("Jan"));
+        assert!(date.contains("2024"));
+    }
+}
+
 fn emit(tx: &Sender<String>, dir: &str, text: &str) {
     let payload = format!(
         r#"{{"dir":{},"text":{}}}"#,

@@ -12,6 +12,31 @@ pub fn db_name() -> String {
     std::env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn db_name_defaults_to_mailserver() {
+        std::env::remove_var("MONGODB_DATABASE");
+        assert_eq!(db_name(), "mailserver");
+    }
+
+    #[test]
+    fn db_name_reads_from_env() {
+        std::env::set_var("MONGODB_DATABASE", "test_db");
+        assert_eq!(db_name(), "test_db");
+        std::env::remove_var("MONGODB_DATABASE");
+    }
+
+    #[test]
+    fn db_name_handles_empty_string() {
+        std::env::set_var("MONGODB_DATABASE", "");
+        assert_eq!(db_name(), "");
+        std::env::remove_var("MONGODB_DATABASE");
+    }
+}
+
 pub fn events_coll(client: &Client) -> mongodb::Collection<bson::Document> {
     client.database(&db_name()).collection(COLLECTION)
 }

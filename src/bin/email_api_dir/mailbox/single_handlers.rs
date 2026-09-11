@@ -109,3 +109,28 @@ pub(crate) async fn api_email_action(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn email_action_request_fields() {
+        let req = EmailActionRequest {
+            action: "archive".to_string(),
+            target_folder: None,
+        };
+        assert_eq!(req.action, "archive");
+        assert!(req.target_folder.is_none());
+    }
+
+    #[test]
+    fn email_action_request_with_target() {
+        let req = EmailActionRequest {
+            action: "move".to_string(),
+            target_folder: Some("inbox".to_string()),
+        };
+        assert_eq!(req.action, "move");
+        assert_eq!(req.target_folder, Some("inbox".to_string()));
+    }
+}

@@ -199,6 +199,134 @@ fn pricing_source_label(
     "unconfigured"
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn latency_stats_empty() {
+        let mut latencies: Vec<i64> = vec![];
+        let (avg, p95) = latency_stats(&mut latencies);
+        assert_eq!(avg, 0);
+        assert_eq!(p95, 0);
+    }
+
+    #[test]
+    fn latency_stats_single() {
+        let mut latencies = vec![42];
+        let (avg, p95) = latency_stats(&mut latencies);
+        assert_eq!(avg, 42);
+        assert_eq!(p95, 42);
+    }
+
+    #[test]
+    fn latency_stats_multiple() {
+        let mut latencies = vec![10, 20, 30, 40, 100];
+        let (avg, p95) = latency_stats(&mut latencies);
+        assert_eq!(avg, 40);
+        // p95 index: ceil(5 * 0.95) - 1 = 5 - 1 = 4, so sorted[4] = 100
+        assert_eq!(p95, 100);
+    }
+
+    #[test]
+    fn latency_stats_sorts() {
+        let mut latencies = vec![100, 10, 50];
+        let (_, p95) = latency_stats(&mut latencies);
+        // sorted: [10, 50, 100], p95 at index ceil(3*0.95)-1 = 2 -> 100
+        assert_eq!(p95, 100);
+    }
+
+    #[test]
+    fn bucket_default_is_zero() {
+        let bucket = Bucket::default();
+        assert_eq!(bucket.runs, 0);
+        assert_eq!(bucket.completed_runs, 0);
+        assert_eq!(bucket.total_tokens, 0);
+    }
+
+    #[test]
+    fn bucket_with_values() {
+        let mut by_user: HashMap<String, Bucket> = HashMap::new();
+        let mut b = Bucket::default();
+        b.runs = 10;
+        b.completed_runs = 8;
+        b.failed_runs = 2;
+        b.total_tokens = 5000;
+        b.total_cost_usd = 0.0123456;
+        by_user.insert("user1".to_string(), b);
+
+        let rows = bucket_rows_with_identity(by_user, "userId");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["userId"], "user1");
+        assert_eq!(rows[0]["runs"], 10);
+        assert_eq!(rows[0]["successRate"], 0.8);
+    }
+
+    #[test]
+    fn trend_rows_from_bucket_map_contains_day() {
+        let mut trend: HashMap<String, Bucket> = HashMap::new();
+        let mut b = Bucket::default();
+        b.runs = 5;
+        trend.insert("2026-09-10".to_string(), b);
+
+        let rows = trend_rows_from_bucket_map(trend);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["day"], "2026-09-10");
+    }
+
+    #[test]
+    fn append_pricing_warnings_adds_warning_when_unconfigured() {
+        let default = PricingRate { input_per_1m_usd: 0.0, output_per_1m_usd: 0.0 };
+        let mut warnings = Vec::new();
+        append_pricing_warnings(&default, &HashMap::new(), &HashMap::new(), &mut warnings);
+        assert!(!warnings.is_empty());
+        assert!(warnings[0].contains("not configured"));
+    }
+
+    #[test]
+    fn append_pricing_warnings_no_warning_when_configured() {
+        let default = PricingRate { input_per_1m_usd: 1.0, output_per_1m_usd: 2.0 };
+        let mut warnings = Vec::new();
+        append_pricing_warnings(&default, &HashMap::new(), &HashMap::new(), &mut warnings);
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn pricing_source_label_unconfigured() {
+        let default = PricingRate { input_per_1m_usd: 0.0, output_per_1m_usd: 0.0 };
+        assert_eq!(pricing_source_label(&default, &HashMap::new(), &HashMap::new()), "unconfigured");
+    }
+
+    #[test]
+    fn pricing_source_label_env_default() {
+        let default = PricingRate { input_per_1m_usd: 1.0, output_per_1m_usd: 2.0 };
+        assert_eq!(pricing_source_label(&default, &HashMap::new(), &HashMap::new()), "env_default_only");
+    }
+
+    #[test]
+    fn pricing_source_label_model_overrides() {
+        let default = PricingRate { input_per_1m_usd: 0.0, output_per_1m_usd: 0.0 };
+        let mut overrides = HashMap::new();
+        overrides.insert("model1".to_string(), PricingRate { input_per_1m_usd: 1.0, output_per_1m_usd: 2.0 });
+        assert_eq!(pricing_source_label(&default, &overrides, &HashMap::new()), "env_model_overrides_only");
+    }
+
+    #[test]
+    fn pricing_source_label_openrouter_rates() {
+        let default = PricingRate { input_per_1m_usd: 0.0, output_per_1m_usd: 0.0 };
+        let mut rates = HashMap::new();
+        rates.insert("model1".to_string(), PricingRate { input_per_1m_usd: 1.0, output_per_1m_usd: 2.0 });
+        assert_eq!(pricing_source_label(&default, &HashMap::new(), &rates), "openrouter_live");
+    }
+
+    #[test]
+    fn round6_rounds_correctly() {
+        assert_eq!(round6(0.0123456), 0.012346);
+        assert_eq!(round6(1.0), 1.0);
+        assert_eq!(round6(0.0), 0.0);
+    }
+}
+
 fn safe_avg_i64(total: i64, count: i64) -> i64 {
     if count > 0 { total / count } else { 0 }
 }

@@ -54,6 +54,109 @@ pub(crate) fn bump_interest(weights: &mut std::collections::HashMap<String, i32>
     *entry += delta;
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_topic_returns_default_for_none() {
+        assert_eq!(normalize_topic(None), "Tech");
+    }
+
+    #[test]
+    fn normalize_topic_returns_default_for_empty() {
+        assert_eq!(normalize_topic(Some("")), "Tech");
+        assert_eq!(normalize_topic(Some("   ")), "Tech");
+    }
+
+    #[test]
+    fn normalize_topic_returns_trimmed_value() {
+        assert_eq!(normalize_topic(Some("  AI  ")), "AI");
+        assert_eq!(normalize_topic(Some("Finance")), "Finance");
+    }
+
+    #[test]
+    fn normalize_url_returns_none_for_empty() {
+        assert_eq!(normalize_url(None), None);
+        assert_eq!(normalize_url(Some("")), None);
+        assert_eq!(normalize_url(Some("   ")), None);
+    }
+
+    #[test]
+    fn normalize_url_preserves_http_scheme() {
+        assert_eq!(normalize_url(Some("http://example.com")), Some("http://example.com".to_string()));
+    }
+
+    #[test]
+    fn normalize_url_preserves_https_scheme() {
+        assert_eq!(normalize_url(Some("https://example.com")), Some("https://example.com".to_string()));
+    }
+
+    #[test]
+    fn normalize_url_adds_https_prefix() {
+        assert_eq!(normalize_url(Some("example.com")), Some("https://example.com".to_string()));
+    }
+
+    #[test]
+    fn compute_signal_uses_requested_value() {
+        assert_eq!(compute_signal("short", Some(80)), 80);
+    }
+
+    #[test]
+    fn compute_signal_clamps_requested_value() {
+        assert_eq!(compute_signal("short", Some(150)), 100);
+        assert_eq!(compute_signal("short", Some(-10)), 0);
+    }
+
+    #[test]
+    fn compute_signal_computes_from_summary_length() {
+        let short = compute_signal("hi", None);
+        assert!(short >= 50 && short <= 98);
+    }
+
+    #[test]
+    fn extract_domain_strips_scheme() {
+        assert_eq!(extract_domain("https://www.example.com/path"), Some("example.com".to_string()));
+        assert_eq!(extract_domain("http://example.com"), Some("example.com".to_string()));
+    }
+
+    #[test]
+    fn extract_domain_strips_www() {
+        assert_eq!(extract_domain("www.example.com"), Some("example.com".to_string()));
+    }
+
+    #[test]
+    fn extract_domain_handles_plain_domain() {
+        assert_eq!(extract_domain("example.com"), Some("example.com".to_string()));
+    }
+
+    #[test]
+    fn extract_domain_returns_none_for_empty() {
+        assert_eq!(extract_domain(""), None);
+        assert_eq!(extract_domain("   "), None);
+    }
+
+    #[test]
+    fn extract_domain_is_case_insensitive() {
+        assert_eq!(extract_domain("Example.COM"), Some("example.com".to_string()));
+    }
+
+    #[test]
+    fn bump_interest_adds_delta() {
+        let mut weights = std::collections::HashMap::new();
+        bump_interest(&mut weights, "tech", 5);
+        assert_eq!(weights.get("tech"), Some(&5));
+    }
+
+    #[test]
+    fn bump_interest_accumulates() {
+        let mut weights = std::collections::HashMap::new();
+        bump_interest(&mut weights, "tech", 5);
+        bump_interest(&mut weights, "tech", 3);
+        assert_eq!(weights.get("tech"), Some(&8));
+    }
+}
+
 fn bump_for_matches(
     weights: &mut std::collections::HashMap<String, i32>,
     corpus: &str,

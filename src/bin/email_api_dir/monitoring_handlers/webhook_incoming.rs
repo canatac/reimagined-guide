@@ -72,6 +72,54 @@ pub fn verify_signature(body: &[u8], secret: &[u8], signature: &str) -> bool {
     expected.as_bytes().ct_eq(&sig_bytes).into()
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compute_signature_returns_hex() {
+        let sig = compute_signature(b"hello", b"secret");
+        assert!(!sig.is_empty());
+        assert_eq!(sig.len(), 64); // SHA256 = 32 bytes = 64 hex chars
+    }
+
+    #[test]
+    fn compute_signature_deterministic() {
+        let sig1 = compute_signature(b"hello", b"secret");
+        let sig2 = compute_signature(b"hello", b"secret");
+        assert_eq!(sig1, sig2);
+    }
+
+    #[test]
+    fn compute_signature_different_inputs() {
+        let sig1 = compute_signature(b"hello", b"secret1");
+        let sig2 = compute_signature(b"hello", b"secret2");
+        assert_ne!(sig1, sig2);
+    }
+
+    #[test]
+    fn verify_signature_valid() {
+        let sig = compute_signature(b"test body", b"my_secret");
+        assert!(verify_signature(b"test body", b"my_secret", &sig));
+    }
+
+    #[test]
+    fn verify_signature_invalid() {
+        let sig = compute_signature(b"test body", b"my_secret");
+        assert!(!verify_signature(b"test body", b"wrong_secret", &sig));
+    }
+
+    #[test]
+    fn verify_signature_invalid_hex() {
+        assert!(!verify_signature(b"test body", b"my_secret", "invalid-hex!"));
+    }
+
+    #[test]
+    fn verify_signature_empty() {
+        assert!(!verify_signature(b"", b"", "non-empty-invalid-hex"));
+    }
+}
+
 /// Response for incoming webhook.
 #[derive(Serialize)]
 struct IncomingWebhookResponse {

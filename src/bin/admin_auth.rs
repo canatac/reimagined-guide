@@ -237,3 +237,27 @@ pub async fn require_admin(
         role: session.role,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn admin_sessions_coll_name() {
+        assert_eq!(ADMIN_SESSIONS_COLL, "admin_sessions");
+    }
+
+    #[test]
+    fn auth_user_system_fields() {
+        let u = AuthUser::system();
+        assert_eq!(u.user_id, "system");
+        assert_eq!(u.email, "system@misfits.ai");
+        assert_eq!(u.role, "admin");
+    }
+
+    #[test]
+    fn session_ttl_secs_default() {
+        let ttl = session_ttl_secs();
+        assert_eq!(ttl, 24 * 3600);
+    }
+}

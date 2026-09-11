@@ -80,6 +80,53 @@ pub(crate) fn make_session_with_token(
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn make_session_with_token_fields() {
+        let response = make_session_with_token("test@example.com", "Test User", "token-123");
+        assert_eq!(response.session.user.email, "test@example.com");
+        assert_eq!(response.session.user.display_name, "Test User");
+        assert_eq!(response.session.user.role, "admin");
+        assert_eq!(response.session.access_token, "token-123");
+        assert!(!response.session.user.two_factor_enabled);
+    }
+
+    #[test]
+    fn make_session_with_token_generates_unique_ids() {
+        let r1 = make_session_with_token("a@b.com", "A", "t1");
+        let r2 = make_session_with_token("a@b.com", "A", "t1");
+        assert_ne!(r1.session.id, r2.session.id);
+        assert_ne!(r1.session.user.id, r2.session.user.id);
+        assert_ne!(r1.session.refresh_token, r2.session.refresh_token);
+    }
+
+    #[test]
+    fn make_session_generates_unique_tokens() {
+        let r1 = make_session("test@example.com", "Test");
+        let r2 = make_session("test@example.com", "Test");
+        assert_ne!(r1.session.access_token, r2.session.access_token);
+    }
+
+    #[test]
+    fn make_session_with_token_timestamps() {
+        let before = Utc::now().timestamp_millis() as u64;
+        let response = make_session_with_token("test@example.com", "Test", "tok");
+        assert!(response.session.issued_at >= before);
+        assert!(response.session.expires_at > response.session.issued_at);
+        assert!(response.session.refresh_expires_at > response.session.expires_at);
+    }
+
+    #[test]
+    fn make_session_with_token_empty_email() {
+        let response = make_session_with_token("", "Test", "tok");
+        assert_eq!(response.session.user.email, "");
+        assert_eq!(response.session.user.display_name, "Test");
+    }
+}
+
 pub(crate) async fn auth_login(
     req: web::Json<LoginRequest>,
     req_http: actix_web::HttpRequest,

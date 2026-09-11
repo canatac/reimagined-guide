@@ -29,6 +29,77 @@ pub(crate) fn default_mon_page_size() -> u32 { 50 }
 pub(crate) fn one() -> u32 { 1 }
 pub(crate) fn twenty() -> u32 { 20 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_window_minutes() {
+        assert_eq!(parse_window("15m"), chrono::Duration::minutes(15));
+        assert_eq!(parse_window("60m"), chrono::Duration::minutes(60));
+    }
+
+    #[test]
+    fn parse_window_hours() {
+        assert_eq!(parse_window("1h"), chrono::Duration::hours(1));
+        assert_eq!(parse_window("24h"), chrono::Duration::hours(24));
+    }
+
+    #[test]
+    fn parse_window_days() {
+        assert_eq!(parse_window("7d"), chrono::Duration::days(7));
+        assert_eq!(parse_window("30d"), chrono::Duration::days(30));
+    }
+
+    #[test]
+    fn parse_window_default() {
+        assert_eq!(parse_window("invalid"), chrono::Duration::minutes(15));
+        assert_eq!(parse_window(""), chrono::Duration::minutes(15));
+    }
+
+    #[test]
+    fn parse_window_with_whitespace() {
+        assert_eq!(parse_window(" 15m "), chrono::Duration::minutes(15));
+    }
+
+    #[test]
+    fn since_str_returns_past_timestamp() {
+        let s = since_str("1h");
+        let dt = chrono::DateTime::parse_from_rfc3339(&s).unwrap();
+        assert!(dt < chrono::Utc::now());
+    }
+
+    #[test]
+    fn default_monitoring_window_is_15m() {
+        assert_eq!(default_monitoring_window(), "15m");
+    }
+
+    #[test]
+    fn default_window_is_1h() {
+        assert_eq!(default_window(), "1h");
+    }
+
+    #[test]
+    fn default_mon_page_is_1() {
+        assert_eq!(default_mon_page(), 1);
+    }
+
+    #[test]
+    fn default_mon_page_size_is_50() {
+        assert_eq!(default_mon_page_size(), 50);
+    }
+
+    #[test]
+    fn one_returns_1() {
+        assert_eq!(one(), 1);
+    }
+
+    #[test]
+    fn twenty_returns_20() {
+        assert_eq!(twenty(), 20);
+    }
+}
+
 #[derive(Deserialize)]
 pub(crate) struct MonitoringWindowQuery {
     #[serde(default = "default_monitoring_window")]

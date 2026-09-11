@@ -22,6 +22,47 @@ pub struct TenantState {
     pub rolled_back: bool,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tenant_state_new() {
+        let state = TenantState {
+            tenant_id: "t1".to_string(),
+            level: 2,
+            action: RemediationAction::Throttle,
+            reason: "test reason".to_string(),
+            alert_id: "a1".to_string(),
+            applied_at: "2024-01-01T00:00:00Z".to_string(),
+            expires_at: Some("2024-01-02T00:00:00Z".to_string()),
+            rolled_back: false,
+        };
+        assert_eq!(state.tenant_id, "t1");
+        assert_eq!(state.level, 2);
+        assert_eq!(state.reason, "test reason");
+        assert!(!state.rolled_back);
+    }
+
+    #[test]
+    fn tenant_state_fields() {
+        let state = TenantState {
+            tenant_id: "t2".to_string(),
+            level: 1,
+            action: RemediationAction::Block,
+            reason: "block reason".to_string(),
+            alert_id: "a2".to_string(),
+            applied_at: "2024-01-01T00:00:00Z".to_string(),
+            expires_at: None,
+            rolled_back: true,
+        };
+        assert_eq!(state.tenant_id, "t2");
+        assert_eq!(state.action, RemediationAction::Block);
+        assert!(state.expires_at.is_none());
+        assert!(state.rolled_back);
+    }
+}
+
 pub async fn apply_remediation(client: &Client, alert: &mut SecurityAlert) {
     if !super::enforce_mode() {
         // Observe mode: log intent but do not enforce

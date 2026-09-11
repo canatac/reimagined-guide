@@ -16,6 +16,66 @@ pub(crate) fn generate_temp_password() -> String {
     format!("{}!{}#", &mixed[..7], &mixed[7..])
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generate_temp_password_has_special_chars() {
+        let pw = generate_temp_password();
+        assert!(pw.contains('!'));
+        assert!(pw.contains('#'));
+    }
+
+    #[test]
+    fn generate_temp_password_is_16_chars() {
+        let pw = generate_temp_password();
+        assert_eq!(pw.len(), 16);
+    }
+
+    #[test]
+    fn generate_temp_password_is_unique() {
+        let pw1 = generate_temp_password();
+        let pw2 = generate_temp_password();
+        assert_ne!(pw1, pw2);
+    }
+
+    #[test]
+    fn resolve_new_password_provided() {
+        let (pw, generated) = resolve_new_password(&Some("mypassword123".to_string()));
+        assert_eq!(pw, "mypassword123");
+        assert!(!generated);
+    }
+
+    #[test]
+    fn resolve_new_password_empty_generates() {
+        let (pw, generated) = resolve_new_password(&Some("".to_string()));
+        assert!(!pw.is_empty());
+        assert!(generated);
+    }
+
+    #[test]
+    fn resolve_new_password_whitespace_generates() {
+        let (pw, generated) = resolve_new_password(&Some("   ".to_string()));
+        assert!(!pw.is_empty());
+        assert!(generated);
+    }
+
+    #[test]
+    fn resolve_new_password_none_generates() {
+        let (pw, generated) = resolve_new_password(&None);
+        assert!(!pw.is_empty());
+        assert!(generated);
+    }
+
+    #[test]
+    fn resolve_new_password_trims() {
+        let (pw, generated) = resolve_new_password(&Some("  password  ".to_string()));
+        assert_eq!(pw, "password");
+        assert!(!generated);
+    }
+}
+
 pub(crate) fn resolve_new_password(input: &Option<String>) -> (String, bool) {
     match input {
         Some(p) if !p.trim().is_empty() => (p.trim().to_string(), false),

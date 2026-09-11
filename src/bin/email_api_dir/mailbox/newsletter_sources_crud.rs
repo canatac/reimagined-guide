@@ -31,6 +31,81 @@ pub(crate) struct UpdateNewsletterSourceInput {
     url: Option<String>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn create_newsletter_source_input_fields() {
+        let input = CreateNewsletterSourceInput {
+            name: "Rust Blog".to_string(),
+            url: Some("https://blog.rust-lang.org/".to_string()),
+        };
+        assert_eq!(input.name, "Rust Blog");
+        assert_eq!(input.url, Some("https://blog.rust-lang.org/".to_string()));
+    }
+
+    #[test]
+    fn create_newsletter_source_input_url_optional() {
+        let input = CreateNewsletterSourceInput {
+            name: "Source Without URL".to_string(),
+            url: None,
+        };
+        assert!(input.url.is_none());
+    }
+
+    #[test]
+    fn create_newsletter_item_input_fields() {
+        let input = CreateNewsletterItemInput {
+            source_id: "src-1".to_string(),
+            title: "New Release".to_string(),
+            summary: "Summary".to_string(),
+            topic: Some("Rust".to_string()),
+            link: Some("https://example.com".to_string()),
+            signal: Some(90),
+        };
+        assert_eq!(input.source_id, "src-1");
+        assert_eq!(input.title, "New Release");
+        assert_eq!(input.topic, Some("Rust".to_string()));
+        assert_eq!(input.signal, Some(90));
+    }
+
+    #[test]
+    fn create_newsletter_item_input_optionals_none() {
+        let input = CreateNewsletterItemInput {
+            source_id: "src-1".to_string(),
+            title: "Title".to_string(),
+            summary: "Summary".to_string(),
+            topic: None,
+            link: None,
+            signal: None,
+        };
+        assert!(input.topic.is_none());
+        assert!(input.link.is_none());
+        assert!(input.signal.is_none());
+    }
+
+    #[test]
+    fn update_newsletter_source_input_fields() {
+        let input = UpdateNewsletterSourceInput {
+            name: Some("Updated".to_string()),
+            url: Some("https://updated.com".to_string()),
+        };
+        assert_eq!(input.name, Some("Updated".to_string()));
+        assert_eq!(input.url, Some("https://updated.com".to_string()));
+    }
+
+    #[test]
+    fn update_newsletter_source_input_defaults() {
+        let input = UpdateNewsletterSourceInput {
+            name: None,
+            url: None,
+        };
+        assert!(input.name.is_none());
+        assert!(input.url.is_none());
+    }
+}
+
 
 pub(crate) async fn api_newsletter_sources_create(
     req: actix_web::HttpRequest,
