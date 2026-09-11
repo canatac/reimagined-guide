@@ -280,6 +280,51 @@ fn normalize_label_color(raw: Option<String>) -> String {
         .unwrap_or_else(|| "#64748b".to_string())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_analytics_days_is_30() {
+        assert_eq!(default_analytics_days(), 30);
+    }
+
+    #[test]
+    fn normalize_label_name_trims() {
+        assert_eq!(normalize_label_name("  work  "), "work");
+    }
+
+    #[test]
+    fn normalize_label_name_empty() {
+        assert_eq!(normalize_label_name(""), "");
+    }
+
+    #[test]
+    fn normalize_label_color_default() {
+        assert_eq!(normalize_label_color(None), "#64748b");
+    }
+
+    #[test]
+    fn normalize_label_color_empty_string() {
+        assert_eq!(normalize_label_color(Some("".to_string())), "#64748b");
+    }
+
+    #[test]
+    fn normalize_label_color_whitespace_only() {
+        assert_eq!(normalize_label_color(Some("   ".to_string())), "#64748b");
+    }
+
+    #[test]
+    fn normalize_label_color_valid() {
+        assert_eq!(normalize_label_color(Some("#ff0000".to_string())), "#ff0000");
+    }
+
+    #[test]
+    fn normalize_label_color_trims() {
+        assert_eq!(normalize_label_color(Some("  #abc  ".to_string())), "#abc");
+    }
+}
+
 pub(crate) async fn api_tags(
     req: actix_web::HttpRequest,
     mongo: web::Data<Arc<mongodb::Client>>,
