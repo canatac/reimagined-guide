@@ -61,17 +61,80 @@ mod tests {
     }
 
     #[test]
-    fn github_user_fields() {
-        let user = GithubUser {
-            id: 42,
-            login: "testuser".to_string(),
-            name: Some("Test User".to_string()),
-            email: Some("test@example.com".to_string()),
+    fn github_email_fields() {
+        let email = GithubEmail {
+            email: "test@example.com".to_string(),
+            primary: true,
+            verified: true,
         };
-        assert_eq!(user.id, 42);
-        assert_eq!(user.login, "testuser");
+        assert_eq!(email.email, "test@example.com");
+        assert!(email.primary);
+        assert!(email.verified);
     }
-}
+
+    #[test]
+    fn user_response_fields() {
+        let user = UserResponse {
+            id: "u1".to_string(),
+            email: "a@b.com".to_string(),
+            display_name: "Test".to_string(),
+            role: "admin".to_string(),
+            two_factor_enabled: true,
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+            updated_at: "2024-01-02T00:00:00Z".to_string(),
+        };
+        assert_eq!(user.id, "u1");
+        assert_eq!(user.role, "admin");
+        assert!(user.two_factor_enabled);
+    }
+
+    #[test]
+    fn session_response_fields() {
+        let session = SessionResponse {
+            id: "s1".to_string(),
+            user: UserResponse {
+                id: "u1".to_string(),
+                email: "a@b.com".to_string(),
+                display_name: "Test".to_string(),
+                role: "user".to_string(),
+                two_factor_enabled: false,
+                created_at: "2024-01-01T00:00:00Z".to_string(),
+                updated_at: "2024-01-02T00:00:00Z".to_string(),
+            },
+            access_token: "access".to_string(),
+            refresh_token: "refresh".to_string(),
+            expires_at: 1000,
+            refresh_expires_at: 2000,
+            issued_at: 500,
+        };
+        assert_eq!(session.id, "s1");
+        assert_eq!(session.access_token, "access");
+        assert_eq!(session.expires_at, 1000);
+    }
+
+    #[test]
+    fn auth_response_fields() {
+        let resp = AuthResponse {
+            session: SessionResponse {
+                id: "s1".to_string(),
+                user: UserResponse {
+                    id: "u1".to_string(),
+                    email: "a@b.com".to_string(),
+                    display_name: "Test".to_string(),
+                    role: "user".to_string(),
+                    two_factor_enabled: false,
+                    created_at: "2024-01-01T00:00:00Z".to_string(),
+                    updated_at: "2024-01-02T00:00:00Z".to_string(),
+                },
+                access_token: "access".to_string(),
+                refresh_token: "refresh".to_string(),
+                expires_at: 1000,
+                refresh_expires_at: 2000,
+                issued_at: 500,
+            },
+        };
+        assert_eq!(resp.session.id, "s1");
+    }
 
 #[derive(Deserialize)]
 pub(super) struct UndoSendRequest {
