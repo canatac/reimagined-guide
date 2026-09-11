@@ -21,6 +21,53 @@ pub(crate) fn env_bool(key: &str, default: bool) -> bool {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn env_bool_true_values() {
+        std::env::set_var("TEST_TRUE_VAR", "1");
+        assert!(env_bool("TEST_TRUE_VAR", false));
+        std::env::set_var("TEST_TRUE_VAR", "true");
+        assert!(env_bool("TEST_TRUE_VAR", false));
+        std::env::set_var("TEST_TRUE_VAR", "yes");
+        assert!(env_bool("TEST_TRUE_VAR", false));
+        std::env::set_var("TEST_TRUE_VAR", "on");
+        assert!(env_bool("TEST_TRUE_VAR", false));
+        std::env::remove_var("TEST_TRUE_VAR");
+    }
+
+    #[test]
+    fn env_bool_false_values() {
+        std::env::set_var("TEST_FALSE_VAR", "0");
+        assert!(!env_bool("TEST_FALSE_VAR", true));
+        std::env::set_var("TEST_FALSE_VAR", "false");
+        assert!(!env_bool("TEST_FALSE_VAR", true));
+        std::env::set_var("TEST_FALSE_VAR", "no");
+        assert!(!env_bool("TEST_FALSE_VAR", true));
+        std::env::set_var("TEST_FALSE_VAR", "off");
+        assert!(!env_bool("TEST_FALSE_VAR", true));
+        std::env::remove_var("TEST_FALSE_VAR");
+    }
+
+    #[test]
+    fn env_bool_default() {
+        std::env::remove_var("TEST_DEFAULT_VAR");
+        assert!(env_bool("TEST_DEFAULT_VAR", true));
+        assert!(!env_bool("TEST_DEFAULT_VAR", false));
+    }
+
+    #[test]
+    fn env_bool_case_insensitive() {
+        std::env::set_var("TEST_CASE_VAR", "TRUE");
+        assert!(env_bool("TEST_CASE_VAR", false));
+        std::env::set_var("TEST_CASE_VAR", "Yes");
+        assert!(env_bool("TEST_CASE_VAR", false));
+        std::env::remove_var("TEST_CASE_VAR");
+    }
+}
+
 pub(crate) struct MailServer {
     pub(crate) mail_dir: String,
 }
