@@ -102,3 +102,39 @@ pub(crate) async fn handle_auth_plain(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn check_credentials_returns_false_on_empty() {
+        // Without env vars set, check_credentials should fail (return Err)
+        std::env::remove_var("SMTP_USERNAME");
+        std::env::remove_var("SMTP_PASSWORD");
+        let result = check_credentials(b"user", b"pass");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn check_credentials_with_env_vars() {
+        std::env::set_var("SMTP_USERNAME", "testuser");
+        std::env::set_var("SMTP_PASSWORD", "testpass");
+        let result = check_credentials(b"testuser", b"testpass");
+        assert!(result.is_ok());
+        assert!(result.unwrap());
+        std::env::remove_var("SMTP_USERNAME");
+        std::env::remove_var("SMTP_PASSWORD");
+    }
+
+    #[test]
+    fn check_credentials_wrong_password() {
+        std::env::set_var("SMTP_USERNAME", "testuser");
+        std::env::set_var("SMTP_PASSWORD", "testpass");
+        let result = check_credentials(b"testuser", b"wrongpass");
+        assert!(result.is_ok());
+        assert!(!result.unwrap());
+        std::env::remove_var("SMTP_USERNAME");
+        std::env::remove_var("SMTP_PASSWORD");
+    }
+}
