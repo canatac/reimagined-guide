@@ -18,6 +18,20 @@ pub(crate) struct AppState {
     pub webhook_registry: Arc<WebhookRegistry>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn app_state_new() {
+        let registry = Arc::new(WebhookRegistry::new());
+        let state = AppState {
+            webhook_registry: registry,
+        };
+        assert!(state.webhook_registry.list().await.is_empty());
+    }
+}
+
 /// Register a new webhook subscriber.
 /// Body: { "url": "https://...", "secret": "...", "events": ["pr_merged"] }
 pub(crate) async fn api_webhook_subscribe(
