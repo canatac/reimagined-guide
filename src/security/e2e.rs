@@ -67,6 +67,69 @@ pub struct RecoveryRequest {
     pub new_public_key: String,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn e2e_key_record_fields() {
+        let record = E2EKeyRecord {
+            user_id: "user1".to_string(),
+            encrypted_private_key: "enc_priv".to_string(),
+            public_key: "pub".to_string(),
+            recovery_key_encrypted: "rec_enc".to_string(),
+            kdf_salt: "salt".to_string(),
+            kdf_iterations: 100000,
+            algorithm: "AES-256-GCM".to_string(),
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+            rotated_at: None,
+            e2e_enabled: true,
+            opt_out: false,
+        };
+        assert_eq!(record.user_id, "user1");
+        assert_eq!(record.kdf_iterations, 100000);
+        assert_eq!(record.algorithm, "AES-256-GCM");
+        assert!(record.e2e_enabled);
+        assert!(record.rotated_at.is_none());
+    }
+
+    #[test]
+    fn register_key_request_fields() {
+        let req = RegisterKeyRequest {
+            user_id: "user1".to_string(),
+            encrypted_private_key: "enc".to_string(),
+            public_key: "pub".to_string(),
+            kdf_salt: "salt".to_string(),
+            kdf_iterations: 100000,
+            algorithm: "x25519+ed25519".to_string(),
+        };
+        assert_eq!(req.user_id, "user1");
+        assert_eq!(req.kdf_iterations, 100000);
+    }
+
+    #[test]
+    fn rotate_key_request_fields() {
+        let req = RotateKeyRequest {
+            encrypted_private_key: "new_enc".to_string(),
+            public_key: "new_pub".to_string(),
+            recovery_key_encrypted: "new_rec".to_string(),
+        };
+        assert_eq!(req.encrypted_private_key, "new_enc");
+        assert_eq!(req.public_key, "new_pub");
+    }
+
+    #[test]
+    fn recovery_request_fields() {
+        let req = RecoveryRequest {
+            user_id: "user1".to_string(),
+            new_encrypted_private_key: "new_enc".to_string(),
+            new_public_key: "new_pub".to_string(),
+        };
+        assert_eq!(req.user_id, "user1");
+        assert_eq!(req.new_public_key, "new_pub");
+    }
+}
+
 /// E2E key manager.
 pub struct E2EKeyManager {
     collection: Collection<E2EKeyRecord>,
