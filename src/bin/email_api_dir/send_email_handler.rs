@@ -27,6 +27,55 @@ pub struct EmailRequest {
     pub attachments: Vec<EmailAttachment>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn email_attachment_fields() {
+        let att = EmailAttachment {
+            filename: "test.txt".to_string(),
+            content_type: "text/plain".to_string(),
+            data_base64: "aGVsbG8=".to_string(),
+        };
+        assert_eq!(att.filename, "test.txt");
+        assert_eq!(att.content_type, "text/plain");
+        assert_eq!(att.data_base64, "aGVsbG8=");
+    }
+
+    #[test]
+    fn email_request_fields() {
+        let req = EmailRequest {
+            from: "a@b.com".to_string(),
+            to: "c@d.com".to_string(),
+            subject: "Hello".to_string(),
+            body: "World".to_string(),
+            attachments: vec![],
+        };
+        assert_eq!(req.from, "a@b.com");
+        assert_eq!(req.to, "c@d.com");
+        assert_eq!(req.subject, "Hello");
+        assert!(req.attachments.is_empty());
+    }
+
+    #[test]
+    fn email_request_with_attachments() {
+        let req = EmailRequest {
+            from: "a@b.com".to_string(),
+            to: "c@d.com".to_string(),
+            subject: "Hi".to_string(),
+            body: "Body".to_string(),
+            attachments: vec![EmailAttachment {
+                filename: "f.txt".to_string(),
+                content_type: "text/plain".to_string(),
+                data_base64: "aGVsbG8=".to_string(),
+            }],
+        };
+        assert_eq!(req.attachments.len(), 1);
+        assert_eq!(req.attachments[0].filename, "f.txt");
+    }
+}
+
 pub async fn send_email_handler(
     email_req: web::Json<EmailRequest>,
     dkim_service: web::Data<Box<dyn DkimService>>,
