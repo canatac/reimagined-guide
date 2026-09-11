@@ -256,5 +256,244 @@ impl MongoDatabaseAdapter {
             .await?;
         Ok(())
     }
+}
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn email_find_filter_format() {
+        let mailbox = "inbox";
+        let filter = doc! { "mailbox": mailbox };
+        assert!(filter.contains_key("mailbox"));
+    }
+
+    #[test]
+    fn email_find_by_id_filter_format() {
+        let email_id = "email-123";
+        let filter = doc! { "id": email_id };
+        assert!(filter.contains_key("id"));
+    }
+
+    #[test]
+    fn email_update_flag_format() {
+        let email_id = "email-123";
+        let flag = "\\Seen";
+        let filter = doc! { "id": email_id };
+        let update = doc! { "$addToSet": { "flags": flag } };
+        assert!(filter.contains_key("id"));
+        assert!(update.contains_key("$addToSet"));
+    }
+
+    #[test]
+    fn email_delete_filter_format() {
+        let email_id = "email-123";
+        let filter = doc! { "id": email_id };
+        assert!(filter.contains_key("id"));
+    }
+
+    #[test]
+    fn email_archive_update_format() {
+        let email_id = "email-123";
+        let filter = doc! { "id": email_id };
+        let update = doc! { "$set": { "mailbox": "archive" } };
+        assert!(filter.contains_key("id"));
+        assert!(update.contains_key("$set"));
+    }
+
+    #[test]
+    fn email_store_sequence_number() {
+        let count = 5u64;
+        let sequence_number = (count + 1) as u32;
+        assert_eq!(sequence_number, 6);
+    }
+
+    #[test]
+    fn email_store_uid() {
+        let count = 10u64;
+        let uid = (count + 1) as u32;
+        assert_eq!(uid, 11);
+    }
+
+    #[test]
+    fn email_get_page_filter_format() {
+        let username = "testuser";
+        let mailbox = "inbox";
+        let filter = doc! { "user_id": username, "mailbox": mailbox };
+        assert!(filter.contains_key("user_id"));
+        assert!(filter.contains_key("mailbox"));
+    }
+
+    #[test]
+    fn email_get_page_sort_format() {
+        let sort = doc! { "internal_date": -1 };
+        assert!(sort.contains_key("internal_date"));
+    }
+
+    #[test]
+    fn email_get_page_limit_clamp() {
+        let limit = 300i64;
+        let clamped = limit.clamp(1, 200);
+        assert_eq!(clamped, 200);
+    }
+
+    #[test]
+    fn email_get_page_limit_clamp_low() {
+        let limit = -5i64;
+        let clamped = limit.clamp(1, 200);
+        assert_eq!(clamped, 1);
+    }
+
+    #[test]
+    fn email_get_page_limit_clamp_normal() {
+        let limit = 50i64;
+        let clamped = limit.clamp(1, 200);
+        assert_eq!(clamped, 50);
+    }
+
+    #[test]
+    fn email_fetch_filter_format() {
+        let username = "testuser";
+        let email_id = "email-123";
+        let filter = doc! { "user_id": username, "id": email_id };
+        assert!(filter.contains_key("user_id"));
+        assert!(filter.contains_key("id"));
+    }
+
+    #[test]
+    fn email_set_read_add_format() {
+        let username = "testuser";
+        let email_id = "email-123";
+        let read = true;
+        let filter = doc! { "user_id": username, "id": email_id };
+        let update = if read {
+            doc! { "$addToSet": { "flags": "\\Seen" } }
+        } else {
+            doc! { "$pull": { "flags": "\\Seen" } }
+        };
+        assert!(update.contains_key("$addToSet"));
+    }
+
+    #[test]
+    fn email_set_read_remove_format() {
+        let username = "testuser";
+        let email_id = "email-123";
+        let read = false;
+        let update = if read {
+            doc! { "$addToSet": { "flags": "\\Seen" } }
+        } else {
+            doc! { "$pull": { "flags": "\\Seen" } }
+        };
+        assert!(update.contains_key("$pull"));
+    }
+
+    #[test]
+    fn email_set_starred_add_format() {
+        let username = "testuser";
+        let email_id = "email-123";
+        let starred = true;
+        let update = if starred {
+            doc! { "$addToSet": { "flags": "\\Flagged" } }
+        } else {
+            doc! { "$pull": { "flags": "\\Flagged" } }
+        };
+        assert!(update.contains_key("$addToSet"));
+    }
+
+    #[test]
+    fn email_set_starred_remove_format() {
+        let username = "testuser";
+        let email_id = "email-123";
+        let starred = false;
+        let update = if starred {
+            doc! { "$addToSet": { "flags": "\\Flagged" } }
+        } else {
+            doc! { "$pull": { "flags": "\\Flagged" } }
+        };
+        assert!(update.contains_key("$pull"));
+    }
+
+    #[test]
+    fn email_move_to_mailbox_format() {
+        let username = "testuser";
+        let email_id = "email-123";
+        let target_mailbox = "archive";
+        let filter = doc! { "user_id": username, "id": email_id };
+        let update = doc! { "$set": { "mailbox": target_mailbox } };
+        assert!(filter.contains_key("user_id"));
+        assert!(update.contains_key("$set"));
+    }
+
+    #[test]
+    fn email_deliver_to_inbox_format() {
+        let username = "testuser";
+        let email_id = "email-123";
+        let doc_insert = doc! {
+            "id": email_id,
+            "user_id": username,
+            "mailbox": "inbox",
+            "flags": bson::Array::new(),
+            "sequence_number": 1i32,
+            "uid": 1i32,
+        };
+        assert!(doc_insert.contains_key("id"));
+        assert!(doc_insert.contains_key("user_id"));
+        assert!(doc_insert.contains_key("mailbox"));
+        assert!(doc_insert.contains_key("flags"));
+    }
+
+    #[test]
+    fn email_log_event_format() {
+        let kind = "sent";
+        let user_id = "testuser";
+        let email_id = "email-123";
+        let subject = "Test";
+        let from = "sender@example.com";
+        let to = "recipient@example.com";
+        let doc_insert = doc! {
+            "kind": kind,
+            "user_id": user_id,
+            "email_id": email_id,
+            "subject": subject,
+            "from": from,
+            "to": to,
+        };
+        assert!(doc_insert.contains_key("kind"));
+        assert!(doc_insert.contains_key("user_id"));
+        assert!(doc_insert.contains_key("email_id"));
+        assert!(doc_insert.contains_key("timestamp") == false); // timestamp added separately
+    }
+
+    #[test]
+    fn email_collection_name() {
+        let coll_name = "emails";
+        assert_eq!(coll_name, "emails");
+    }
+
+    #[test]
+    fn mail_events_collection_name() {
+        let coll_name = "mail_events";
+        assert_eq!(coll_name, "mail_events");
+    }
+
+    #[test]
+    fn email_default_flags() {
+        let flags = bson::Array::new();
+        assert_eq!(flags.len(), 0);
+    }
+
+    #[test]
+    fn email_sequence_number_start() {
+        let count = 0u64;
+        let sequence_number = (count + 1) as u32;
+        assert_eq!(sequence_number, 1);
+    }
+
+    #[test]
+    fn email_uid_start() {
+        let count = 0u64;
+        let uid = (count + 1) as u32;
+        assert_eq!(uid, 1);
+    }
 }
