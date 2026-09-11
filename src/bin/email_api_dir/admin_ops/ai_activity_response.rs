@@ -253,3 +253,143 @@ fn trend_row_total_tokens(row: &serde_json::Value) -> i64 {
         })
         .unwrap_or(0)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn latency_stats_empty() {
+        let mut v: Vec<i64> = vec![];
+        assert_eq!(latency_stats(&mut v), (0, 0));
+    }
+
+    #[test]
+    fn latency_stats_single() {
+        let mut v = vec![100];
+        assert_eq!(latency_stats(&mut v), (100, 100));
+    }
+
+    #[test]
+    fn latency_stats_multiple() {
+        let mut v = vec![100, 200, 300, 400, 500];
+        let (avg, p95) = latency_stats(&mut v);
+        assert_eq!(avg, 300);
+        assert_eq!(p95, 500);
+    }
+
+    #[test]
+    fn safe_avg_i64_returns_average() {
+        assert_eq!(safe_avg_i64(100, 4), 25);
+    }
+
+    #[test]
+    fn safe_avg_i64_zero_count() {
+        assert_eq!(safe_avg_i64(100, 0), 0);
+    }
+
+    #[test]
+    fn safe_avg_f64_returns_average() {
+        assert!((safe_avg_f64(10.0, 2) - 5.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn safe_avg_f64_zero_count() {
+        assert_eq!(safe_avg_f64(10.0, 0), 0.0);
+    }
+
+    #[test]
+    fn safe_rate_returns_ratio() {
+        assert!((safe_rate(3, 4) - 0.75).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn safe_rate_zero_total() {
+        assert_eq!(safe_rate(5, 0), 0.0);
+    }
+
+    #[test]
+    fn safe_rate_all_success() {
+        assert!((safe_rate(10, 10) - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn pricing_source_label_openrouter() {
+        let default = PricingRate { input_per_1m_usd: 0.0, output_per_1m_usd: 0.0 };
+        let overrides = HashMap::new();
+        let mut openrouter = HashMap::new();
+        openrouter.insert("gpt-4".to_string(), PricingRate { input_per_1m_usd: 10.0, output_per_1m_usd: 30.0 });
+        assert_eq!(pricing_source_label(&default, &overrides, &openrouter), "openrouter_live");
+    }
+
+    #[test]
+    fn pricing_source_label_overrides_only() {
+        let default = PricingRate { input_per_1m_usd: 0.0, output_per_1m_usd: 0.0 };
+        let mut overrides = HashMap::new();
+        overrides.insert("gpt-4".to_string(), PricingRate { input_per_1m_usd: 10.0, output_per_1m_usd: 30.0 });
+        let openrouter = HashMap::new();
+        assert_eq!(pricing_source_label(&default, &overrides, &openrouter), "env_model_overrides_only");
+    }
+
+    #[test]
+    fn pricing_source_label_default_only() {
+        let default = PricingRate { input_per_1m_usd: 5.0, output_per_1m_usd: 10.0 };
+        let overrides = HashMap::new();
+        let openrouter = HashMap::new();
+        assert_eq!(pricing_source_label(&default, &overrides, &openrouter), "env_default_only");
+    }
+
+    #[test]
+    fn pricing_source_label_unconfigured() {
+        let default = PricingRate { input_per_1m_usd: 0.0, output_per_1m_usd: 0.0 };
+        let overrides = HashMap::new();
+        let openrouter = HashMap::new();
+        assert_eq!(pricing_source_label(&default, &overrides, &openrouter), "unconfigured");
+    }
+
+    #[test]
+    fn append_pricing_warnings_no_warning_when_configured() {
+        let default = PricingRate { input_per_1m_usd: 5.0, output_per_1m_usd: 10.0 };
+        let overrides = HashMap::new();
+        let openrouter = HashMap::new();
+        let mut warnings = Vec::new();
+        append_pricing_warnings(&default, &overrides, &openrouter, &mut warnings);
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn append_pricing_warnings_warns_when_unconfigured() {
+        let default = PricingRate { input_per_1m_usd: 0.0, output_per_1m_usd: 0.0 };
+        let overrides = HashMap::new();
+        let openrouter = HashMap::new();
+        let mut warnings = Vec::new();
+        append_pricing_warnings(&default, &overrides, &openrouter, &mut warnings);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("LLM pricing not configured"));
+    }
+
+    #[test]
+    fn bucket_default_is_zero() {
+        let b: Bucket = Default::default();
+        assert_eq!(b.runs, 0);
+        assert_eq!(b.total_tokens, 0);
+        assert_eq!(b.total_cost_usd, 0.0);
+    }
+
+    #[test]
+    fn trend_row_total_tokens_empty() {
+        let row = serde_json::json!({ "days": [] });
+        assert_eq!(trend_row_total_tokens(&row), 0);
+    }
+
+    #[test]
+    fn trend_row_total_tokens_sums_tokens() {
+        let row = serde_json::json!({
+            "days": [
+                { "totalTokens": 100 },
+                { "totalTokens": 200 }
+            ]
+        });
+        assert_eq!(trend_row_total_tokens(&row), 300);
+    }
+}
