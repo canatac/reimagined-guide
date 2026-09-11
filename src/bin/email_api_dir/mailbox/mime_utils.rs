@@ -1,8 +1,6 @@
 // MIME DTO + address parsing helpers (post-Sprint 17 split).
 // Body decoding lives in mime_body.rs; attachment extraction in mime_attachments.rs.
 use super::super::*;
-#[allow(unused_imports)]
-use base64::Engine as _;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -231,10 +229,4 @@ pub(crate) fn email_to_dto(email: &Email, folder: &str, include_body: bool) -> E
         size: email.body.len() as u64,
         message_id,
     }
-}
-
-// Silence unused import lint for base64 which is used transitively by some subcrates.
-#[allow(dead_code)]
-fn _touch_base64(s: &[u8]) -> String {
-    base64::engine::general_purpose::STANDARD.encode(s)
 }
