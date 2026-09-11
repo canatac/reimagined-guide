@@ -164,6 +164,55 @@ fn format_cluster_uri(cluster_url: &str, username: &str, password: &str, app_nam
         username, password, cluster_url, app_name
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_cluster_uri_standard_mongodb() {
+        let result = format_cluster_uri(
+            "mongodb://localhost:27017",
+            "user",
+            "pass",
+            "myapp",
+        );
+        assert_eq!(result, "mongodb://localhost:27017?appName=myapp&serverSelectionTimeoutMS=5000");
+    }
+
+    #[test]
+    fn format_cluster_uri_mongodb_srv() {
+        let result = format_cluster_uri(
+            "mongodb+srv://cluster0.mongodb.net",
+            "user",
+            "pass",
+            "myapp",
+        );
+        assert_eq!(result, "mongodb+srv://user:pass@cluster0.mongodb.net/?retryWrites=true&w=majority&appName=myapp&serverSelectionTimeoutMS=5000");
+    }
+
+    #[test]
+    fn format_cluster_uri_with_existing_query() {
+        let result = format_cluster_uri(
+            "mongodb://localhost:27017?retryWrites=true",
+            "user",
+            "pass",
+            "myapp",
+        );
+        assert_eq!(result, "mongodb://localhost:27017?retryWrites=true&appName=myapp&serverSelectionTimeoutMS=5000");
+    }
+
+    #[test]
+    fn format_cluster_uri_plain_host() {
+        let result = format_cluster_uri(
+            "localhost:27017",
+            "admin",
+            "secret",
+            "smtp-server",
+        );
+        assert_eq!(result, "mongodb://admin:secret@localhost:27017/?authSource=admin&appName=smtp-server&serverSelectionTimeoutMS=5000");
+    }
+}
 async fn init_mongo_client(client_uri: &str) -> Result<Arc<mongodb::Client>, MainError> {
     let options = build_mongo_options(client_uri).await.map_err(|e| MainError(format!("MongoDB options parse failed: {e}")))?;
     let client = mongodb::Client::with_options(options)
