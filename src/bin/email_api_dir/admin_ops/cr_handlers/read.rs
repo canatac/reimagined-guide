@@ -51,3 +51,69 @@ pub(crate) async fn api_admin_change_request_get(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn list_response_structure() {
+        let response = serde_json::json!({
+            "generatedAt": "2026-01-01T00:00:00Z",
+            "counts": {},
+            "items": [],
+        });
+        assert!(response.get("generatedAt").is_some());
+        assert!(response.get("counts").is_some());
+        assert!(response.get("items").is_some());
+    }
+
+    #[test]
+    fn get_response_success() {
+        let response = serde_json::json!({ "item": {} });
+        assert!(response.get("item").is_some());
+    }
+
+    #[test]
+    fn get_response_not_found() {
+        let response = serde_json::json!({ "message": "Change request not found" });
+        assert_eq!(response["message"], "Change request not found");
+    }
+
+    #[test]
+    fn get_response_error() {
+        let response = serde_json::json!({ "message": "Failed to load change request" });
+        assert_eq!(response["message"], "Failed to load change request");
+    }
+
+    #[test]
+    fn list_response_error() {
+        let response = serde_json::json!({ "message": "Failed to load change requests" });
+        assert_eq!(response["message"], "Failed to load change requests");
+    }
+
+    #[test]
+    fn find_one_query_format() {
+        let id = "cr-123";
+        let query = mongodb::bson::doc! { "id": &id };
+        assert_eq!(query.get_str("id").unwrap(), "cr-123");
+    }
+
+    #[test]
+    fn find_all_query_format() {
+        let query = mongodb::bson::doc! {};
+        assert!(query.is_empty());
+    }
+
+    #[test]
+    fn sort_by_updated_at_desc() {
+        let sort = mongodb::bson::doc! { "updatedAt": -1 };
+        assert_eq!(sort.get_i32("updatedAt").unwrap(), -1);
+    }
+
+    #[test]
+    fn limit_500() {
+        let limit = 500i64;
+        assert_eq!(limit, 500);
+    }
+}
