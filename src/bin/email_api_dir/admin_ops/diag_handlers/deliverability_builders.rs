@@ -187,3 +187,61 @@ pub(crate) fn compute_procedure_diff(checklist: &[serde_json::Value], gmail_bloc
     };
     (done_count, overall_status)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compute_procedure_diff_all_done() {
+        let checklist = vec![
+            serde_json::json!({"id": "item1", "status": "done"}),
+            serde_json::json!({"id": "item2", "status": "done_manual"}),
+        ];
+        let (count, status) = compute_procedure_diff(&checklist, 0);
+        assert_eq!(count, 2);
+        assert_eq!(status, "ready_for_reject");
+    }
+
+    #[test]
+    fn compute_procedure_diff_in_progress() {
+        let checklist = vec![
+            serde_json::json!({"id": "item1", "status": "done"}),
+            serde_json::json!({"id": "item2", "status": "todo"}),
+        ];
+        let (count, status) = compute_procedure_diff(&checklist, 0);
+        assert_eq!(count, 1);
+        assert_eq!(status, "in_progress");
+    }
+
+    #[test]
+    fn compute_procedure_diff_blocked_by_gmail() {
+        let checklist = vec![
+            serde_json::json!({"id": "item1", "status": "done"}),
+            serde_json::json!({"id": "item2", "status": "done"}),
+        ];
+        let (count, status) = compute_procedure_diff(&checklist, 5);
+        assert_eq!(count, 2);
+        assert_eq!(status, "blocked_gmail_policy");
+    }
+
+    #[test]
+    fn compute_procedure_diff_empty() {
+        let checklist: Vec<serde_json::Value> = vec![];
+        let (count, status) = compute_procedure_diff(&checklist, 0);
+        assert_eq!(count, 0);
+        assert_eq!(status, "ready_for_reject");
+    }
+
+    #[test]
+    fn compute_procedure_diff_ignores_unknown_status() {
+        let checklist = vec![
+            serde_json::json!({"id": "item1", "status": "done"}),
+            serde_json::json!({"id": "item2", "status": "unknown"}),
+            serde_json::json!({"id": "item3", "status": "blocked"}),
+        ];
+        let (count, status) = compute_procedure_diff(&checklist, 0);
+        assert_eq!(count, 1);
+        assert_eq!(status, "in_progress");
+    }
+}

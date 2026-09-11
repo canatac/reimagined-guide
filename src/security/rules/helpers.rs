@@ -38,6 +38,70 @@ pub(crate) fn db_name() -> String {
     std::env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_env_u64_default() {
+        std::env::remove_var("TEST_U64_VAR");
+        assert_eq!(env_u64("TEST_U64_VAR", 42), 42);
+    }
+
+    #[test]
+    fn test_env_u64_reads_value() {
+        std::env::set_var("TEST_U64_VAR", "100");
+        assert_eq!(env_u64("TEST_U64_VAR", 0), 100);
+        std::env::remove_var("TEST_U64_VAR");
+    }
+
+    #[test]
+    fn test_env_u64_invalid_falls_back() {
+        std::env::set_var("TEST_U64_VAR", "abc");
+        assert_eq!(env_u64("TEST_U64_VAR", 99), 99);
+        std::env::remove_var("TEST_U64_VAR");
+    }
+
+    #[test]
+    fn test_env_f64_default() {
+        std::env::remove_var("TEST_F64_VAR");
+        assert_eq!(env_f64("TEST_F64_VAR", 3.14), 3.14);
+    }
+
+    #[test]
+    fn test_env_f64_reads_value() {
+        std::env::set_var("TEST_F64_VAR", "2.71");
+        assert_eq!(env_f64("TEST_F64_VAR", 0.0), 2.71);
+        std::env::remove_var("TEST_F64_VAR");
+    }
+
+    #[test]
+    fn test_env_list_empty() {
+        std::env::remove_var("TEST_LIST");
+        assert!(env_list("TEST_LIST").is_empty());
+    }
+
+    #[test]
+    fn test_env_list_splits() {
+        std::env::set_var("TEST_LIST", "a,b,c");
+        assert_eq!(env_list("TEST_LIST"), vec!["a", "b", "c"]);
+        std::env::remove_var("TEST_LIST");
+    }
+
+    #[test]
+    fn test_db_name_default() {
+        std::env::remove_var("MONGODB_DATABASE");
+        assert_eq!(db_name(), "mailserver");
+    }
+
+    #[test]
+    fn test_db_name_custom() {
+        std::env::set_var("MONGODB_DATABASE", "custom_db");
+        assert_eq!(db_name(), "custom_db");
+        std::env::remove_var("MONGODB_DATABASE");
+    }
+}
+
 
 pub(crate) async fn count(client: &Client, coll: &str, filter: mongodb::bson::Document) -> u64 {
     client

@@ -127,3 +127,61 @@ pub(crate) fn rbl_listed_by() -> Vec<String> {
         .filter(|s| !s.is_empty())
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rbl_sources_default() {
+        std::env::remove_var("RBL_CHECK_HOSTS");
+        let sources = rbl_sources();
+        assert!(!sources.is_empty());
+        assert!(sources.iter().any(|s| s.contains("spamhaus")));
+    }
+
+    #[test]
+    fn rbl_sources_custom() {
+        std::env::set_var("RBL_CHECK_HOSTS", "custom1.example.com,custom2.example.com");
+        let sources = rbl_sources();
+        assert_eq!(sources.len(), 2);
+        assert_eq!(sources[0], "custom1.example.com");
+        assert_eq!(sources[1], "custom2.example.com");
+        std::env::remove_var("RBL_CHECK_HOSTS");
+    }
+
+    #[test]
+    fn rbl_sources_trims_whitespace() {
+        std::env::set_var("RBL_CHECK_HOSTS", " host1 , host2 ");
+        let sources = rbl_sources();
+        assert_eq!(sources[0], "host1");
+        assert_eq!(sources[1], "host2");
+        std::env::remove_var("RBL_CHECK_HOSTS");
+    }
+
+    #[test]
+    fn rbl_listed_by_default_empty() {
+        std::env::remove_var("RBL_LISTED_BY");
+        let listed = rbl_listed_by();
+        assert!(listed.is_empty());
+    }
+
+    #[test]
+    fn rbl_listed_by_custom() {
+        std::env::set_var("RBL_LISTED_BY", "provider1,provider2");
+        let listed = rbl_listed_by();
+        assert_eq!(listed.len(), 2);
+        assert_eq!(listed[0], "provider1");
+        assert_eq!(listed[1], "provider2");
+        std::env::remove_var("RBL_LISTED_BY");
+    }
+
+    #[test]
+    fn rbl_listed_by_trims_whitespace() {
+        std::env::set_var("RBL_LISTED_BY", " p1 , p2 ");
+        let listed = rbl_listed_by();
+        assert_eq!(listed[0], "p1");
+        assert_eq!(listed[1], "p2");
+        std::env::remove_var("RBL_LISTED_BY");
+    }
+}

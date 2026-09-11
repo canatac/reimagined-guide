@@ -199,3 +199,204 @@ fn is_completed_status(status: &str) -> bool {
 fn is_failed_status(status: &str) -> bool {
     matches!(status, "failed" | "error" | "cancelled" | "expired")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_run_facts_completed_status() {
+        let run = serde_json::json!({
+            "status": "completed",
+            "model": "gpt-4",
+            "feature": "compose",
+            "usage": { "prompt_tokens": 100, "completion_tokens": 50 }
+        });
+        let facts = extract_run_facts(&run);
+        assert_eq!(facts.status, "completed");
+        assert_eq!(facts.model, "gpt-4");
+        assert_eq!(facts.feature, "compose");
+        assert_eq!(facts.prompt_tokens, 100);
+        assert_eq!(facts.completion_tokens, 50);
+        assert_eq!(facts.total_tokens, 150);
+    }
+
+    #[test]
+    fn extract_run_facts_failed_status() {
+        let run = serde_json::json!({
+            "status": "FAILED",
+            "model": "gpt-4",
+            "feature": "translate"
+        });
+        let facts = extract_run_facts(&run);
+        assert_eq!(facts.status, "failed");
+    }
+
+    #[test]
+    fn extract_run_facts_camel_case_fields() {
+        let run = serde_json::json!({
+            "status": "success",
+            "model": "claude-3",
+            "feature": "triage",
+            "promptTokens": 200,
+            "completionTokens": 80,
+            "totalTokens": 300,
+            "latencyMs": 1500
+        });
+        let facts = extract_run_facts(&run);
+        assert_eq!(facts.prompt_tokens, 200);
+        assert_eq!(facts.completion_tokens, 80);
+        assert_eq!(facts.total_tokens, 300);
+        assert_eq!(facts.latency_ms, 1500);
+    }
+
+    #[test]
+    fn extract_run_facts_user_and_session() {
+        let run = serde_json::json!({
+            "status": "completed",
+            "model": "gpt-4",
+            "feature": "compose",
+            "userId": "user-42",
+            "sessionId": "sess-abc"
+        });
+        let facts = extract_run_facts(&run);
+        assert_eq!(facts.user_id, Some("user-42".to_string()));
+        assert_eq!(facts.session_id, Some("sess-abc".to_string()));
+    }
+
+    #[test]
+    fn extract_run_facts_day_bucket() {
+        let run = serde_json::json!({
+            "status": "completed",
+            "model": "gpt-4",
+            "feature": "compose",
+            "startedAt": "2026-09-10T14:30:00Z"
+        });
+        let facts = extract_run_facts(&run);
+        assert_eq!(facts.day_bucket, "2026-09-10");
+    }
+
+    #[test]
+    fn extract_run_facts_defaults() {
+        let run = serde_json::json!({});
+        let facts = extract_run_facts(&run);
+        assert_eq!(facts.status, "unknown");
+        assert_eq!(facts.model, "unknown");
+        assert_eq!(facts.feature, "unknown");
+        assert_eq!(facts.total_tokens, 0);
+        assert_eq!(facts.day_bucket, "unknown");
+    }
+
+    #[test]
+    fn is_completed_status_matches() {
+        assert!(is_completed_status("completed"));
+        assert!(is_completed_status("success"));
+        assert!(!is_completed_status("failed"));
+        assert!(!is_completed_status("running"));
+    }
+
+    #[test]
+    fn is_failed_status_matches() {
+        assert!(is_failed_status("failed"));
+        assert!(is_failed_status("error"));
+        assert!(is_failed_status("cancelled"));
+        assert!(is_failed_status("expired"));
+        assert!(!is_failed_status("completed"));
+        assert!(!is_failed_status("running"));
+    }
+
+    #[test]
+    fn update_global_counters_accumulates() {
+        let mut completed = 0;
+        let mut failed = 0;
+        let mut prompt = 0;
+        let mut completion = 0;
+        let mut total = 0;
+        let mut latencies = Vec::new();
+        let facts = RunFacts {
+            status: "completed".to_string(),
+            model: "gpt-4".to_string(),
+            feature: "compose".to_string(),
+            user_id: None,
+            session_id: None,
+            day_bucket: "2026-09-10".to_string(),
+            prompt_tokens: 100,
+            completion_tokens: 50,
+            total_tokens: 150,
+            latency_ms: 200,
+        };
+        update_global_counters(
+            &mut completed,
+            &mut failed,
+            &mut prompt,
+            &mut completion,
+            &mut total,
+            &mut latencies,
+            &facts,
+        );
+        assert_eq!(completed, 1);
+        assert_eq!(failed, 0);
+        assert_eq!(prompt, 100);
+        assert_eq!(completion, 50);
+        assert_eq!(total, 150);
+        assert_eq!(latencies, vec![200]);
+    }
+
+    #[test]
+    fn update_pricing_counters_priced() {
+        let mut total_cost = 0.0;
+        let mut priced = 0;
+        let mut unpriced = 0;
+        update_pricing_counters(&mut total_cost, &mut priced, &mut unpriced, 0.05);
+        assert!((total_cost - 0.05).abs() < f64::EPSILON);
+        assert_eq!(priced, 1);
+        assert_eq!(unpriced, 0);
+    }
+
+    #[test]
+    fn update_pricing_counters_unpriced() {
+        let mut total_cost = 0.0;
+        let mut priced = 0;
+        let mut unpriced = 0;
+        update_pricing_counters(&mut total_cost, &mut priced, &mut unpriced, 0.0);
+        assert_eq!(priced, 0);
+        assert_eq!(unpriced, 1);
+    }
+
+    #[test]
+    fn estimate_run_cost_calculates() {
+        let rate = PricingRate {
+            input_per_1m_usd: 10.0,
+            output_per_1m_usd: 30.0,
+        };
+        let cost = estimate_run_cost(1_000_000, 500_000, rate);
+        assert!((cost - 25.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn iso_day_prefix_extracts_date() {
+        assert_eq!(
+            iso_day_prefix("2026-09-10T14:30:00Z"),
+            Some("2026-09-10".to_string())
+        );
+    }
+
+    #[test]
+    fn iso_day_prefix_short_string() {
+        assert_eq!(iso_day_prefix("short"), None);
+    }
+
+    #[test]
+    fn normalized_user_key_returns_unknown_for_empty() {
+        assert_eq!(normalized_user_key(None), "unknown");
+        assert_eq!(normalized_user_key(Some("  ".to_string())), "unknown");
+    }
+
+    #[test]
+    fn normalized_user_key_returns_id() {
+        assert_eq!(
+            normalized_user_key(Some("user-42".to_string())),
+            "user-42"
+        );
+    }
+}

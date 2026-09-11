@@ -195,3 +195,76 @@ pub(super) async fn api_events_stream(bus: web::Data<EventBus>, req: actix_web::
         .insert_header(("X-Accel-Buffering", "no"))
         .streaming(event_stream)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mail_event_kind_serialization() {
+        let kinds = vec![
+            (MailEventKind::Sent, "\"sent\""),
+            (MailEventKind::Received, "\"received\""),
+            (MailEventKind::Read, "\"read\""),
+        ];
+        for (kind, expected) in kinds {
+            let serialized = serde_json::to_string(&kind).unwrap();
+            assert_eq!(serialized, expected);
+        }
+    }
+
+    #[test]
+    fn mail_event_kind_deserialization() {
+        let kinds = vec![
+            ("\"sent\"", MailEventKind::Sent),
+            ("\"received\"", MailEventKind::Received),
+            ("\"read\"", MailEventKind::Read),
+        ];
+        for (json, expected) in kinds {
+            let deserialized: MailEventKind = serde_json::from_str(json).unwrap();
+            assert_eq!(deserialized, expected);
+        }
+    }
+
+    #[test]
+    fn mail_event_serialization() {
+        let event = MailEvent {
+            id: "evt-1".to_string(),
+            kind: MailEventKind::Sent,
+            user_id: "user-1".to_string(),
+            email_id: "email-1".to_string(),
+            subject: "Test Subject".to_string(),
+            from: "sender@example.com".to_string(),
+            to: "recipient@example.com".to_string(),
+            timestamp: "2026-01-15T10:30:00Z".to_string(),
+        };
+        let serialized = serde_json::to_value(&event).unwrap();
+        assert_eq!(serialized["id"], "evt-1");
+        assert_eq!(serialized["kind"], "sent");
+        assert_eq!(serialized["userId"], "user-1");
+        assert_eq!(serialized["emailId"], "email-1");
+        assert_eq!(serialized["subject"], "Test Subject");
+        assert_eq!(serialized["from"], "sender@example.com");
+        assert_eq!(serialized["to"], "recipient@example.com");
+        assert_eq!(serialized["timestamp"], "2026-01-15T10:30:00Z");
+    }
+
+    #[test]
+    fn mail_event_deserialization() {
+        let json = serde_json::json!({
+            "id": "evt-1",
+            "kind": "sent",
+            "userId": "user-1",
+            "emailId": "email-1",
+            "subject": "Test Subject",
+            "from": "sender@example.com",
+            "to": "recipient@example.com",
+            "timestamp": "2026-01-15T10:30:00Z"
+        });
+        let event: MailEvent = serde_json::from_value(json).unwrap();
+        assert_eq!(event.id, "evt-1");
+        assert_eq!(event.kind, MailEventKind::Sent);
+        assert_eq!(event.user_id, "user-1");
+        assert_eq!(event.email_id, "email-1");
+    }
+}

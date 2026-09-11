@@ -185,3 +185,86 @@ pub(crate) fn email_to_dto(email: &Email, folder: &str, include_body: bool) -> E
 fn _touch_base64(s: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(s)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_address_name_and_address() {
+        let dto = parse_address("John Doe <john@example.com>");
+        assert_eq!(dto.name, "John Doe");
+        assert_eq!(dto.address, "john@example.com");
+    }
+
+    #[test]
+    fn parse_address_bare_address() {
+        let dto = parse_address("jane@example.com");
+        assert_eq!(dto.name, "jane");
+        assert_eq!(dto.address, "jane@example.com");
+    }
+
+    #[test]
+    fn parse_address_angle_brackets_only() {
+        let dto = parse_address("<admin@misfits.fr>");
+        assert_eq!(dto.name, "admin");
+        assert_eq!(dto.address, "admin@misfits.fr");
+    }
+
+    #[test]
+    fn parse_address_quoted_name() {
+        let dto = parse_address("\"Support Team\" <support@misfits.ai>");
+        assert_eq!(dto.name, "Support Team");
+        assert_eq!(dto.address, "support@misfits.ai");
+    }
+
+    #[test]
+    fn parse_address_trims_whitespace() {
+        let dto = parse_address("  user@domain.com  ");
+        assert_eq!(dto.name, "user");
+        assert_eq!(dto.address, "user@domain.com");
+    }
+
+    #[test]
+    fn parse_address_empty_string() {
+        let dto = parse_address("");
+        assert_eq!(dto.name, "");
+        assert_eq!(dto.address, "");
+    }
+
+    #[test]
+    fn strip_tags_simple_html() {
+        let result = strip_tags("<p>Hello World</p>");
+        assert_eq!(result, "Hello World");
+    }
+
+    #[test]
+    fn strip_tags_nested_tags() {
+        let result = strip_tags("<div><p>Hello <b>World</b></p></div>");
+        assert_eq!(result, "Hello World");
+    }
+
+    #[test]
+    fn strip_tags_no_tags() {
+        let result = strip_tags("Plain text");
+        assert_eq!(result, "Plain text");
+    }
+
+    #[test]
+    fn strip_tags_collapses_whitespace() {
+        let result = strip_tags("<p>Hello    World</p>");
+        assert_eq!(result, "Hello World");
+    }
+
+    #[test]
+    fn strip_tags_empty_input() {
+        let result = strip_tags("");
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn strip_tags_attributes_inside_tag() {
+        let result = strip_tags("<a href=\"https://example.com\">Link</a>");
+        assert_eq!(result, "Link");
+    }
+}
