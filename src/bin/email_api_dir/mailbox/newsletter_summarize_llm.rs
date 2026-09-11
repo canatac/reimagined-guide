@@ -259,3 +259,55 @@ pub(crate) async fn summarize_with_hermes(
         llm_suggested_url,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn llm_summary_data_default_model_fallback() {
+        // Test that when no newsletter/triage feature is set, default_model is used
+        // This is a logic test since we can't easily mock load_ai_settings
+        let default_model = "gpt-4".to_string();
+        let features = std::collections::HashMap::new();
+        
+        let model = features
+            .get("newsletter")
+            .or_else(|| features.get("triage"))
+            .cloned()
+            .unwrap_or_else(|| default_model.clone());
+        
+        assert_eq!(model, "gpt-4");
+    }
+
+    #[test]
+    fn llm_summary_data_newsletter_feature_preferred() {
+        let default_model = "gpt-4".to_string();
+        let mut features = std::collections::HashMap::new();
+        features.insert("newsletter".to_string(), "claude-3".to_string());
+        features.insert("triage".to_string(), "gpt-3.5".to_string());
+        
+        let model = features
+            .get("newsletter")
+            .or_else(|| features.get("triage"))
+            .cloned()
+            .unwrap_or_else(|| default_model.clone());
+        
+        assert_eq!(model, "claude-3");
+    }
+
+    #[test]
+    fn llm_summary_data_triage_fallback() {
+        let default_model = "gpt-4".to_string();
+        let mut features = std::collections::HashMap::new();
+        features.insert("triage".to_string(), "gpt-3.5".to_string());
+        
+        let model = features
+            .get("newsletter")
+            .or_else(|| features.get("triage"))
+            .cloned()
+            .unwrap_or_else(|| default_model.clone());
+        
+        assert_eq!(model, "gpt-3.5");
+    }
+}

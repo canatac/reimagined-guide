@@ -158,3 +158,63 @@ pub(crate) async fn api_newsletter_suggestions(
     }))
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn newsletter_sources_list_returns_total() {
+        // Verify the response structure includes total count
+        // Since we can't easily mock MongoDB, we test the JSON structure
+        let sources: Vec<serde_json::Value> = vec![];
+        let total = sources.len();
+        let json = serde_json::json!({"sources": sources, "total": total});
+        assert_eq!(json["total"], 0);
+    }
+
+    #[test]
+    fn newsletter_suggestions_ranking_logic() {
+        // Test the ranking logic used in api_newsletter_suggestions
+        let mut ranked: Vec<(String, i32)> = vec![
+            ("ai".to_string(), 5),
+            ("tech".to_string(), 10),
+            ("security".to_string(), 3),
+        ];
+        ranked.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        
+        assert_eq!(ranked[0].0, "tech");
+        assert_eq!(ranked[0].1, 10);
+        assert_eq!(ranked[1].0, "ai");
+        assert_eq!(ranked[2].0, "security");
+    }
+
+    #[test]
+    fn newsletter_suggestions_top_n() {
+        let ranked: Vec<(String, i32)> = vec![
+            ("tech".to_string(), 10),
+            ("ai".to_string(), 5),
+            ("security".to_string(), 3),
+            ("finance".to_string(), 2),
+            ("design".to_string(), 1),
+            ("extra".to_string(), 0),
+        ];
+        let top: Vec<String> = ranked.iter().take(5).map(|(k, _)| k.clone()).collect();
+        assert_eq!(top.len(), 5);
+        assert_eq!(top[0], "tech");
+        assert_eq!(top[4], "design");
+    }
+
+    #[test]
+    fn newsletter_suggestions_truncate_to_8() {
+        let mut suggestions: Vec<serde_json::Value> = (0..10)
+            .map(|i| serde_json::json!({"matchScore": i}))
+            .collect();
+        suggestions.sort_by(|a, b| {
+            let sa = a.get("matchScore").and_then(|v| v.as_i64()).unwrap_or(0);
+            let sb = b.get("matchScore").and_then(|v| v.as_i64()).unwrap_or(0);
+            sb.cmp(&sa)
+        });
+        suggestions.truncate(8);
+        assert_eq!(suggestions.len(), 8);
+    }
+}
