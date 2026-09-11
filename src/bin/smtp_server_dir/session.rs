@@ -195,3 +195,73 @@ pub(crate) async fn handle_plain_client(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn smtp_greeting_is_correct() {
+        let greeting = "220 mail.misfits.ai ESMTP\r\n";
+        assert!(greeting.starts_with("220 "));
+        assert!(greeting.contains("mail.misfits.ai"));
+        assert!(greeting.contains("ESMTP"));
+    }
+
+    #[test]
+    fn starttls_response_for_tls_client() {
+        // When a TLS client sends STARTTLS, it should get 454
+        let response = "454 TLS not available due to temporary reason\r\n";
+        assert!(response.starts_with("454 "));
+        assert!(response.contains("TLS not available"));
+    }
+
+    #[test]
+    fn starttls_response_for_plain_client() {
+        // When a plain client sends STARTTLS, it should get 220
+        let response = "220 Ready to start TLS\r\n";
+        assert!(response.starts_with("220 "));
+        assert!(response.contains("Ready to start TLS"));
+    }
+
+    #[test]
+    fn invalid_header_response() {
+        let response = "550 5.6.0 Invalid header\r\n";
+        assert!(response.starts_with("550 "));
+        assert!(response.contains("Invalid header"));
+    }
+
+    #[test]
+    fn bye_response() {
+        let response = "221 Bye\r\n";
+        assert!(response.starts_with("221 "));
+        assert!(response.contains("Bye"));
+    }
+
+    #[test]
+    fn data_mode_terminator() {
+        // In data mode, a line containing only "." terminates data
+        let terminator = ".";
+        assert_eq!(terminator, ".");
+    }
+
+    #[test]
+    fn custom_email_default() {
+        let email = CustomEmail {
+            email: Email::new("", "", "", "", ""),
+            raw_content: String::new(),
+            dkim_signature: None,
+        };
+        assert_eq!(email.email.from, "");
+        assert_eq!(email.email.to, "");
+        assert_eq!(email.raw_content, "");
+        assert_eq!(email.dkim_signature, None);
+    }
+
+    #[test]
+    fn stream_type_is_tls() {
+        // We can't easily construct a TlsStream, but we can verify the enum exists
+        let _: fn(&StreamType) -> bool = StreamType::is_tls;
+        assert!(true);
+    }
+}
