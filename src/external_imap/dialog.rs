@@ -105,6 +105,36 @@ fn connect_tcp_with_timeouts(addr: &std::net::SocketAddr) -> std::result::Result
     Ok(tcp)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ensure_password_ok() {
+        assert!(ensure_password("secret").is_ok());
+    }
+
+    #[test]
+    fn ensure_password_empty_rejected() {
+        assert!(ensure_password("").is_err());
+    }
+
+    #[test]
+    fn resolve_addr_invalid_host() {
+        let result = resolve_addr("this.does.not.exist.invalid.tld", 993);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn resolve_addr_valid_localhost() {
+        let result = resolve_addr("127.0.0.1", 143);
+        assert!(result.is_ok());
+        let addr = result.unwrap();
+        assert_eq!(addr.ip().to_string(), "127.0.0.1");
+        assert_eq!(addr.port(), 143);
+    }
+}
+
 fn imap_fetch_dialog<S: std::io::Read + std::io::Write>(
     mut stream: S,
     username: &str,
