@@ -14,6 +14,46 @@ pub(super) struct MailingListEmailRequest {
     pub mailing_list: String,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mailing_list_request_fields() {
+        let req = MailingListRequest {
+            label: "newsletter".to_string(),
+            emails: vec!["a@b.com".to_string(), "c@d.com".to_string()],
+        };
+        assert_eq!(req.label, "newsletter");
+        assert_eq!(req.emails.len(), 2);
+        assert_eq!(req.emails[0], "a@b.com");
+    }
+
+    #[test]
+    fn mailing_list_request_empty() {
+        let req = MailingListRequest {
+            label: "empty".to_string(),
+            emails: vec![],
+        };
+        assert_eq!(req.label, "empty");
+        assert!(req.emails.is_empty());
+    }
+
+    #[test]
+    fn mailing_list_email_request_fields() {
+        let req = MailingListEmailRequest {
+            from: "sender@test.com".to_string(),
+            subject: "Hello".to_string(),
+            body: "World".to_string(),
+            mailing_list: "newsletter".to_string(),
+        };
+        assert_eq!(req.from, "sender@test.com");
+        assert_eq!(req.subject, "Hello");
+        assert_eq!(req.body, "World");
+        assert_eq!(req.mailing_list, "newsletter");
+    }
+}
+
 pub(super) async fn create_mailing_list(mailing_list: web::Json<MailingListRequest>) -> impl Responder {
     let mailing_list_dir = Path::new("mailing-lists");
     if !mailing_list_dir.exists() {
