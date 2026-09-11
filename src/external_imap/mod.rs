@@ -203,6 +203,126 @@ mod tests {
     use super::*;
 
     #[test]
+    fn redact_account_clears_secret() {
+        let account = ExternalImapAccount {
+            id: "acc_1".to_string(),
+            owner_user_id: "user_1".to_string(),
+            provider: "gmail".to_string(),
+            email: "test@example.com".to_string(),
+            auth_type: "password".to_string(),
+            secret_value: Some("secret-token".to_string()),
+            secret_ref: Some("ref-1".to_string()),
+            imap_host: "imap.gmail.com".to_string(),
+            imap_port: 993,
+            imap_tls: true,
+            smtp_host: Some("smtp.gmail.com".to_string()),
+            smtp_port: Some(587),
+            smtp_tls: Some(true),
+            status: "active".to_string(),
+            last_sync_at: None,
+            last_error: None,
+            created_at: "2026-01-01".to_string(),
+            updated_at: "2026-01-01".to_string(),
+        };
+        let redacted = redact_account(account);
+        assert!(redacted.secret_value.is_none());
+        assert_eq!(redacted.id, "acc_1");
+        assert_eq!(redacted.email, "test@example.com");
+    }
+
+    #[test]
+    fn parse_rfc3339_as_bson_valid() {
+        let result = parse_rfc3339_as_bson("2026-09-10T12:00:00Z");
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn parse_rfc3339_as_bson_with_offset() {
+        let result = parse_rfc3339_as_bson("2026-09-10T12:00:00+02:00");
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn parse_rfc3339_as_bson_invalid() {
+        assert!(parse_rfc3339_as_bson("not-a-date").is_none());
+        assert!(parse_rfc3339_as_bson("").is_none());
+    }
+
+    #[test]
+    fn infer_role_inbox() {
+        assert_eq!(infer_role("INBOX"), "inbox");
+        assert_eq!(infer_role("Inbox"), "inbox");
+    }
+
+    #[test]
+    fn infer_role_sent() {
+        assert_eq!(infer_role("Sent"), "sent");
+        assert_eq!(infer_role("Sent Items"), "sent");
+    }
+
+    #[test]
+    fn infer_role_drafts() {
+        assert_eq!(infer_role("Drafts"), "drafts");
+        assert_eq!(infer_role("Draft"), "drafts");
+    }
+
+    #[test]
+    fn infer_role_trash() {
+        assert_eq!(infer_role("Trash"), "trash");
+        assert_eq!(infer_role("Bin"), "trash");
+    }
+
+    #[test]
+    fn infer_role_spam() {
+        assert_eq!(infer_role("Spam"), "spam");
+        assert_eq!(infer_role("Junk"), "spam");
+    }
+
+    #[test]
+    fn infer_role_archive() {
+        assert_eq!(infer_role("Archive"), "archive");
+    }
+
+    #[test]
+    fn infer_role_custom() {
+        assert_eq!(infer_role("MyFolder"), "custom");
+        assert_eq!(infer_role("Work"), "custom");
+    }
+
+    #[test]
+    fn redact_account_clears_secret_value() {
+        let account = ExternalImapAccount {
+            id: "acc_1".to_string(),
+            owner_user_id: "user_1".to_string(),
+            provider: "gmail".to_string(),
+            email: "test@example.com".to_string(),
+            auth_type: "password".to_string(),
+            secret_value: Some("secret-token".to_string()),
+            secret_ref: Some("ref-1".to_string()),
+            imap_host: "imap.gmail.com".to_string(),
+            imap_port: 993,
+            imap_tls: true,
+            smtp_host: Some("smtp.gmail.com".to_string()),
+            smtp_port: Some(587),
+            smtp_tls: Some(true),
+            status: "active".to_string(),
+            last_sync_at: None,
+            last_error: None,
+            created_at: "2026-01-01".to_string(),
+            updated_at: "2026-01-01".to_string(),
+        };
+        let redacted = redact_account(account);
+        assert!(redacted.secret_value.is_none());
+        assert_eq!(redacted.id, "acc_1");
+        assert_eq!(redacted.email, "test@example.com");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
     fn infer_role_classifies_inbox() {
         assert_eq!(infer_role("INBOX"), "inbox");
         assert_eq!(infer_role("Inbox"), "inbox");
