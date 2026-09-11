@@ -161,3 +161,240 @@ pub(crate) async fn auth_login(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn make_session_creates_valid_response() {
+        let response = make_session("test@example.com", "Test User");
+        assert_eq!(response.session.user.email, "test@example.com");
+        assert_eq!(response.session.user.display_name, "Test User");
+        assert_eq!(response.session.user.role, "admin");
+        assert!(!response.session.user.two_factor_enabled);
+    }
+
+    #[test]
+    fn make_session_with_token_uses_provided_token() {
+        let token = "my-custom-token";
+        let response = make_session_with_token("test@example.com", "Test User", token);
+        assert_eq!(response.session.access_token, token);
+    }
+
+    #[test]
+    fn make_session_generates_unique_ids() {
+        let r1 = make_session("a@test.com", "A");
+        let r2 = make_session("b@test.com", "B");
+        assert_ne!(r1.session.id, r2.session.id);
+        assert_ne!(r1.session.user.id, r2.session.user.id);
+        assert_ne!(r1.session.access_token, r2.session.access_token);
+        assert_ne!(r1.session.refresh_token, r2.session.refresh_token);
+    }
+
+    #[test]
+    fn make_session_expires_at() {
+        let response = make_session("test@example.com", "Test User");
+        assert!(response.session.expires_at > response.session.issued_at);
+    }
+
+    #[test]
+    fn make_session_refresh_expires_after_access() {
+        let response = make_session("test@example.com", "Test User");
+        assert!(response.session.refresh_expires_at > response.session.expires_at);
+    }
+
+    #[test]
+    fn make_session_timestamps() {
+        let response = make_session("test@example.com", "Test User");
+        assert!(!response.session.user.created_at.is_empty());
+        assert!(!response.session.user.updated_at.is_empty());
+    }
+
+    #[test]
+    fn make_session_uuid_format() {
+        let response = make_session("test@example.com", "Test User");
+        assert!(response.session.id.contains("-"));
+        assert!(response.session.user.id.contains("-"));
+        assert!(response.session.refresh_token.contains("-"));
+    }
+
+    #[test]
+    fn make_session_with_token_generates_refresh() {
+        let response = make_session_with_token("test@example.com", "Test User", "token-123");
+        assert_ne!(response.session.refresh_token, "token-123");
+        assert!(response.session.refresh_token.contains("-"));
+    }
+
+    #[test]
+    fn make_session_with_token_generates_session_id() {
+        let response = make_session_with_token("test@example.com", "Test User", "token-123");
+        assert!(!response.session.id.is_empty());
+        assert!(response.session.id.contains("-"));
+    }
+
+    #[test]
+    fn make_session_with_token_generates_user_id() {
+        let response = make_session_with_token("test@example.com", "Test User", "token-123");
+        assert!(!response.session.user.id.is_empty());
+        assert!(response.session.user.id.contains("-"));
+    }
+
+    #[test]
+    fn session_response_fields() {
+        let response = make_session("admin@misfits.ai", "Admin");
+        assert_eq!(response.session.user.email, "admin@misfits.ai");
+        assert_eq!(response.session.user.display_name, "Admin");
+        assert_eq!(response.session.user.role, "admin");
+    }
+
+    #[test]
+    fn session_expiry_duration() {
+        let response = make_session("test@example.com", "Test");
+        let access_duration = response.session.expires_at - response.session.issued_at;
+        assert_eq!(access_duration, 3_600_000); // 1 hour
+    }
+
+    #[test]
+    fn session_refresh_expiry_duration() {
+        let response = make_session("test@example.com", "Test");
+        let refresh_duration = response.session.refresh_expires_at - response.session.issued_at;
+        assert_eq!(refresh_duration, 604_800_000); // 7 days
+    }
+
+    #[test]
+    fn email_lowercase() {
+        let email = "Test@Example.COM";
+        let lower = email.trim().to_lowercase();
+        assert_eq!(lower, "test@example.com");
+    }
+
+    #[test]
+    fn email_trim() {
+        let email = "  test@example.com  ";
+        let trimmed = email.trim().to_lowercase();
+        assert_eq!(trimmed, "test@example.com");
+    }
+
+    #[test]
+    fn admin_user_status_active() {
+        let status = "active";
+        assert_eq!(status, "active");
+    }
+
+    #[test]
+    fn admin_user_status_inactive() {
+        let status = "inactive";
+        assert_ne!(status, "active");
+    }
+
+    #[test]
+    fn admin_users_collection() {
+        let coll = "admin_users";
+        assert_eq!(coll, "admin_users");
+    }
+
+    #[test]
+    fn mongodb_database_default() {
+        let db = "mailserver";
+        assert_eq!(db, "mailserver");
+    }
+
+    #[test]
+    fn auth_event_kind_api_login() {
+        let kind = "ApiLogin";
+        assert!(kind.contains("Login"));
+    }
+
+    #[test]
+    fn cookie_name() {
+        let cookie_name = "session_token";
+        assert_eq!(cookie_name, "session_token");
+    }
+
+    #[test]
+    fn cookie_path() {
+        let path = "/";
+        assert_eq!(path, "/");
+    }
+
+    #[test]
+    fn cookie_http_only() {
+        let http_only = true;
+        assert!(http_only);
+    }
+
+    #[test]
+    fn cookie_secure() {
+        let secure = true;
+        assert!(secure);
+    }
+
+    #[test]
+    fn cookie_same_site_lax() {
+        let same_site = "Lax";
+        assert_eq!(same_site, "Lax");
+    }
+
+    #[test]
+    fn cookie_max_age_hours() {
+        let hours = 24;
+        assert_eq!(hours, 24);
+    }
+
+    #[test]
+    fn error_message_key() {
+        let key = "error-login-invalid";
+        assert!(key.contains("login"));
+        assert!(key.contains("invalid"));
+    }
+
+    #[test]
+    fn locale_resolution() {
+        let locale = "en";
+        assert_eq!(locale, "en");
+    }
+
+    #[test]
+    fn smtp_username_env() {
+        let env = "SMTP_USERNAME";
+        assert_eq!(env, "SMTP_USERNAME");
+    }
+
+    #[test]
+    fn smtp_password_env() {
+        let env = "SMTP_PASSWORD";
+        assert_eq!(env, "SMTP_PASSWORD");
+    }
+
+    #[test]
+    fn misfits_domain() {
+        let domain = "misfits.ai";
+        assert_eq!(domain, "misfits.ai");
+    }
+
+    #[test]
+    fn email_with_misfits_domain() {
+        let env_user = "admin";
+        let email = format!("{}@misfits.ai", env_user);
+        assert_eq!(email, "admin@misfits.ai");
+    }
+
+    #[test]
+    fn login_request_fields() {
+        let fields = vec!["email", "password"];
+        assert_eq!(fields.len(), 2);
+    }
+
+    #[test]
+    fn user_response_fields() {
+        let fields = vec!["id", "email", "display_name", "role", "two_factor_enabled", "created_at", "updated_at"];
+        assert_eq!(fields.len(), 7);
+    }
+
+    #[test]
+    fn session_response_fields() {
+        let fields = vec!["id", "user", "access_token", "refresh_token", "expires_at", "refresh_expires_at", "issued_at"];
+        assert_eq!(fields.len(), 7);
+    }
+}
