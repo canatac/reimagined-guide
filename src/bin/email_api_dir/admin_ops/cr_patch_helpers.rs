@@ -163,3 +163,202 @@ pub(crate) fn apply_simple_field_patches(item: &mut ChangeRequestItem, body: &Pa
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_item() -> ChangeRequestItem {
+        ChangeRequestItem {
+            id: "cr-1".to_string(),
+            title: "Test".to_string(),
+            problem: "Problem".to_string(),
+            desired_outcome: "Outcome".to_string(),
+            status: "submitted".to_string(),
+            workflow: vec![
+                WorkflowStage {
+                    name: "Stage1".to_string(),
+                    status: "active".to_string(),
+                    done_at: None,
+                },
+            ],
+            execution_state: "idle".to_string(),
+            execution_run_id: None,
+            execution_started_at: None,
+            execution_last_heartbeat_at: None,
+            execution_finished_at: None,
+            execution_last_error: None,
+            changelog_entry: None,
+        }
+    }
+
+    #[test]
+    fn apply_action_reject_sets_rejected() {
+        let mut item = make_item();
+        apply_action_reject(&mut item);
+        assert_eq!(item.status, "rejected");
+        assert_eq!(item.execution_state, "idle");
+        assert!(item.execution_finished_at.is_some());
+    }
+
+    #[test]
+    fn apply_action_reject_marks_active_stage_done() {
+        let mut item = make_item();
+        apply_action_reject(&mut item);
+        assert_eq!(item.workflow[0].status, "done");
+        assert!(item.workflow[0].done_at.is_some());
+    }
+
+    #[test]
+    fn apply_action_advance_increments_status() {
+        let mut item = make_item();
+        let body = PatchChangeRequestInputApi::default();
+        let mut note = None;
+        apply_action_advance(&mut item, &body, &mut note);
+        assert_eq!(item.status, "triaged");
+    }
+
+    #[test]
+    fn apply_action_advance_to_in_progress_queues() {
+        let mut item = ChangeRequestItem {
+            status: "planned".to_string(),
+            ..make_item()
+        };
+        let body = PatchChangeRequestInputApi::default();
+        let mut note = None;
+        apply_action_advance(&mut item, &body, &mut note);
+        assert_eq!(item.status, "in_progress");
+        assert_eq!(item.execution_state, "queued");
+    }
+
+    #[test]
+    fn apply_action_advance_to_released_sets_success() {
+        let mut item = ChangeRequestItem {
+            status: "qa".to_string(),
+            ..make_item()
+        };
+        let body = PatchChangeRequestInputApi::default();
+        let mut note = None;
+        apply_action_advance(&mut item, &body, &mut note);
+        assert_eq!(item.status, "released");
+        assert_eq!(item.execution_state, "success");
+        assert!(item.changelog_entry.is_some());
+    }
+
+    #[test]
+    fn apply_action_advance_at_last_status_noop() {
+        let mut item = ChangeRequestItem {
+            status: "released".to_string(),
+            ..make_item()
+        };
+        let body = PatchChangeRequestInputApi::default();
+        let mut note = None;
+        apply_action_advance(&mut item, &body, &mut note);
+        assert_eq!(item.status, "released");
+    }
+
+    #[test]
+    fn set_run_id_if_present_sets_when_non_empty() {
+        let mut item = make_item();
+        let body = PatchChangeRequestInputApi {
+            execution_run_id: Some("run-123".to_string()),
+            ..Default::default()
+        };
+        set_run_id_if_present(&mut item, &body);
+        assert_eq!(item.execution_run_id, Some("run-123".to_string()));
+    }
+
+    #[test]
+    fn set_run_id_if_present_ignores_empty() {
+        let mut item = make_item();
+        let body = PatchChangeRequestInputApi {
+            execution_run_id: Some("  ".to_string()),
+            ..Default::default()
+        };
+        set_run_id_if_present(&mut item, &body);
+        assert_eq!(item.execution_run_id, None);
+    }
+
+    #[test]
+    fn apply_execution_action_queue() {
+        let mut item = make_item();
+        let body = PatchChangeRequestInputApi::default();
+        apply_execution_action(&mut item, "execution_queue", &body, &None);
+        assert_eq!(item.execution_state, "queued");
+        assert!(item.execution_finished_at.is_none());
+    }
+
+    #[test]
+    fn apply_execution_action_start() {
+        let mut item = make_item();
+        let body = PatchChangeRequestInputApi::default();
+        apply_execution_action(&mut item, "execution_start", &body, &None);
+        assert_eq!(item.execution_state, "running");
+        assert!(item.execution_started_at.is_some());
+        assert!(item.execution_last_heartbeat_at.is_some());
+    }
+
+    #[test]
+    fn apply_execution_action_fail() {
+        let mut item = make_item();
+        let body = PatchChangeRequestInputApi {
+            execution_error: Some("boom".to_string()),
+            ..Default::default()
+        };
+        apply_execution_action(&mut item, "execution_fail", &body, &None);
+        assert_eq!(item.execution_state, "failed");
+        assert_eq!(item.execution_last_error, Some("boom".to_string()));
+    }
+
+    #[test]
+    fn apply_execution_action_success() {
+        let mut item = make_item();
+        let body = PatchChangeRequestInputApi::default();
+        apply_execution_action(&mut item, "execution_success", &body, &None);
+        assert_eq!(item.execution_state, "success");
+        assert!(item.execution_last_error.is_none());
+    }
+
+    #[test]
+    fn apply_execution_action_reset() {
+        let mut item = ChangeRequestItem {
+            execution_state: "running".to_string(),
+            execution_run_id: Some("run-1".to_string()),
+            execution_started_at: Some("2026-01-01".to_string()),
+            ..make_item()
+        };
+        let body = PatchChangeRequestInputApi::default();
+        apply_execution_action(&mut item, "execution_reset", &body, &None);
+        assert_eq!(item.execution_state, "idle");
+        assert!(item.execution_run_id.is_none());
+        assert!(item.execution_started_at.is_none());
+    }
+
+    #[test]
+    fn apply_simple_field_patches_updates_fields() {
+        let mut item = make_item();
+        let body = PatchChangeRequestInputApi {
+            title: Some("  New Title  ".to_string()),
+            problem: Some("  New Problem  ".to_string()),
+            desired_outcome: Some("  New Outcome  ".to_string()),
+            status: Some("  IN_PROGRESS  ".to_string()),
+            ..Default::default()
+        };
+        apply_simple_field_patches(&mut item, &body);
+        assert_eq!(item.title, "New Title");
+        assert_eq!(item.problem, "New Problem");
+        assert_eq!(item.desired_outcome, "New Outcome");
+        assert_eq!(item.status, "in_progress");
+    }
+
+    #[test]
+    fn apply_simple_field_patches_rejects_invalid_status() {
+        let mut item = make_item();
+        let body = PatchChangeRequestInputApi {
+            status: Some("invalid_status".to_string()),
+            ..Default::default()
+        };
+        apply_simple_field_patches(&mut item, &body);
+        assert_eq!(item.status, "submitted");
+    }
+}
