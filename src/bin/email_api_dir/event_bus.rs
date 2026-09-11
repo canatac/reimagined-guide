@@ -135,6 +135,7 @@ mod tests {
         };
         assert_eq!(resp.session.id, "s1");
     }
+}
 
 #[derive(Deserialize)]
 pub(super) struct UndoSendRequest {
