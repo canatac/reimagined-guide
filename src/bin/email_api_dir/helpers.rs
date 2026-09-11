@@ -126,3 +126,114 @@ pub(crate) fn welcome_email_html(
     )
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- normalize_segment ---
+
+    #[test]
+    fn test_normalize_segment_lowercase() {
+        assert_eq!(normalize_segment("Hello"), "hello");
+    }
+
+    #[test]
+    fn test_normalize_segment_accents() {
+        assert_eq!(normalize_segment("café"), "cafe");
+        assert_eq!(normalize_segment("naïve"), "naive");
+        assert_eq!(normalize_segment("résumé"), "resume");
+    }
+
+    #[test]
+    fn test_normalize_segment_ligatures() {
+        assert_eq!(normalize_segment("æther"), "ather");
+        assert_eq!(normalize_segment("œuvre"), "oeuvre");
+    }
+
+    #[test]
+    fn test_normalize_segment_tildes() {
+        assert_eq!(normalize_segment("señor"), "senor");
+    }
+
+    #[test]
+    fn test_normalize_segment_filters_non_alphanumeric() {
+        assert_eq!(normalize_segment("a b!c@1"), "abc1");
+    }
+
+    #[test]
+    fn test_normalize_segment_empty() {
+        assert_eq!(normalize_segment(""), "");
+    }
+
+    #[test]
+    fn test_normalize_segment_max_length() {
+        let input = "a".repeat(300);
+        assert_eq!(normalize_segment(&input).len(), 256);
+    }
+
+    #[test]
+    fn test_normalize_segment_special_chars_only() {
+        assert_eq!(normalize_segment("!@#$%^&*()"), "");
+    }
+
+    // --- build_misfits_local ---
+
+    #[test]
+    fn test_build_misfits_local_valid() {
+        assert_eq!(build_misfits_local("Alice", "Smith"), Some("alice.smith".into()));
+    }
+
+    #[test]
+    fn test_build_misfits_local_with_accents() {
+        assert_eq!(build_misfits_local("José", "García"), Some("jose.garcia".into()));
+    }
+
+    #[test]
+    fn test_build_misfits_local_empty_first() {
+        assert_eq!(build_misfits_local("", "Smith"), None);
+    }
+
+    #[test]
+    fn test_build_misfits_local_empty_last() {
+        assert_eq!(build_misfits_local("Alice", ""), None);
+    }
+
+    #[test]
+    fn test_build_misfits_local_whitespace_only() {
+        assert_eq!(build_misfits_local("   ", "   "), None);
+    }
+
+    #[test]
+    fn test_build_misfits_local_trims_whitespace() {
+        assert_eq!(build_misfits_local("  Alice  ", "  Smith  "), Some("alice.smith".into()));
+    }
+
+    // --- normalize_oauth_provider ---
+
+    #[test]
+    fn test_normalize_oauth_provider_github() {
+        assert_eq!(normalize_oauth_provider("github"), Some("github".into()));
+    }
+
+    #[test]
+    fn test_normalize_oauth_provider_github_mixed_case() {
+        assert_eq!(normalize_oauth_provider("GitHub"), Some("github".into()));
+    }
+
+    #[test]
+    fn test_normalize_oauth_provider_unknown() {
+        assert_eq!(normalize_oauth_provider("facebook"), None);
+    }
+
+    #[test]
+    fn test_normalize_oauth_provider_empty() {
+        assert_eq!(normalize_oauth_provider(""), None);
+    }
+
+    #[test]
+    fn test_normalize_oauth_provider_with_whitespace() {
+        assert_eq!(normalize_oauth_provider("  github  "), Some("github".into()));
+    }
+}
+
