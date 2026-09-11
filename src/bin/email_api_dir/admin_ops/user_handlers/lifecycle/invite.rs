@@ -2,6 +2,26 @@
 use super::super::super::*;
 use super::super::audit::log_admin_action;
 
+/// Generates a unique invite token.
+pub(crate) fn generate_invite_token() -> String {
+    Uuid::new_v4().to_string()
+}
+
+/// Calculates the expiration time for an invite.
+pub(crate) fn calculate_invite_expiration(ttl_hours: i64) -> chrono::DateTime<chrono::Utc> {
+    Utc::now() + chrono::Duration::hours(ttl_hours)
+}
+
+/// Builds the accept URL for an invite.
+pub(crate) fn build_accept_url(invite_base: &str, token: &str) -> String {
+    format!("{}?token={}", invite_base, token)
+}
+
+/// Truncates recent activity to the last N entries.
+pub(crate) fn truncate_recent_activity(activity: &mut Vec<AdminUserActivity>, max_entries: usize) {
+    activity.truncate(max_entries);
+}
+
 /// POST /api/admin/users/{id}/invite
 pub(crate) async fn api_admin_user_invite(
     req: HttpRequest,
@@ -30,13 +50,13 @@ pub(crate) async fn api_admin_user_invite(
         }
     };
 
-    let token = Uuid::new_v4().to_string();
+    let token = generate_invite_token();
     let now = Utc::now();
     let ttl_hours: i64 = env::var("ADMIN_INVITE_TTL_HOURS")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(72);
-    let expires = now + chrono::Duration::hours(ttl_hours);
+    let expires = calculate_invite_expiration(ttl_hours);
 
     user.invite_token = Some(token.clone());
     user.invite_expires_at = Some(expires.to_rfc3339());
@@ -51,7 +71,7 @@ pub(crate) async fn api_admin_user_invite(
             kind: "admin_action".to_string(),
         },
     );
-    recent.truncate(8);
+    truncate_recent_activity(&mut recent, 8);
     user.recent_activity = recent;
 
     if let Err(e) = coll
@@ -70,7 +90,7 @@ pub(crate) async fn api_admin_user_invite(
         .unwrap_or_else(|_| "https://misfits.ai/admin/accept-invite".to_string());
     let sender = env::var("ADMIN_INVITE_FROM")
         .unwrap_or_else(|_| "no-reply@misfits.ai".to_string());
-    let accept_url = format!("{}?token={}", invite_base, token);
+    let accept_url = build_accept_url(&invite_base, &token);
     let display = user
         .display_name
         .clone()
@@ -127,4 +147,86 @@ pub(crate) async fn api_admin_user_invite(
         "acceptUrl": accept_url,
         "expiresAt": expires.to_rfc3339(),
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generate_invite_token_is_unique() {
+        let token1 = generate_invite_token();
+        let token2 = generate_invite_token();
+        assert_ne!(token1, token2);
+    }
+
+    #[test]
+    fn generate_invite_token_is_uuid_format() {
+        let token = generate_invite_token();
+        assert!(Uuid::parse_str(&token).is_ok());
+    }
+
+    #[test]
+    fn calculate_invite_expiration_default_ttl() {
+        let expiration = calculate_invite_expiration(72);
+        let now = Utc::now();
+        let expected = now + chrono::Duration::hours(72);
+        // Allow 1 second tolerance for test execution time
+        let diff = (expiration - expected).num_seconds().abs();
+        assert!(diff <= 1);
+    }
+
+    #[test]
+    fn calculate_invite_expiration_custom_ttl() {
+        let expiration = calculate_invite_expiration(24);
+        let now = Utc::now();
+        let expected = now + chrono::Duration::hours(24);
+        let diff = (expiration - expected).num_seconds().abs();
+        assert!(diff <= 1);
+    }
+
+    #[test]
+    fn build_accept_url_with_token() {
+        let url = build_accept_url("https://misfits.ai/admin/accept-invite", "token123");
+        assert_eq!(url, "https://misfits.ai/admin/accept-invite?token=token123");
+    }
+
+    #[test]
+    fn build_accept_url_with_empty_token() {
+        let url = build_accept_url("https://example.com/invite", "");
+        assert_eq!(url, "https://example.com/invite?token=");
+    }
+
+    #[test]
+    fn truncate_recent_activity_to_8() {
+        let mut activity: Vec<AdminUserActivity> = (0..10)
+            .map(|i| AdminUserActivity {
+                at: format!("2026-01-0{}T00:00:00Z", i),
+                label: format!("Activity {}", i),
+                kind: "test".to_string(),
+            })
+            .collect();
+        truncate_recent_activity(&mut activity, 8);
+        assert_eq!(activity.len(), 8);
+    }
+
+    #[test]
+    fn truncate_recent_activity_under_limit() {
+        let mut activity: Vec<AdminUserActivity> = (0..5)
+            .map(|i| AdminUserActivity {
+                at: format!("2026-01-0{}T00:00:00Z", i),
+                label: format!("Activity {}", i),
+                kind: "test".to_string(),
+            })
+            .collect();
+        truncate_recent_activity(&mut activity, 8);
+        assert_eq!(activity.len(), 5);
+    }
+
+    #[test]
+    fn truncate_recent_activity_empty() {
+        let mut activity: Vec<AdminUserActivity> = vec![];
+        truncate_recent_activity(&mut activity, 8);
+        assert!(activity.is_empty());
+    }
 }
