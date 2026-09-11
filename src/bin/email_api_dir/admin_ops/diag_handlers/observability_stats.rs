@@ -81,6 +81,56 @@ pub(crate) struct ThroughputStats {
     pub(crate) dns_issue_events: u64,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn smtp_status_stats_fields() {
+        let stats = SmtpStatusStats {
+            total: 100,
+            delivered: 80,
+            bounced: 10,
+            failed: 5,
+            deferred: 5,
+            by_status: serde_json::Map::new(),
+            p95: Some(250),
+        };
+        assert_eq!(stats.total, 100);
+        assert_eq!(stats.delivered, 80);
+        assert_eq!(stats.bounced, 10);
+        assert_eq!(stats.failed, 5);
+        assert_eq!(stats.deferred, 5);
+        assert_eq!(stats.p95, Some(250));
+    }
+
+    #[test]
+    fn queue_stats_fields() {
+        let stats = QueueStats {
+            depth: 42,
+            oldest_age_seconds: Some(3600),
+        };
+        assert_eq!(stats.depth, 42);
+        assert_eq!(stats.oldest_age_seconds, Some(3600));
+    }
+
+    #[test]
+    fn throughput_stats_fields() {
+        let stats = ThroughputStats {
+            incoming: 500,
+            outgoing: 480,
+            smtp_4xx: 10,
+            smtp_5xx: 5,
+            dns_issue_events: 2,
+        };
+        assert_eq!(stats.incoming, 500);
+        assert_eq!(stats.outgoing, 480);
+        assert_eq!(stats.smtp_4xx, 10);
+        assert_eq!(stats.smtp_5xx, 5);
+        assert_eq!(stats.dns_issue_events, 2);
+    }
+}
+
 pub(crate) async fn collect_throughput_stats(
     mongo: &Arc<mongodb::Client>,
     since: &str,

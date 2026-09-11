@@ -9,6 +9,41 @@ pub(crate) struct AlertsSnapshot {
     pub(crate) anomalies: usize,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn alerts_snapshot_new() {
+        let snapshot = AlertsSnapshot {
+            monitoring: vec![],
+            security: vec![],
+            queue_growth: 0,
+            auth_failures: 0,
+            anomalies: 0,
+        };
+        assert!(snapshot.monitoring.is_empty());
+        assert!(snapshot.security.is_empty());
+        assert_eq!(snapshot.queue_growth, 0);
+        assert_eq!(snapshot.auth_failures, 0);
+        assert_eq!(snapshot.anomalies, 0);
+    }
+
+    #[test]
+    fn alerts_snapshot_with_counts() {
+        let snapshot = AlertsSnapshot {
+            monitoring: vec![],
+            security: vec![],
+            queue_growth: 3,
+            auth_failures: 5,
+            anomalies: 2,
+        };
+        assert_eq!(snapshot.queue_growth, 3);
+        assert_eq!(snapshot.auth_failures, 5);
+        assert_eq!(snapshot.anomalies, 2);
+    }
+}
+
 pub(crate) async fn collect_alerts_snapshot(
     mongo: &Arc<mongodb::Client>,
     window: &str,
