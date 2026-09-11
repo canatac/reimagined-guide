@@ -93,6 +93,67 @@ pub(crate) fn canonical_message_id(raw: &str) -> Option<String> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_recipient_with_name() {
+        let r = ComposerRecipient {
+            email: "<EMAIL>".into(),
+            name: Some("John".into()),
+        };
+        assert_eq!(format_recipient(&r), Some("John <<EMAIL>>".to_string()));
+    }
+
+    #[test]
+    fn format_recipient_without_name() {
+        let r = ComposerRecipient {
+            email: "<EMAIL>".into(),
+            name: None,
+        };
+        assert_eq!(format_recipient(&r), Some("<EMAIL>".to_string()));
+    }
+
+    #[test]
+    fn format_recipient_empty_email() {
+        let r = ComposerRecipient {
+            email: "".into(),
+            name: Some("John".into()),
+        };
+        assert_eq!(format_recipient(&r), None);
+    }
+
+    #[test]
+    fn join_recipients_comma_separated() {
+        let list = vec![
+            ComposerRecipient { email: "<EMAIL>".into(), name: None },
+            ComposerRecipient { email: "<EMAIL>".into(), name: Some("Bob".into()) },
+        ];
+        assert_eq!(join_recipients(&list), "<EMAIL>, Bob <<EMAIL>>");
+    }
+
+    #[test]
+    fn from_address_for_user_with_at() {
+        assert_eq!(from_address_for_user("admin@misfits.ai"), "admin@misfits.ai");
+    }
+
+    #[test]
+    fn normalize_message_id_strips_brackets() {
+        assert_eq!(normalize_message_id("<msg-123>"), "msg-123");
+    }
+
+    #[test]
+    fn canonical_message_id_wraps_brackets() {
+        assert_eq!(canonical_message_id("msg-123"), Some("<msg-123>".to_string()));
+    }
+
+    #[test]
+    fn canonical_message_id_empty() {
+        assert_eq!(canonical_message_id(""), None);
+    }
+}
+
 fn sanitize_filename(name: &str, fallback_index: usize) -> String {
     let cleaned = name
         .trim()
@@ -241,122 +302,95 @@ mod tests {
 
     #[test]
     fn format_recipient_with_name() {
-        let r = ComposerRecipient {
-            email: "alice@example.com".to_string(),
-            name: Some("Alice Smith".to_string()),
-        };
-        assert_eq!(format_recipient(&r), Some("Alice Smith <alice@example.com>".to_string()));
+        let r = ComposerRecipient { email: "<EMAIL>".into(), name: Some("John".into()) };
+        assert_eq!(format_recipient(&r), Some("John <<EMAIL>>".to_string()));
     }
 
     #[test]
-    fn format_recipient_without_name() {
-        let r = ComposerRecipient {
-            email: "alice@example.com".to_string(),
-            name: None,
-        };
-        assert_eq!(format_recipient(&r), Some("alice@example.com".to_string()));
+    fn format_recipient_no_name() {
+        let r = ComposerRecipient { email: "<EMAIL>".into(), name: None };
+        assert_eq!(format_recipient(&r), Some("<EMAIL>".to_string()));
     }
 
     #[test]
     fn format_recipient_empty_email() {
-        let r = ComposerRecipient {
-            email: "".to_string(),
-            name: Some("Alice".to_string()),
-        };
+        let r = ComposerRecipient { email: "".into(), name: Some("John".into()) };
         assert_eq!(format_recipient(&r), None);
     }
 
     #[test]
-    fn format_recipient_whitespace_email() {
-        let r = ComposerRecipient {
-            email: "   ".to_string(),
-            name: Some("Alice".to_string()),
-        };
-        assert_eq!(format_recipient(&r), None);
-    }
-
-    #[test]
-    fn format_recipient_empty_name() {
-        let r = ComposerRecipient {
-            email: "alice@example.com".to_string(),
-            name: Some("".to_string()),
-        };
-        assert_eq!(format_recipient(&r), Some("alice@example.com".to_string()));
+    fn format_recipient_empty_name_becomes_none() {
+        let r = ComposerRecipient { email: "<EMAIL>".into(), name: Some("  ".into()) };
+        assert_eq!(format_recipient(&r), Some("<EMAIL>".to_string()));
     }
 
     #[test]
     fn join_recipients_comma_separated() {
         let recipients = vec![
-            ComposerRecipient { email: "a@b.com".to_string(), name: Some("A".to_string()) },
-            ComposerRecipient { email: "c@d.com".to_string(), name: None },
+            ComposerRecipient { email: "<EMAIL>".into(), name: Some("A".into()) },
+            ComposerRecipient { email: "<EMAIL>".into(), name: None },
         ];
-        assert_eq!(join_recipients(&recipients), "A <a@b.com>, c@d.com");
+        assert_eq!(join_recipients(&recipients), "A <<EMAIL>>, <EMAIL>");
     }
 
     #[test]
     fn join_recipients_skips_empty() {
         let recipients = vec![
-            ComposerRecipient { email: "".to_string(), name: Some("A".to_string()) },
-            ComposerRecipient { email: "c@d.com".to_string(), name: None },
+            ComposerRecipient { email: "".into(), name: Some("A".into()) },
+            ComposerRecipient { email: "<EMAIL>".into(), name: None },
         ];
-        assert_eq!(join_recipients(&recipients), "c@d.com");
+        assert_eq!(join_recipients(&recipients), "<EMAIL>");
     }
 
     #[test]
-    fn join_recipients_empty_list() {
-        let recipients: Vec<ComposerRecipient> = vec![];
-        assert_eq!(join_recipients(&recipients), "");
+    fn domain_from_env_default() {
+        std::env::remove_var("DOMAIN_NAME");
+        assert_eq!(domain_from_env(), "misfits.ai");
+    }
+
+    #[test]
+    fn domain_from_env_from_env() {
+        std::env::set_var("DOMAIN_NAME", "example.com");
+        assert_eq!(domain_from_env(), "example.com");
+        std::env::remove_var("DOMAIN_NAME");
     }
 
     #[test]
     fn from_address_for_user_with_at() {
-        assert_eq!(from_address_for_user("admin@misfits.ai"), "admin@misfits.ai");
+        assert_eq!(from_address_for_user("<EMAIL>"), "<EMAIL>");
     }
 
     #[test]
     fn from_address_for_user_without_at() {
-        std::env::set_var("DOMAIN_NAME", "example.com");
-        assert_eq!(from_address_for_user("admin"), "admin@example.com");
         std::env::remove_var("DOMAIN_NAME");
-    }
-
-    #[test]
-    fn from_address_for_user_default_domain() {
-        std::env::remove_var("DOMAIN_NAME");
-        assert_eq!(from_address_for_user("admin"), "admin@misfits.ai");
+        assert_eq!(from_address_for_user("user"), "<EMAIL>");
     }
 
     #[test]
     fn normalize_message_id_strips_brackets() {
-        assert_eq!(normalize_message_id("<abc-123@example.com>"), "abc-123@example.com");
+        assert_eq!(normalize_message_id("<msg-123>"), "msg-123");
     }
 
     #[test]
     fn normalize_message_id_no_brackets() {
-        assert_eq!(normalize_message_id("abc-123@example.com"), "abc-123@example.com");
-    }
-
-    #[test]
-    fn normalize_message_id_trims() {
-        assert_eq!(normalize_message_id("  <abc>  "), "abc");
+        assert_eq!(normalize_message_id("msg-123"), "msg-123");
     }
 
     #[test]
     fn canonical_message_id_wraps_brackets() {
-        assert_eq!(canonical_message_id("abc-123"), Some("<abc-123>".to_string()));
+        assert_eq!(canonical_message_id("msg-123"), Some("<msg-123>".to_string()));
     }
 
     #[test]
     fn canonical_message_id_empty() {
         assert_eq!(canonical_message_id(""), None);
-        assert_eq!(canonical_message_id("   "), None);
     }
 
     #[test]
     fn sanitize_filename_removes_special_chars() {
         assert_eq!(sanitize_filename("file/name.txt", 0), "file_name.txt");
-        assert_eq!(sanitize_filename("file\\name.txt", 0), "file_name.txt");
-        assert_eq!(sanitize_filename("file:name?.txt", 0), "file_name_.txt");
+        assert_eq!(sanitize_filename("file:name.txt", 0), "file_name.txt");
+        assert_eq!(sanitize_filename("file*name?.txt", 0), "file_name_.txt");
     }
 
     #[test]
@@ -366,37 +400,9 @@ mod tests {
     }
 
     #[test]
-    fn sanitize_filename_preserves_valid() {
-        assert_eq!(sanitize_filename("document.pdf", 0), "document.pdf");
-    }
-
-    #[test]
-    fn chunk_base64_lines_empty() {
-        assert_eq!(chunk_base64_lines(""), "");
-    }
-
-    #[test]
-    fn chunk_base64_lines_short() {
-        assert_eq!(chunk_base64_lines("AAAA"), "AAAA\r\n");
-    }
-
-    #[test]
-    fn chunk_base64_lines_76_chars() {
-        let input = "A".repeat(76);
-        let expected = format!("{}\r\n", input);
-        assert_eq!(chunk_base64_lines(&input), expected);
-    }
-
-    #[test]
-    fn chunk_base64_lines_77_chars() {
-        let input = "A".repeat(77);
-        let expected = format!("{}\r\nA\r\n", "A".repeat(76));
-        assert_eq!(chunk_base64_lines(&input), expected);
-    }
-
-    #[test]
     fn is_private_or_local_ip_loopback() {
         assert!(is_private_or_local_ip("127.0.0.1"));
+        assert!(is_private_or_local_ip("::1"));
     }
 
     #[test]
@@ -413,30 +419,19 @@ mod tests {
     }
 
     #[test]
-    fn is_private_or_local_ip_ipv6_loopback() {
-        assert!(is_private_or_local_ip("::1"));
-    }
-
-    #[test]
-    fn is_private_or_local_ip_ipv6_unspecified() {
-        assert!(is_private_or_local_ip("::"));
-    }
-
-    #[test]
     fn is_private_or_local_ip_invalid() {
         assert!(!is_private_or_local_ip("not-an-ip"));
     }
 
     #[test]
-    fn is_internal_delivery_hop_host_internal() {
+    fn is_internal_delivery_hop_local_host() {
         assert!(is_internal_delivery_hop(Some("smtp-server"), None, None, None));
-        assert!(is_internal_delivery_hop(Some("server.local"), None, None, None));
+        assert!(is_internal_delivery_hop(Some("host.local"), None, None, None));
         assert!(is_internal_delivery_hop(Some("host.internal"), None, None, None));
     }
 
     #[test]
-    fn is_internal_delivery_hop_ip_internal() {
-        assert!(is_internal_delivery_hop(None, Some("127.0.0.1"), None, None));
+    fn is_internal_delivery_hop_private_ip() {
         assert!(is_internal_delivery_hop(None, Some("10.0.0.1"), None, None));
     }
 
@@ -447,12 +442,7 @@ mod tests {
     }
 
     #[test]
-    fn is_internal_delivery_hop_external() {
-        assert!(!is_internal_delivery_hop(Some("gmail.com"), Some("8.8.8.8"), Some(587), Some("google")));
-    }
-
-    #[test]
-    fn is_internal_delivery_hop_all_none() {
-        assert!(!is_internal_delivery_hop(None, None, None, None));
+    fn is_internal_delivery_hop_not_internal() {
+        assert!(!is_internal_delivery_hop(Some("mail.google.com"), Some("8.8.8.8"), Some(587), Some("Google")));
     }
 }

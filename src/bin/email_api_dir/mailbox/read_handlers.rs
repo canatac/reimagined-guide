@@ -133,6 +133,53 @@ fn default_analytics_days() -> u32 {
     30
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn personal_analytics_query_default_days() {
+        let json = serde_json::json!({});
+        let query: PersonalAnalyticsQuery = serde_json::from_value(json).unwrap();
+        assert_eq!(query.days, 30);
+    }
+
+    #[test]
+    fn personal_analytics_query_custom_days() {
+        let json = serde_json::json!({ "days": 7 });
+        let query: PersonalAnalyticsQuery = serde_json::from_value(json).unwrap();
+        assert_eq!(query.days, 7);
+    }
+
+    #[test]
+    fn email_list_query_defaults() {
+        let json = serde_json::json!({});
+        let query: EmailListQuery = serde_json::from_value(json).unwrap();
+        assert_eq!(query.folder, "inbox");
+        assert_eq!(query.page, 1);
+        assert_eq!(query.page_size, 50);
+    }
+
+    #[test]
+    fn email_list_query_custom() {
+        let json = serde_json::json!({
+            "folder": "sent",
+            "page": 2,
+            "pageSize": 25
+        });
+        let query: EmailListQuery = serde_json::from_value(json).unwrap();
+        assert_eq!(query.folder, "sent");
+        assert_eq!(query.page, 2);
+        assert_eq!(query.page_size, 25);
+    }
+
+    #[test]
+    fn default_analytics_days_is_30() {
+        assert_eq!(default_analytics_days(), 30);
+    }
+}
+
+
 pub(crate) async fn api_personal_analytics(
     query: web::Query<PersonalAnalyticsQuery>,
     req: actix_web::HttpRequest,
@@ -278,6 +325,34 @@ fn normalize_label_color(raw: Option<String>) -> String {
     raw.map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
         .unwrap_or_else(|| "#64748b".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_label_name_trims() {
+        assert_eq!(normalize_label_name("  Work  "), "Work");
+    }
+
+    #[test]
+    fn normalize_label_name_empty() {
+        assert_eq!(normalize_label_name(""), "");
+    }
+
+    #[test]
+    fn normalize_label_color_default() {
+        assert_eq!(normalize_label_color(None), "#64748b");
+        assert_eq!(normalize_label_color(Some("".into())), "#64748b");
+        assert_eq!(normalize_label_color(Some("  ".into())), "#64748b");
+    }
+
+    #[test]
+    fn normalize_label_color_custom() {
+        assert_eq!(normalize_label_color(Some("#ff0000".into())), "#ff0000");
+        assert_eq!(normalize_label_color(Some("  #abc  ".into())), "#abc");
+    }
 }
 
 pub(crate) async fn api_tags(

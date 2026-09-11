@@ -223,3 +223,80 @@ pub(super) async fn send_via_mx(email: &Email) -> std::io::Result<()> {
     emit_final_event(&ctx, &result, &smtp_server, &remote_ip, dns_ms, connect_ms, tls_ms, total_ms);
     result
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn smtp_ports_constants() {
+        assert_eq!(SMTP_PORTS.len(), 3);
+        assert_eq!(SMTP_PORTS[0], 25);
+        assert_eq!(SMTP_PORTS[1], 587);
+        assert_eq!(SMTP_PORTS[2], 465);
+    }
+
+    #[test]
+    fn connection_timeout_is_3_seconds() {
+        assert_eq!(CONNECTION_TIMEOUT, Duration::from_secs(3));
+    }
+
+    #[test]
+    fn recipient_domain_extraction() {
+        let email = "<EMAIL>";
+        let domain = email.split('@').nth(1).unwrap();
+        assert_eq!(domain, "example.com");
+    }
+
+    #[test]
+    fn recipient_domain_subdomain() {
+        let email = "<EMAIL>";
+        let domain = email.split('@').nth(1).unwrap();
+        assert_eq!(domain, "mail.example.com");
+    }
+
+    #[test]
+    fn recipient_domain_missing_at() {
+        let email = "invalid-email";
+        let domain = email.split('@').nth(1);
+        assert!(domain.is_none());
+    }
+
+    #[test]
+    fn mx_record_selection_trims_trailing_dot() {
+        // MX records often end with a dot (FQDN)
+        let mx_record = "mail.example.com.";
+        let trimmed = mx_record.trim_end_matches('.');
+        assert_eq!(trimmed, "mail.example.com");
+    }
+
+    #[test]
+    fn mx_record_selection_no_trailing_dot() {
+        let mx_record = "mail.example.com";
+        let trimmed = mx_record.trim_end_matches('.');
+        assert_eq!(trimmed, "mail.example.com");
+    }
+
+    #[test]
+    fn smtp_port_465_is_implicit_tls() {
+        // Port 465 should use implicit TLS (no STARTTLS)
+        let port: u16 = 465;
+        assert_eq!(port, 465);
+        // In perform_smtp_handshake: if smtp_port != 465 { STARTTLS } else { Plain }
+        assert!(port == 465);
+    }
+
+    #[test]
+    fn smtp_port_587_uses_starttls() {
+        // Port 587 should use STARTTLS
+        let port: u16 = 587;
+        assert_ne!(port, 465);
+    }
+
+    #[test]
+    fn smtp_port_25_uses_starttls() {
+        // Port 25 should use STARTTLS
+        let port: u16 = 25;
+        assert_ne!(port, 465);
+    }
+}

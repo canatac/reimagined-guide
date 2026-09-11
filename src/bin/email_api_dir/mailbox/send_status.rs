@@ -2,6 +2,44 @@
 #![allow(unused_imports)]
 use super::*;
 
+/// Map a send-queue status to a delivery-state string.
+pub(crate) fn delivery_state(status: &str) -> &'static str {
+    match status {
+        "sent" => "sent",
+        "failed" | "sent_copy_failed" => "failed",
+        "cancelled" => "cancelled",
+        _ => "queued",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn delivery_state_sent() {
+        assert_eq!(delivery_state("sent"), "sent");
+    }
+
+    #[test]
+    fn delivery_state_failed() {
+        assert_eq!(delivery_state("failed"), "failed");
+        assert_eq!(delivery_state("sent_copy_failed"), "failed");
+    }
+
+    #[test]
+    fn delivery_state_cancelled() {
+        assert_eq!(delivery_state("cancelled"), "cancelled");
+    }
+
+    #[test]
+    fn delivery_state_queued() {
+        assert_eq!(delivery_state("pending"), "queued");
+        assert_eq!(delivery_state("scheduled"), "queued");
+        assert_eq!(delivery_state(""), "queued");
+    }
+}
+
 pub(crate) async fn api_send_status(
     path: web::Path<String>,
     req: actix_web::HttpRequest,
@@ -25,12 +63,7 @@ pub(crate) async fn api_send_status(
             {
                 Ok(Some(q)) => {
                     let status = q.get_str("status").unwrap_or("pending");
-                    let delivery_state = match status {
-                        "sent" => "sent",
-                        "failed" | "sent_copy_failed" => "failed",
-                        "cancelled" => "cancelled",
-                        _ => "queued",
-                    };
+                    let delivery_state = delivery_state(status);
                     HttpResponse::Ok().json(serde_json::json!({
                         "id": email_id,
                         "deliveryState": delivery_state,

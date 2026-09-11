@@ -12,6 +12,38 @@ pub(crate) struct ExternalMessagesQuery {
     pub(crate) page_size: Option<u64>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn external_messages_query_deserializes() {
+        let json = serde_json::json!({
+            "account_id": "acc-1",
+            "folder": "INBOX",
+            "page": 1,
+            "page_size": 20
+        });
+        let query: ExternalMessagesQuery = serde_json::from_value(json).unwrap();
+        assert_eq!(query.account_id, "acc-1");
+        assert_eq!(query.folder, Some("INBOX".to_string()));
+        assert_eq!(query.page, Some(1));
+        assert_eq!(query.page_size, Some(20));
+    }
+
+    #[test]
+    fn external_messages_query_defaults() {
+        let json = serde_json::json!({
+            "account_id": "acc-1"
+        });
+        let query: ExternalMessagesQuery = serde_json::from_value(json).unwrap();
+        assert_eq!(query.account_id, "acc-1");
+        assert_eq!(query.folder, None);
+        assert_eq!(query.page, None);
+        assert_eq!(query.page_size, None);
+    }
+}
+
 pub(crate) async fn api_external_sync_start(
     req: HttpRequest,
     path: web::Path<String>,

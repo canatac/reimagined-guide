@@ -143,15 +143,7 @@ pub(crate) async fn dispatch_and_finalize(
                 },
             )
             .await;
-            let delivery_state = if dkim.dkim_remote_rejected {
-                "failed"
-            } else if dkim.dkim_remote_accepted {
-                "sent"
-            } else if dkim.already_delivered {
-                "queued"
-            } else {
-                "sending"
-            };
+            let delivery_state = delivery_state_from_dkim(dkim);
 
             HttpResponse::Ok().json(serde_json::json!({
                 "sent": true,
@@ -174,5 +166,79 @@ pub(crate) async fn dispatch_and_finalize(
                 "message": format!("Failed to send email: {}", e),
             }))
         }
+    }
+}
+
+/// Determine delivery state string from DKIM outcome.
+pub(crate) fn delivery_state_from_dkim(dkim: &DkimOutcome) -> &'static str {
+    if dkim.dkim_remote_rejected {
+        "failed"
+    } else if dkim.dkim_remote_accepted {
+        "sent"
+    } else if dkim.already_delivered {
+        "queued"
+    } else {
+        "sending"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn delivery_state_rejected_is_failed() {
+        let dkim = DkimOutcome {
+            already_delivered: false,
+            dkim_remote_accepted: false,
+            dkim_remote_rejected: true,
+            dkim_mx_host: None,
+            dkim_remote_ip: None,
+            dkim_remote_port: None,
+            dkim_response: None,
+        };
+        assert_eq!(delivery_state_from_dkim(&dkim), "failed");
+    }
+
+    #[test]
+    fn delivery_state_accepted_is_sent() {
+        let dkim = DkimOutcome {
+            already_delivered: false,
+            dkim_remote_accepted: true,
+            dkim_remote_rejected: false,
+            dkim_mx_host: None,
+            dkim_remote_ip: None,
+            dkim_remote_port: None,
+            dkim_response: None,
+        };
+        assert_eq!(delivery_state_from_dkim(&dkim), "sent");
+    }
+
+    #[test]
+    fn delivery_state_already_delivered_is_queued() {
+        let dkim = DkimOutcome {
+            already_delivered: true,
+            dkim_remote_accepted: false,
+            dkim_remote_rejected: false,
+            dkim_mx_host: None,
+            dkim_remote_ip: None,
+            dkim_remote_port: None,
+            dkim_response: None,
+        };
+        assert_eq!(delivery_state_from_dkim(&dkim), "queued");
+    }
+
+    #[test]
+    fn delivery_state_default_is_sending() {
+        let dkim = DkimOutcome {
+            already_delivered: false,
+            dkim_remote_accepted: false,
+            dkim_remote_rejected: false,
+            dkim_mx_host: None,
+            dkim_remote_ip: None,
+            dkim_remote_port: None,
+            dkim_response: None,
+        };
+        assert_eq!(delivery_state_from_dkim(&dkim), "sending");
     }
 }

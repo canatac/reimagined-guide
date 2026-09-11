@@ -247,3 +247,134 @@ pub use hermes_handlers::*;
 pub use hermes_runs::*;
 pub use hermes_events::*;
 pub use diag_handlers::*;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compute_priority_p0() {
+        assert_eq!(compute_priority("high", "high"), "P0");
+    }
+
+    #[test]
+    fn compute_priority_p1_high_urgency() {
+        assert_eq!(compute_priority("high", "low"), "P1");
+    }
+
+    #[test]
+    fn compute_priority_p1_high_impact() {
+        assert_eq!(compute_priority("low", "high"), "P1");
+    }
+
+    #[test]
+    fn compute_priority_p2() {
+        assert_eq!(compute_priority("low", "low"), "P2");
+    }
+
+    #[test]
+    fn compute_priority_medium() {
+        assert_eq!(compute_priority("medium", "medium"), "P2");
+    }
+
+    #[test]
+    fn admin_workflow_order() {
+        let order = admin_workflow_order();
+        assert_eq!(order.len(), 7);
+        assert_eq!(order[0], "submitted");
+        assert_eq!(order[6], "released");
+    }
+
+    #[test]
+    fn build_initial_stages_has_5_stages() {
+        let stages = build_initial_stages();
+        assert_eq!(stages.len(), 5);
+        assert_eq!(stages[0].status, "active");
+        assert_eq!(stages[1].status, "pending");
+    }
+
+    #[test]
+    fn build_acceptance_criteria_ux() {
+        let criteria = build_acceptance_criteria("ux");
+        assert!(criteria.iter().any(|c| c.contains("UX")));
+    }
+
+    #[test]
+    fn build_acceptance_criteria_backend() {
+        let criteria = build_acceptance_criteria("backend");
+        assert!(criteria.iter().any(|c| c.contains("API")));
+    }
+
+    #[test]
+    fn build_acceptance_criteria_security() {
+        let criteria = build_acceptance_criteria("security");
+        assert!(criteria.iter().any(|c| c.contains("Audit")));
+    }
+
+    #[test]
+    fn advance_workflow_moves_active() {
+        let stages = vec![
+            WorkflowStage {
+                key: "a".into(),
+                label: "A".into(),
+                owner: "dev".into(),
+                status: "active".into(),
+                checklist: vec![],
+                done_at: None,
+            },
+            WorkflowStage {
+                key: "b".into(),
+                label: "B".into(),
+                owner: "dev".into(),
+                status: "pending".into(),
+                checklist: vec![],
+                done_at: None,
+            },
+        ];
+        let advanced = advance_workflow(&stages);
+        assert_eq!(advanced[0].status, "done");
+        assert!(advanced[0].done_at.is_some());
+        assert_eq!(advanced[1].status, "active");
+    }
+
+    #[test]
+    fn advance_workflow_no_active() {
+        let stages = vec![
+            WorkflowStage {
+                key: "a".into(),
+                label: "A".into(),
+                owner: "dev".into(),
+                status: "done".into(),
+                checklist: vec![],
+                done_at: Some("2026-01-01".into()),
+            },
+        ];
+        let advanced = advance_workflow(&stages);
+        assert_eq!(advanced[0].status, "done");
+    }
+
+    #[test]
+    fn status_counts_basic() {
+        let items = vec![
+            ChangeRequestItem {
+                id: "1".into(),
+                status: "submitted".into(),
+                ..Default::default()
+            },
+            ChangeRequestItem {
+                id: "2".into(),
+                status: "submitted".into(),
+                ..Default::default()
+            },
+            ChangeRequestItem {
+                id: "3".into(),
+                status: "released".into(),
+                ..Default::default()
+            },
+        ];
+        let counts = status_counts(&items);
+        assert_eq!(counts["submitted"], 2);
+        assert_eq!(counts["released"], 1);
+        assert_eq!(counts["rejected"], 0);
+    }
+}

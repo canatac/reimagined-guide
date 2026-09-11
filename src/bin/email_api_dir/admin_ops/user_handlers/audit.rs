@@ -19,6 +19,29 @@ pub(crate) struct AdminAuditEntry {
     diff: Option<serde_json::Value>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn audit_entry_serializes() {
+        let entry = AdminAuditEntry {
+            id: "test".into(),
+            at: "2026-01-01T00:00:00Z".into(),
+            actor_id: "actor".into(),
+            actor_email: "<EMAIL>".into(),
+            action: "create".into(),
+            target_kind: "user".into(),
+            target_id: "user-1".into(),
+            note: Some("note".into()),
+            diff: None,
+        };
+        let json = serde_json::to_value(&entry).unwrap();
+        assert_eq!(json["action"], "create");
+        assert_eq!(json["actorEmail"], "<EMAIL>");
+    }
+}
+
 /// Best-effort — n'échoue jamais, log stderr en cas de problème Mongo.
 pub(crate) async fn log_admin_action(
     mongo: &mongodb::Client,

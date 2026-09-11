@@ -126,3 +126,50 @@ pub(crate) fn welcome_email_html(
     )
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_segment_lowercase_ascii() {
+        assert_eq!(normalize_segment("Hello World"), "helloworld");
+    }
+
+    #[test]
+    fn normalize_segment_accents() {
+        assert_eq!(normalize_segment("café"), "cafe");
+        assert_eq!(normalize_segment("naïve"), "naive");
+    }
+
+    #[test]
+    fn normalize_segment_truncates_long_input() {
+        let long = "a".repeat(500);
+        assert_eq!(normalize_segment(&long).len(), 256);
+    }
+
+    #[test]
+    fn build_misfits_local_valid() {
+        assert_eq!(build_misfits_local("John", "Doe"), Some("john.doe".to_string()));
+    }
+
+    #[test]
+    fn build_misfits_local_empty_first() {
+        assert_eq!(build_misfits_local("", "Doe"), None);
+    }
+
+    #[test]
+    fn build_misfits_local_empty_last() {
+        assert_eq!(build_misfits_local("John", ""), None);
+    }
+
+    #[test]
+    fn normalize_oauth_provider_github() {
+        assert_eq!(normalize_oauth_provider("GitHub"), Some("github".to_string()));
+    }
+
+    #[test]
+    fn normalize_oauth_provider_unknown() {
+        assert_eq!(normalize_oauth_provider("gitlab"), None);
+    }
+}
+

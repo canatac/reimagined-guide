@@ -17,6 +17,55 @@ pub struct EmailAttachment {
     pub data_base64: String,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn email_attachment_deserializes() {
+        let json = serde_json::json!({
+            "filename": "test.txt",
+            "contentType": "text/plain",
+            "dataBase64": "SGVsbG8="
+        });
+        let att: EmailAttachment = serde_json::from_value(json).unwrap();
+        assert_eq!(att.filename, "test.txt");
+        assert_eq!(att.content_type, "text/plain");
+        assert_eq!(att.data_base64, "SGVsbG8=");
+    }
+
+    #[test]
+    fn email_request_deserializes() {
+        let json = serde_json::json!({
+            "from": "<EMAIL>",
+            "to": "<EMAIL>",
+            "subject": "Hello",
+            "body": "World"
+        });
+        let req: EmailRequest = serde_json::from_value(json).unwrap();
+        assert_eq!(req.from, "<EMAIL>");
+        assert_eq!(req.to, "<EMAIL>");
+        assert_eq!(req.subject, "Hello");
+        assert_eq!(req.body, "World");
+        assert_eq!(req.attachments.len(), 0);
+    }
+
+    #[test]
+    fn email_request_with_attachments() {
+        let json = serde_json::json!({
+            "from": "<EMAIL>",
+            "to": "<EMAIL>",
+            "subject": "Hello",
+            "body": "World",
+            "attachments": [
+                {"filename": "a.txt", "contentType": "text/plain", "dataBase64": "SGVsbG8="}
+            ]
+        });
+        let req: EmailRequest = serde_json::from_value(json).unwrap();
+        assert_eq!(req.attachments.len(), 1);
+    }
+}
+
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
 pub struct EmailRequest {
     pub from: String,

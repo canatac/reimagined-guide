@@ -89,6 +89,21 @@ pub(crate) fn smtp_timeout_budget() -> SmtpTimeoutBudget {
     }
 }
 
+/// Returns true if the given port is a standard SMTP port.
+pub(crate) fn is_smtp_port(port: u16) -> bool {
+    SMTP_PORTS.contains(&port)
+}
+
+/// Returns the default SMTP port for relay (587).
+pub(crate) fn default_relay_port() -> u16 {
+    587
+}
+
+/// Returns the implicit TLS port (465).
+pub(crate) fn implicit_tls_port() -> u16 {
+    465
+}
+
 #[cfg(test)]
 mod timeout_budget_tests {
     use super::*;
@@ -107,6 +122,60 @@ mod timeout_budget_tests {
         let b = smtp_timeout_budget();
         assert_eq!(b.connect_ms, 4242);
         std::env::remove_var("SMTP_TIMEOUT_CONNECT_MS");
+    }
+
+    #[test]
+    fn timeout_budget_ignores_zero_env() {
+        std::env::set_var("SMTP_TIMEOUT_DNS_MS", "0");
+        let b = smtp_timeout_budget();
+        assert_eq!(b.dns_ms, 3000); // falls back to default
+        std::env::remove_var("SMTP_TIMEOUT_DNS_MS");
+    }
+
+    #[test]
+    fn timeout_budget_ignores_negative_env() {
+        std::env::set_var("SMTP_TIMEOUT_CONNECT_MS", "-100");
+        let b = smtp_timeout_budget();
+        assert_eq!(b.connect_ms, 10000); // falls back to default
+        std::env::remove_var("SMTP_TIMEOUT_CONNECT_MS");
+    }
+
+    #[test]
+    fn is_smtp_port_25() {
+        assert!(is_smtp_port(25));
+    }
+
+    #[test]
+    fn is_smtp_port_587() {
+        assert!(is_smtp_port(587));
+    }
+
+    #[test]
+    fn is_smtp_port_465() {
+        assert!(is_smtp_port(465));
+    }
+
+    #[test]
+    fn is_smtp_port_rejects_non_smtp() {
+        assert!(!is_smtp_port(80));
+        assert!(!is_smtp_port(443));
+        assert!(!is_smtp_port(8080));
+        assert!(!is_smtp_port(0));
+    }
+
+    #[test]
+    fn default_relay_port_is_587() {
+        assert_eq!(default_relay_port(), 587);
+    }
+
+    #[test]
+    fn implicit_tls_port_is_465() {
+        assert_eq!(implicit_tls_port(), 465);
+    }
+
+    #[test]
+    fn connection_timeout_is_3_seconds() {
+        assert_eq!(CONNECTION_TIMEOUT, Duration::from_secs(3));
     }
 }
 

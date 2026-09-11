@@ -92,6 +92,91 @@ pub(crate) fn escape_imap(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_capabilities_extracts_from_line() {
+        let lines = vec![
+            "* CAPABILITY IMAP4rev1 STARTTLS AUTH=PLAIN".to_string(),
+            "A1 OK".to_string(),
+        ];
+        let caps = parse_capabilities(&lines);
+        assert_eq!(caps, vec!["IMAP4rev1", "STARTTLS", "AUTH=PLAIN"]);
+    }
+
+    #[test]
+    fn parse_capabilities_no_capability_line() {
+        let lines = vec!["A1 OK".to_string()];
+        assert!(parse_capabilities(&lines).is_empty());
+    }
+
+    #[test]
+    fn tag_status_ok_found() {
+        let lines = vec!["A1 OK LOGIN completed".to_string()];
+        assert!(tag_status_ok(&lines, "A1"));
+    }
+
+    #[test]
+    fn tag_status_ok_not_found() {
+        let lines = vec!["A1 NO LOGIN failed".to_string()];
+        assert!(!tag_status_ok(&lines, "A1"));
+    }
+
+    #[test]
+    fn parse_list_folders_extracts_names() {
+        let lines = vec![
+            r#"* LIST (\HasNoChildren) "/" "INBOX""#.to_string(),
+            r#"* LIST (\HasNoChildren) "/" "Sent""#.to_string(),
+            r#"* LIST (\HasNoChildren) "/" "Drafts""#.to_string(),
+            "A1 OK LIST completed".to_string(),
+        ];
+        let folders = parse_list_folders(&lines);
+        assert_eq!(folders, vec!["Drafts", "INBOX", "Sent"]);
+    }
+
+    #[test]
+    fn parse_list_folders_empty() {
+        let lines = vec!["A1 OK".to_string()];
+        assert!(parse_list_folders(&lines).is_empty());
+    }
+
+    #[test]
+    fn parse_uid_search_extracts_uids() {
+        let lines = vec!["* SEARCH 1 5 10 20".to_string()];
+        assert_eq!(parse_uid_search(&lines), vec![1, 5, 10, 20]);
+    }
+
+    #[test]
+    fn parse_uid_search_no_search_line() {
+        let lines = vec!["A1 OK".to_string()];
+        assert!(parse_uid_search(&lines).is_empty());
+    }
+
+    #[test]
+    fn escape_imap_backslash() {
+        assert_eq!(escape_imap(r"a\b"), r"a\\b");
+    }
+
+    #[test]
+    fn escape_imap_double_quote() {
+        assert_eq!(escape_imap(r#"a"b"#), r#"a\"b"#);
+    }
+
+    #[test]
+    fn escape_imap_no_special_chars() {
+        assert_eq!(escape_imap("plain"), "plain");
+    }
+
+    #[test]
+    fn format_imap_date_formats_correctly() {
+        use chrono::TimeZone;
+        let dt = Utc.with_ymd_and_hms(2026, 9, 10, 12, 0, 0).unwrap();
+        assert_eq!(format_imap_date(&dt), "10-Sep-2026");
+    }
+}
+
 /// Format a chrono UTC date as RFC 3501 SEARCH date: "01-Jan-2026".
 pub(crate) fn format_imap_date(dt: &chrono::DateTime<Utc>) -> String {
     dt.format("%d-%b-%Y").to_string()

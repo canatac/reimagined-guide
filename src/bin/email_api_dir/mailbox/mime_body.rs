@@ -62,6 +62,73 @@ pub(super) fn looks_like_raw_multipart_dump(body: &str) -> bool {
     b.starts_with("--") && b.contains("Content-Type:")
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compact_preview_collapses_whitespace() {
+        assert_eq!(compact_preview("  hello   world  "), "hello world");
+    }
+
+    #[test]
+    fn compact_preview_empty() {
+        assert_eq!(compact_preview(""), "");
+    }
+
+    #[test]
+    fn raw_mime_from_email_with_headers() {
+        let email = Email {
+            id: "test".into(),
+            from: "a@b.com".into(),
+            to: "c@d.com".into(),
+            subject: "Sub".into(),
+            body: "Body".into(),
+            headers: vec![("From".into(), "a@b.com".into()), ("To".into(), "c@d.com".into())],
+            flags: vec![],
+            sequence_number: 0,
+            uid: 0,
+            internal_date: chrono::Utc::now(),
+            dkim_signature: None,
+        };
+        let raw = raw_mime_from_email(&email);
+        assert!(raw.contains("From: a@b.com"));
+        assert!(raw.contains("To: c@d.com"));
+        assert!(raw.contains("\r\n\r\nBody"));
+    }
+
+    #[test]
+    fn raw_mime_from_email_no_headers() {
+        let email = Email {
+            id: "test".into(),
+            from: "".into(),
+            to: "".into(),
+            subject: "".into(),
+            body: "Just body".into(),
+            headers: vec![],
+            flags: vec![],
+            sequence_number: 0,
+            uid: 0,
+            internal_date: chrono::Utc::now(),
+            dkim_signature: None,
+        };
+        assert_eq!(raw_mime_from_email(&email), "Just body");
+    }
+
+    #[test]
+    fn looks_like_raw_multipart_dump_true() {
+        assert!(looks_like_raw_multipart_dump(
+            "--boundary\r\nContent-Type: text/plain\r\n\r\nbody"
+        ));
+    }
+
+    #[test]
+    fn looks_like_raw_multipart_dump_false() {
+        assert!(!looks_like_raw_multipart_dump("Just plain text"));
+        assert!(!looks_like_raw_multipart_dump("--boundary\r\nNo content type"));
+    }
+}
+
 fn decode_from_synthetic_boundary(body: &str) -> Option<(String, String, String)> {
     let first_line = body.lines().next()?.trim();
     if !first_line.starts_with("--") {

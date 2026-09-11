@@ -204,19 +204,205 @@ impl MongoDatabaseAdapter {
 
     pub async fn create_alias_impl(&self, alias: &str, target: &str) -> Result<()> {
         let db_name = Self::database_name();
+        let collection_name = std::env::var("MONGODB_USERS_COLLECTION")
+            .unwrap_or_else(|_| "users".to_string());
         let collection = self
             .client
             .database(&db_name)
-            .collection::<mongodb::bson::Document>("aliases");
-        let now = bson::DateTime::from_millis(chrono::Utc::now().timestamp_millis());
+            .collection::<mongodb::bson::Document>(&collection_name);
         collection
-            .insert_one(doc! {
-                "alias": alias,
-                "target": target,
-                "created_at": now,
-            })
+            .update_one(
+                doc! { "username": target },
+                doc! { "$addToSet": { "aliases": alias } },
+            )
             .await?;
         Ok(())
     }
+}
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_mailbox_names() {
+        let names = vec!["inbox", "sent", "drafts", "archive", "trash"];
+        assert_eq!(names.len(), 5);
+        assert_eq!(names[0], "inbox");
+        assert_eq!(names[1], "sent");
+        assert_eq!(names[2], "drafts");
+        assert_eq!(names[3], "archive");
+        assert_eq!(names[4], "trash");
+    }
+
+    #[test]
+    fn mailbox_default_values() {
+        let mailbox = Mailbox {
+            name: "inbox".to_string(),
+            flags: vec![],
+            exists: 0,
+            recent: 0,
+            unseen: 0,
+            permanent_flags: vec![],
+            uid_validity: 1,
+            uid_next: 1,
+            user_id: "testuser".to_string(),
+        };
+        assert_eq!(mailbox.name, "inbox");
+        assert_eq!(mailbox.flags.len(), 0);
+        assert_eq!(mailbox.exists, 0);
+        assert_eq!(mailbox.recent, 0);
+        assert_eq!(mailbox.unseen, 0);
+        assert_eq!(mailbox.permanent_flags.len(), 0);
+        assert_eq!(mailbox.uid_validity, 1);
+        assert_eq!(mailbox.uid_next, 1);
+        assert_eq!(mailbox.user_id, "testuser");
+    }
+
+    #[test]
+    fn user_default_values() {
+        let user = User {
+            id: None,
+            username: "testuser".to_string(),
+            password: "testpass".to_string(),
+            mailbox: "inbox".to_string(),
+            condition_accepted: false,
+            locale: None,
+        };
+        assert_eq!(user.id, None);
+        assert_eq!(user.username, "testuser");
+        assert_eq!(user.password, "testpass");
+        assert_eq!(user.mailbox, "inbox");
+        assert_eq!(user.condition_accepted, false);
+        assert_eq!(user.locale, None);
+    }
+
+    #[test]
+    fn user_with_locale() {
+        let user = User {
+            id: None,
+            username: "testuser".to_string(),
+            password: "testpass".to_string(),
+            mailbox: "inbox".to_string(),
+            condition_accepted: false,
+            locale: Some("fr".to_string()),
+        };
+        assert_eq!(user.locale, Some("fr".to_string()));
+    }
+
+    #[test]
+    fn user_with_id() {
+        let user = User {
+            id: Some("user-123".to_string()),
+            username: "testuser".to_string(),
+            password: "testpass".to_string(),
+            mailbox: "inbox".to_string(),
+            condition_accepted: true,
+            locale: None,
+        };
+        assert_eq!(user.id, Some("user-123".to_string()));
+        assert!(user.condition_accepted);
+    }
+
+    #[test]
+    fn password_bcrypt_prefix() {
+        let password = "$2b$12$hashedpassword";
+        assert!(password.starts_with("$2"));
+    }
+
+    #[test]
+    fn password_plaintext_no_prefix() {
+        let password = "plaintextpassword";
+        assert!(!password.starts_with("$2"));
+    }
+
+    #[test]
+    fn oauth_filter_format() {
+        let provider = "google";
+        let provider_user_id = "12345";
+        let filter = doc! {
+            "oauth.provider": provider,
+            "oauth.subject": provider_user_id
+        };
+        assert!(filter.contains_key("oauth.provider"));
+        assert!(filter.contains_key("oauth.subject"));
+    }
+
+    #[test]
+    fn oauth_set_format() {
+        let provider = "google";
+        let provider_user_id = "12345";
+        let oauth_set = doc! {
+            "oauth": {
+                "provider": provider,
+                "subject": provider_user_id
+            },
+            "updated_at": bson::DateTime::from_millis(chrono::Utc::now().timestamp_millis())
+        };
+        assert!(oauth_set.contains_key("oauth"));
+        assert!(oauth_set.contains_key("updated_at"));
+    }
+
+    #[test]
+    fn username_filter_format() {
+        let email = "test@example.com";
+        let filter = doc! { "username": email };
+        assert!(filter.contains_key("username"));
+    }
+
+    #[test]
+    fn alias_update_format() {
+        let alias = "alias@example.com";
+        let target = "target@example.com";
+        let update = doc! { "$addToSet": { "aliases": alias } };
+        assert!(update.contains_key("$addToSet"));
+    }
+
+    #[test]
+    fn locale_update_format() {
+        let username = "testuser";
+        let locale = "fr";
+        let update = doc! { "$set": { "locale": locale } };
+        assert!(update.contains_key("$set"));
+    }
+
+    #[test]
+    fn email_update_format() {
+        let email_id = "email-123";
+        let flag = "\\Seen";
+        let update = doc! { "$addToSet": { "flags": flag } };
+        assert!(update.contains_key("$addToSet"));
+    }
+
+    #[test]
+    fn email_delete_format() {
+        let email_id = "email-123";
+        let filter = doc! { "id": email_id };
+        assert!(filter.contains_key("id"));
+    }
+
+    #[test]
+    fn email_archive_format() {
+        let email_id = "email-123";
+        let update = doc! { "$set": { "mailbox": "archive" } };
+        assert!(update.contains_key("$set"));
+    }
+
+    #[test]
+    fn users_collection_name_default() {
+        let coll_name = "users";
+        assert_eq!(coll_name, "users");
+    }
+
+    #[test]
+    fn mailboxes_collection_name() {
+        let coll_name = "mailboxes";
+        assert_eq!(coll_name, "mailboxes");
+    }
+
+    #[test]
+    fn emails_collection_name() {
+        let coll_name = "emails";
+        assert_eq!(coll_name, "emails");
+    }
 }

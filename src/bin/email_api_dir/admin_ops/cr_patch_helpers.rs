@@ -41,7 +41,7 @@ pub(crate) fn apply_action_advance(
             item.execution_finished_at = None;
             if transition_note.is_none() {
                 *transition_note = Some(
-                    "Workflow in_progress atteint; en attente d’un run technique backend explicite".to_string(),
+                    "Workflow in_progress atteint; en attente d'un run technique backend explicite".to_string(),
                 );
             }
         }
@@ -161,5 +161,280 @@ pub(crate) fn apply_simple_field_patches(item: &mut ChangeRequestItem, body: &Pa
         {
             item.status = status;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn apply_action_reject_sets_status() {
+        let mut item = ChangeRequestItem {
+            id: "cr-1".into(),
+            status: "active".into(),
+            workflow: vec![WorkflowStage {
+                status: "active".into(),
+                done_at: None,
+            }],
+            execution_state: "running".into(),
+            execution_run_id: Some("run-1".into()),
+            execution_started_at: Some("2026-01-01T00:00:00Z".into()),
+            execution_last_heartbeat_at: Some("2026-01-01T00:00:00Z".into()),
+            execution_finished_at: None,
+            execution_last_error: None,
+        };
+        apply_action_reject(&mut item);
+        assert_eq!(item.status, "rejected");
+        assert_eq!(item.execution_state, "idle");
+        assert_eq!(item.execution_run_id, None);
+        assert_eq!(item.workflow[0].status, "done");
+        assert!(item.workflow[0].done_at.is_some());
+        assert!(item.execution_finished_at.is_some());
+    }
+
+    #[test]
+    fn set_run_id_if_present_sets_when_present() {
+        let mut item = ChangeRequestItem {
+            id: "cr-1".into(),
+            status: "active".into(),
+            workflow: vec![],
+            execution_state: "idle".into(),
+            execution_run_id: None,
+            execution_started_at: None,
+            execution_last_heartbeat_at: None,
+            execution_finished_at: None,
+            execution_last_error: None,
+        };
+        let body = PatchChangeRequestInputApi {
+            execution_run_id: Some("run-123".into()),
+        };
+        set_run_id_if_present(&mut item, &body);
+        assert_eq!(item.execution_run_id, Some("run-123".to_string()));
+    }
+
+    #[test]
+    fn set_run_id_if_present_skips_empty() {
+        let mut item = ChangeRequestItem {
+            id: "cr-1".into(),
+            status: "active".into(),
+            workflow: vec![],
+            execution_state: "idle".into(),
+            execution_run_id: None,
+            execution_started_at: None,
+            execution_last_heartbeat_at: None,
+            execution_finished_at: None,
+            execution_last_error: None,
+        };
+        let body = PatchChangeRequestInputApi {
+            execution_run_id: Some("  ".into()),
+        };
+        set_run_id_if_present(&mut item, &body);
+        assert_eq!(item.execution_run_id, None);
+    }
+
+    #[test]
+    fn apply_execution_action_queue() {
+        let mut item = ChangeRequestItem {
+            id: "cr-1".into(),
+            status: "in_progress".into(),
+            workflow: vec![],
+            execution_state: "idle".into(),
+            execution_run_id: None,
+            execution_started_at: None,
+            execution_last_heartbeat_at: None,
+            execution_finished_at: None,
+            execution_last_error: None,
+        };
+        let body = PatchChangeRequestInputApi {
+            execution_run_id: Some("run-1".into()),
+        };
+        apply_execution_action(&mut item, "execution_queue", &body, &None);
+        assert_eq!(item.execution_state, "queued");
+        assert_eq!(item.execution_finished_at, None);
+        assert_eq!(item.execution_last_error, None);
+        assert_eq!(item.execution_run_id, Some("run-1".to_string()));
+    }
+
+    #[test]
+    fn apply_execution_action_start() {
+        let mut item = ChangeRequestItem {
+            id: "cr-1".into(),
+            status: "in_progress".into(),
+            workflow: vec![],
+            execution_state: "queued".into(),
+            execution_run_id: None,
+            execution_started_at: None,
+            execution_last_heartbeat_at: None,
+            execution_finished_at: None,
+            execution_last_error: None,
+        };
+        let body = PatchChangeRequestInputApi {
+            execution_run_id: None,
+        };
+        apply_execution_action(&mut item, "execution_start", &body, &None);
+        assert_eq!(item.execution_state, "running");
+        assert!(item.execution_started_at.is_some());
+        assert!(item.execution_last_heartbeat_at.is_some());
+        assert_eq!(item.execution_finished_at, None);
+        assert_eq!(item.execution_last_error, None);
+    }
+
+    #[test]
+    fn apply_execution_action_heartbeat() {
+        let mut item = ChangeRequestItem {
+            id: "cr-1".into(),
+            status: "in_progress".into(),
+            workflow: vec![],
+            execution_state: "running".into(),
+            execution_run_id: None,
+            execution_started_at: None,
+            execution_last_heartbeat_at: None,
+            execution_finished_at: None,
+            execution_last_error: None,
+        };
+        let body = PatchChangeRequestInputApi {
+            execution_run_id: None,
+        };
+        apply_execution_action(&mut item, "execution_heartbeat", &body, &None);
+        assert_eq!(item.execution_state, "running");
+        assert!(item.execution_last_heartbeat_at.is_some());
+        assert!(item.execution_started_at.is_some());
+    }
+
+    #[test]
+    fn apply_execution_action_fail() {
+        let mut item = ChangeRequestItem {
+            id: "cr-1".into(),
+            status: "in_progress".into(),
+            workflow: vec![],
+            execution_state: "running".into(),
+            execution_run_id: None,
+            execution_started_at: Some("2026-01-01T00:00:00Z".into()),
+            execution_last_heartbeat_at: Some("2026-01-01T00:00:00Z".into()),
+            execution_finished_at: None,
+            execution_last_error: None,
+        };
+        let body = PatchChangeRequestInputApi {
+            execution_error: Some("Connection timeout".into()),
+        };
+        apply_execution_action(&mut item, "execution_fail", &body, &None);
+        assert_eq!(item.execution_state, "failed");
+        assert_eq!(item.execution_last_error, Some("Connection timeout".to_string()));
+        assert!(item.execution_finished_at.is_some());
+        assert!(item.execution_last_heartbeat_at.is_some());
+    }
+
+    #[test]
+    fn apply_execution_action_success() {
+        let mut item = ChangeRequestItem {
+            id: "cr-1".into(),
+            status: "released".into(),
+            workflow: vec![],
+            execution_state: "running".into(),
+            execution_run_id: None,
+            execution_started_at: Some("2026-01-01T00:00:00Z".into()),
+            execution_last_heartbeat_at: Some("2026-01-01T00:00:00Z".into()),
+            execution_finished_at: None,
+            execution_last_error: Some("Previous error".into()),
+        };
+        let body = PatchChangeRequestInputApi {
+            execution_run_id: None,
+        };
+        apply_execution_action(&mut item, "execution_success", &body, &None);
+        assert_eq!(item.execution_state, "success");
+        assert_eq!(item.execution_last_error, None);
+        assert!(item.execution_finished_at.is_some());
+    }
+
+    #[test]
+    fn apply_execution_action_reset() {
+        let mut item = ChangeRequestItem {
+            id: "cr-1".into(),
+            status: "in_progress".into(),
+            workflow: vec![],
+            execution_state: "failed".into(),
+            execution_run_id: Some("run-1".into()),
+            execution_started_at: Some("2026-01-01T00:00:00Z".into()),
+            execution_last_heartbeat_at: Some("2026-01-01T00:00:00Z".into()),
+            execution_finished_at: Some("2026-01-01T00:00:00Z".into()),
+            execution_last_error: Some("Error".into()),
+        };
+        let body = PatchChangeRequestInputApi {
+            execution_run_id: None,
+        };
+        apply_execution_action(&mut item, "execution_reset", &body, &None);
+        assert_eq!(item.execution_state, "idle");
+        assert_eq!(item.execution_run_id, None);
+        assert_eq!(item.execution_started_at, None);
+        assert_eq!(item.execution_last_heartbeat_at, None);
+        assert_eq!(item.execution_finished_at, None);
+        assert_eq!(item.execution_last_error, None);
+    }
+
+    #[test]
+    fn apply_simple_field_patches_title() {
+        let mut item = ChangeRequestItem {
+            id: "cr-1".into(),
+            title: "Old Title".into(),
+            status: "submitted".into(),
+            workflow: vec![],
+            execution_state: "idle".into(),
+            execution_run_id: None,
+            execution_started_at: None,
+            execution_last_heartbeat_at: None,
+            execution_finished_at: None,
+            execution_last_error: None,
+        };
+        let body = PatchChangeRequestInputApi {
+            title: Some("  New Title  ".into()),
+            ..Default::default()
+        };
+        apply_simple_field_patches(&mut item, &body);
+        assert_eq!(item.title, "New Title");
+    }
+
+    #[test]
+    fn apply_simple_field_patches_status() {
+        let mut item = ChangeRequestItem {
+            id: "cr-1".into(),
+            title: "Title".into(),
+            status: "submitted".into(),
+            workflow: vec![],
+            execution_state: "idle".into(),
+            execution_run_id: None,
+            execution_started_at: None,
+            execution_last_heartbeat_at: None,
+            execution_finished_at: None,
+            execution_last_error: None,
+        };
+        let body = PatchChangeRequestInputApi {
+            status: Some("  TRIAGED  ".into()),
+            ..Default::default()
+        };
+        apply_simple_field_patches(&mut item, &body);
+        assert_eq!(item.status, "triaged");
+    }
+
+    #[test]
+    fn apply_simple_field_patches_rejects_invalid_status() {
+        let mut item = ChangeRequestItem {
+            id: "cr-1".into(),
+            title: "Title".into(),
+            status: "submitted".into(),
+            workflow: vec![],
+            execution_state: "idle".into(),
+            execution_run_id: None,
+            execution_started_at: None,
+            execution_last_heartbeat_at: None,
+            execution_finished_at: None,
+            execution_last_error: None,
+        };
+        let body = PatchChangeRequestInputApi {
+            status: Some("invalid".into()),
+            ..Default::default()
+        };
+        apply_simple_field_patches(&mut item, &body);
+        assert_eq!(item.status, "submitted");
     }
 }

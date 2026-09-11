@@ -156,3 +156,55 @@ pub(crate) async fn api_drafts_delete(
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn draft_upsert_generates_id_when_missing() {
+        // When no id is provided, a UUID should be generated
+        let json = serde_json::json!({ "subject": "Test", "body": "Hello" });
+        let obj = json.as_object().cloned().unwrap();
+        
+        let draft_id = obj
+            .get("id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| Uuid::new_v4().to_string());
+        
+        assert!(!draft_id.is_empty());
+        // Verify it's a valid UUID format
+        assert!(Uuid::parse_str(&draft_id).is_ok());
+    }
+
+    #[test]
+    fn draft_upsert_preserves_existing_id() {
+        let json = serde_json::json!({ "id": "my-draft-123", "subject": "Test" });
+        let obj = json.as_object().cloned().unwrap();
+        
+        let draft_id = obj
+            .get("id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| Uuid::new_v4().to_string());
+        
+        assert_eq!(draft_id, "my-draft-123");
+    }
+
+    #[test]
+    fn draft_upsert_sets_timestamps() {
+        let json = serde_json::json!({ "subject": "Test" });
+        let mut obj = json.as_object().cloned().unwrap();
+        
+        let now = Utc::now().to_rfc3339();
+        obj.insert("updatedAt".to_string(), serde_json::Value::String(now.clone()));
+        if !obj.contains_key("createdAt") {
+            obj.insert("createdAt".to_string(), serde_json::Value::String(now.clone()));
+        }
+        
+        assert!(obj.contains_key("updatedAt"));
+        assert!(obj.contains_key("createdAt"));
+    }
+}

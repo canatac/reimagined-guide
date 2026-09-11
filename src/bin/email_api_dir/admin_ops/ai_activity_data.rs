@@ -92,6 +92,96 @@ pub(crate) fn default_pricing_rate() -> PricingRate {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn doc_str_returns_value() {
+        let mut doc = bson::Document::new();
+        doc.insert("name", "test");
+        assert_eq!(doc_str(&doc, "name"), Some("test".to_string()));
+    }
+
+    #[test]
+    fn doc_str_missing() {
+        let doc = bson::Document::new();
+        assert_eq!(doc_str(&doc, "missing"), None);
+    }
+
+    #[test]
+    fn doc_i64_int32() {
+        let mut doc = bson::Document::new();
+        doc.insert("val", 42i32);
+        assert_eq!(doc_i64(&doc, "val"), 42);
+    }
+
+    #[test]
+    fn doc_i64_int64() {
+        let mut doc = bson::Document::new();
+        doc.insert("val", 42i64);
+        assert_eq!(doc_i64(&doc, "val"), 42);
+    }
+
+    #[test]
+    fn doc_i64_double() {
+        let mut doc = bson::Document::new();
+        doc.insert("val", 42.5f64);
+        assert_eq!(doc_i64(&doc, "val"), 42);
+    }
+
+    #[test]
+    fn doc_i64_string() {
+        let mut doc = bson::Document::new();
+        doc.insert("val", "123");
+        assert_eq!(doc_i64(&doc, "val"), 123);
+    }
+
+    #[test]
+    fn doc_i64_missing() {
+        let doc = bson::Document::new();
+        assert_eq!(doc_i64(&doc, "missing"), 0);
+    }
+
+    #[test]
+    fn parse_env_f64_missing() {
+        std::env::remove_var("TEST_PARSE_F64_MISSING");
+        assert_eq!(parse_env_f64("TEST_PARSE_F64_MISSING"), None);
+    }
+
+    #[test]
+    fn parse_env_f64_valid() {
+        std::env::set_var("TEST_PARSE_F64_VAL", "3.14");
+        assert_eq!(parse_env_f64("TEST_PARSE_F64_VAL"), Some(3.14));
+        std::env::remove_var("TEST_PARSE_F64_VAL");
+    }
+
+    #[test]
+    fn parse_env_f64_negative() {
+        std::env::set_var("TEST_PARSE_F64_NEG", "-1.0");
+        assert_eq!(parse_env_f64("TEST_PARSE_F64_NEG"), None);
+    }
+
+    #[test]
+    fn default_pricing_rate_fallback() {
+        std::env::remove_var("LLM_COST_DEFAULT_INPUT_PER_1M_USD");
+        std::env::remove_var("LLM_COST_DEFAULT_OUTPUT_PER_1M_USD");
+        let rate = default_pricing_rate();
+        assert_eq!(rate.input_per_1m_usd, 0.0);
+        assert_eq!(rate.output_per_1m_usd, 0.0);
+    }
+
+    #[test]
+    fn pricing_rate_creation() {
+        let rate = PricingRate {
+            input_per_1m_usd: 10.0,
+            output_per_1m_usd: 30.0,
+        };
+        assert_eq!(rate.input_per_1m_usd, 10.0);
+        assert_eq!(rate.output_per_1m_usd, 30.0);
+    }
+}
+
 pub(crate) fn parse_openrouter_token_price_to_per_1m(raw: Option<&str>) -> Option<f64> {
     let per_token = raw
         .map(|v| v.trim())

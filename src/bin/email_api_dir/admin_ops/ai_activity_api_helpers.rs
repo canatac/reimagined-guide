@@ -197,5 +197,93 @@ fn is_completed_status(status: &str) -> bool {
 }
 
 fn is_failed_status(status: &str) -> bool {
-    matches!(status, "failed" | "error" | "cancelled" | "expired")
+    matches!(status, "failed" | "error")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_run_facts_basic() {
+        let run = serde_json::json!({
+            "status": "completed",
+            "model": "gpt-4",
+            "feature": "triage",
+            "user_id": "user-1",
+            "sessionId": "sess-1",
+            "startedAt": "2026-01-15T10:30:00Z",
+            "usage": {
+                "prompt_tokens": 100,
+                "completion_tokens": 200,
+                "total_tokens": 300
+            },
+            "latencyMs": 1500
+        });
+        let facts = extract_run_facts(&run);
+        assert_eq!(facts.status, "completed");
+        assert_eq!(facts.model, "gpt-4");
+        assert_eq!(facts.feature, "triage");
+        assert_eq!(facts.user_id, Some("user-1".to_string()));
+        assert_eq!(facts.total_tokens, 300);
+        assert_eq!(facts.latency_ms, 1500);
+    }
+
+    #[test]
+    fn extract_run_facts_fallback_total_tokens() {
+        let run = serde_json::json!({
+            "status": "completed",
+            "model": "gpt-4",
+            "feature": "triage",
+            "usage": {
+                "prompt_tokens": 100,
+                "completion_tokens": 200
+            }
+        });
+        let facts = extract_run_facts(&run);
+        assert_eq!(facts.total_tokens, 300);
+    }
+
+    #[test]
+    fn extract_run_facts_defaults() {
+        let run = serde_json::json!({});
+        let facts = extract_run_facts(&run);
+        assert_eq!(facts.status, "unknown");
+        assert_eq!(facts.model, "unknown");
+        assert_eq!(facts.user_id, None);
+    }
+
+    #[test]
+    fn estimate_run_cost_calculates() {
+        let rate = PricingRate {
+            input_per_1m_usd: 10.0,
+            output_per_1m_usd: 30.0,
+        };
+        let cost = estimate_run_cost(1_000_000, 500_000, rate);
+        assert!(cost > 0.0);
+    }
+
+    #[test]
+    fn estimate_run_cost_zero_tokens() {
+        let rate = PricingRate {
+            input_per_1m_usd: 10.0,
+            output_per_1m_usd: 30.0,
+        };
+        let cost = estimate_run_cost(0, 0, rate);
+        assert_eq!(cost, 0.0);
+    }
+
+    #[test]
+    fn is_completed_status_matches() {
+        assert!(is_completed_status("completed"));
+        assert!(is_completed_status("success"));
+        assert!(!is_completed_status("failed"));
+    }
+
+    #[test]
+    fn is_failed_status_matches() {
+        assert!(is_failed_status("failed"));
+        assert!(is_failed_status("error"));
+        assert!(!is_failed_status("completed"));
+    }
 }
