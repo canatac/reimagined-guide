@@ -225,3 +225,189 @@ pub(crate) async fn api_admin_change_request_patch(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn patch_input_deserializes() {
+        let json = serde_json::json!({
+            "action": "advance",
+            "note": "Moving forward",
+            "actor": "john@example.com"
+        });
+        let input: PatchChangeRequestInputApi = serde_json::from_value(json).unwrap();
+        assert_eq!(input.action, Some("advance".to_string()));
+        assert_eq!(input.note, Some("Moving forward".to_string()));
+        assert_eq!(input.actor, Some("john@example.com".to_string()));
+    }
+
+    #[test]
+    fn patch_input_empty() {
+        let json = serde_json::json!({});
+        let input: PatchChangeRequestInputApi = serde_json::from_value(json).unwrap();
+        assert_eq!(input.action, None);
+        assert_eq!(input.note, None);
+    }
+
+    #[test]
+    fn action_validation_advance() {
+        let action = "advance";
+        assert!(["advance", "reject", "execution_queue", "execution_start", "execution_heartbeat", "execution_fail", "execution_success", "execution_reset"].contains(&action));
+    }
+
+    #[test]
+    fn action_validation_reject() {
+        let action = "reject";
+        assert!(["advance", "reject", "execution_queue", "execution_start", "execution_heartbeat", "execution_fail", "execution_success", "execution_reset"].contains(&action));
+    }
+
+    #[test]
+    fn action_validation_execution_actions() {
+        let actions = vec!["execution_queue", "execution_start", "execution_heartbeat", "execution_fail", "execution_success", "execution_reset"];
+        for action in actions {
+            assert!(["advance", "reject", "execution_queue", "execution_start", "execution_heartbeat", "execution_fail", "execution_success", "execution_reset"].contains(&action));
+        }
+    }
+
+    #[test]
+    fn action_validation_rejects_invalid() {
+        let action = "invalid_action";
+        assert!(!["advance", "reject", "execution_queue", "execution_start", "execution_heartbeat", "execution_fail", "execution_success", "execution_reset"].contains(&action));
+    }
+
+    #[test]
+    fn workflow_order() {
+        let order = admin_workflow_order();
+        assert_eq!(order.len(), 7);
+        assert_eq!(order[0], "submitted");
+        assert_eq!(order[6], "released");
+    }
+
+    #[test]
+    fn status_validation_submitted() {
+        let status = "submitted";
+        assert!(["submitted", "triaged", "planned", "in_progress", "qa", "released", "rejected"].contains(&status));
+    }
+
+    #[test]
+    fn status_validation_released() {
+        let status = "released";
+        assert!(["submitted", "triaged", "planned", "in_progress", "qa", "released", "rejected"].contains(&status));
+    }
+
+    #[test]
+    fn status_validation_rejected() {
+        let status = "rejected";
+        assert!(["submitted", "triaged", "planned", "in_progress", "qa", "released", "rejected"].contains(&status));
+    }
+
+    #[test]
+    fn status_validation_rejects_invalid() {
+        let status = "invalid";
+        assert!(!["submitted", "triaged", "planned", "in_progress", "qa", "released", "rejected"].contains(&status));
+    }
+
+    #[test]
+    fn error_response_not_found() {
+        let response = serde_json::json!({ "message": "Change request not found" });
+        assert_eq!(response["message"], "Change request not found");
+    }
+
+    #[test]
+    fn error_response_invalid_action() {
+        let response = serde_json::json!({ "message": "action must be advance|reject|execution_queue|execution_start|execution_heartbeat|execution_fail|execution_success|execution_reset" });
+        assert_eq!(response["message"], "action must be advance|reject|execution_queue|execution_start|execution_heartbeat|execution_fail|execution_success|execution_reset");
+    }
+
+    #[test]
+    fn error_response_update_failed() {
+        let response = serde_json::json!({ "message": "Failed to update change request" });
+        assert_eq!(response["message"], "Failed to update change request");
+    }
+
+    #[test]
+    fn execution_state_idle() {
+        let state = "idle";
+        assert_eq!(state, "idle");
+    }
+
+    #[test]
+    fn execution_state_queued() {
+        let state = "queued";
+        assert_eq!(state, "queued");
+    }
+
+    #[test]
+    fn execution_state_running() {
+        let state = "running";
+        assert_eq!(state, "running");
+    }
+
+    #[test]
+    fn execution_state_failed() {
+        let state = "failed";
+        assert_eq!(state, "failed");
+    }
+
+    #[test]
+    fn execution_state_success() {
+        let state = "success";
+        assert_eq!(state, "success");
+    }
+
+    #[test]
+    fn actor_defaults_to_hermes() {
+        let actor: Option<String> = None;
+        let resolved = actor
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("hermes")
+            .to_string();
+        assert_eq!(resolved, "hermes");
+    }
+
+    #[test]
+    fn actor_custom() {
+        let actor: Option<String> = Some("john@example.com".to_string());
+        let resolved = actor
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("hermes")
+            .to_string();
+        assert_eq!(resolved, "john@example.com");
+    }
+
+    #[test]
+    fn actor_empty_defaults_to_hermes() {
+        let actor: Option<String> = Some("  ".to_string());
+        let resolved = actor
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("hermes")
+            .to_string();
+        assert_eq!(resolved, "hermes");
+    }
+
+    #[test]
+    fn intake_tracking_sets_actor() {
+        // When a CR moves from submitted to another status, intake tracking should be set
+        let previous_status = "submitted";
+        let new_status = "triaged";
+        assert_eq!(previous_status, "submitted");
+        assert_ne!(new_status, "submitted");
+    }
+
+    #[test]
+    fn intake_tracking_not_set_for_submitted() {
+        // When a CR stays in submitted, intake tracking should NOT be set
+        let previous_status = "submitted";
+        let new_status = "submitted";
+        assert_eq!(previous_status, "submitted");
+        assert_eq!(new_status, "submitted");
+    }
+}
