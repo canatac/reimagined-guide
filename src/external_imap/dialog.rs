@@ -257,9 +257,3 @@ fn logout_best_effort<S: std::io::Write>(stream: &mut S) {
     let _ = stream.write_all(b"a9 LOGOUT\r\n");
     let _ = stream.flush();
 }
-
-// Force Utc use to be referenced by the module for downstream re-exports
-#[allow(dead_code)]
-fn _touch_utc() -> chrono::DateTime<Utc> {
-    Utc::now()
-}

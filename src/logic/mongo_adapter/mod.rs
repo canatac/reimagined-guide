@@ -6,7 +6,6 @@
 // le trait `DatabaseInterface` est implémenté dans `trait_impl.rs` et délègue
 // à ces méthodes. Comportement inchangé — pur re-arrangement du code.
 
-use mongodb::bson::{self, doc};
 use mongodb::Client;
 use std::sync::Arc;
 
@@ -65,9 +64,4 @@ mod tests {
         assert_eq!(users_collection_name(), "my_users");
         std::env::remove_var("MONGODB_USERS_COLLECTION");
     }
-}
-
-#[allow(dead_code)]
-fn _bson_use() -> bson::Document {
-    doc! {}
 }
