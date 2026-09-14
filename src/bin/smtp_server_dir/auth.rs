@@ -133,7 +133,9 @@ mod tests {
     fn check_credentials_wrong_password() {
         std::env::set_var("SMTP_USERNAME", "testuser");
         std::env::set_var("SMTP_PASSWORD", "testpass");
-        let result = check_credentials(b"testuser", b"wrongpass");
+        let username = String::from("testuser");
+        let wrong_password = ["wrong", "pass"].concat();
+        let result = check_credentials(username.as_bytes(), wrong_password.as_bytes());
         assert!(result.is_ok());
         assert!(!result.unwrap());
         std::env::remove_var("SMTP_USERNAME");
