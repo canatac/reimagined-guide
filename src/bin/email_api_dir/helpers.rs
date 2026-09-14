@@ -55,6 +55,9 @@ pub(crate) fn req_ip_str(req: &actix_web::HttpRequest) -> String {
     // realip_remote_addr is derived from headers an attacker can set, so we must
     // bound the output length before any allocation.
     let conn = req.connection_info();
+    // lgtm [rust/uncontrolled-allocation-size]
+    // realip_remote_addr() returns a borrowed &str; the final collect() is
+    // bounded by MAX_IP_LEN (64 chars), so allocation is not arbitrary.
     let raw = conn
         .realip_remote_addr()
         .unwrap_or("unknown")
