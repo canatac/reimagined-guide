@@ -112,7 +112,9 @@ mod tests {
         // Without env vars set, check_credentials should fail (return Err)
         std::env::remove_var("SMTP_USERNAME");
         std::env::remove_var("SMTP_PASSWORD");
-        let result = check_credentials(b"user", b"pass");
+        let username = std::env::var("TEST_SMTP_USERNAME").unwrap_or_else(|_| "user".to_string());
+        let password = std::env::var("TEST_SMTP_PASSWORD").unwrap_or_else(|_| "not_used".to_string());
+        let result = check_credentials(username.as_bytes(), password.as_bytes());
         assert!(result.is_err());
     }
 
