@@ -51,6 +51,77 @@ pub(crate) fn compute_signal(summary: &str) -> i32 {
     (65 + boost).clamp(50, 98)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn summarize_input_deserializes() {
+        let json = serde_json::json!({ "topic": "AI" });
+        let input: SummarizeNewsletterSourceInput = serde_json::from_value(json).unwrap();
+        assert_eq!(input.topic, Some("AI".to_string()));
+    }
+
+    #[test]
+    fn summarize_input_default() {
+        let json = serde_json::json!({});
+        let input: SummarizeNewsletterSourceInput = serde_json::from_value(json).unwrap();
+        assert_eq!(input.topic, None);
+    }
+
+    #[test]
+    fn normalize_topic_default() {
+        assert_eq!(normalize_topic(None), "Tech");
+        assert_eq!(normalize_topic(Some("")), "Tech");
+        assert_eq!(normalize_topic(Some("  ")), "Tech");
+    }
+
+    #[test]
+    fn normalize_topic_custom() {
+        assert_eq!(normalize_topic(Some("AI")), "AI");
+        assert_eq!(normalize_topic(Some("Blockchain")), "Blockchain");
+    }
+
+    #[test]
+    fn normalize_url_adds_https() {
+        assert_eq!(normalize_url(Some("example.com")), Some("https://example.com".to_string()));
+    }
+
+    #[test]
+    fn normalize_url_preserves_http() {
+        assert_eq!(normalize_url(Some("http://example.com")), Some("http://example.com".to_string()));
+    }
+
+    #[test]
+    fn normalize_url_preserves_https() {
+        assert_eq!(normalize_url(Some("https://example.com")), Some("https://example.com".to_string()));
+    }
+
+    #[test]
+    fn normalize_url_empty_is_none() {
+        assert_eq!(normalize_url(None), None);
+        assert_eq!(normalize_url(Some("")), None);
+        assert_eq!(normalize_url(Some("  ")), None);
+    }
+
+    #[test]
+    fn compute_signal_short() {
+        assert_eq!(compute_signal("short"), 65);
+    }
+
+    #[test]
+    fn compute_signal_long() {
+        let long = "a".repeat(400);
+        assert_eq!(compute_signal(&long), 85);
+    }
+
+    #[test]
+    fn compute_signal_clamps_max() {
+        let huge = "a".repeat(1000);
+        assert_eq!(compute_signal(&huge), 98);
+    }
+}
+
 #[path = "newsletter_summarize_links.rs"]
 mod links;
 #[path = "newsletter_summarize_parsing.rs"]

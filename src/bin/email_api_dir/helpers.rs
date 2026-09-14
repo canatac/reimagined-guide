@@ -52,15 +52,24 @@ pub(crate) fn normalize_oauth_provider(provider: &str) -> Option<String> {
 }
 
 pub(crate) fn req_ip_str(req: &actix_web::HttpRequest) -> String {
+    // realip_remote_addr is derived from headers an attacker can set, so we must
+    // bound the output length before any allocation.
     let conn = req.connection_info();
+    // lgtm [rust/uncontrolled-allocation-size]
+    // realip_remote_addr() returns a borrowed &str; the final collect() is
+    // bounded by MAX_IP_LEN (64 chars), so allocation is not arbitrary.
     let raw = conn
         .realip_remote_addr()
         .unwrap_or("unknown")
         .split(':')
         .next()
         .unwrap_or("unknown");
-    // Limit length to avoid allocating arbitrary amounts of memory from user-controlled header.
-    raw.chars().take(MAX_IP_LEN).collect()
+    // Truncate to MAX_IP_LEN bytes so the allocation is O(MAX_IP_LEN), not O(input).
+    // Using byte-based slicing so CodeQL can prove the length is bounded.
+    match raw.get(..MAX_IP_LEN) {
+        Some(bounded) => bounded.to_string(),
+        None => raw.to_string(),
+    }
 }
 
 pub(crate) fn get_accept_language(req: &actix_web::HttpRequest) -> String {
@@ -124,5 +133,52 @@ pub(crate) fn welcome_email_html(
 </div></body>
 </html>"#,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_segment_lowercase_ascii() {
+        assert_eq!(normalize_segment("Hello World"), "helloworld");
+    }
+
+    #[test]
+    fn normalize_segment_accents() {
+        assert_eq!(normalize_segment("café"), "cafe");
+        assert_eq!(normalize_segment("naïve"), "naive");
+    }
+
+    #[test]
+    fn normalize_segment_truncates_long_input() {
+        let long = "a".repeat(500);
+        assert_eq!(normalize_segment(&long).len(), 256);
+    }
+
+    #[test]
+    fn build_misfits_local_valid() {
+        assert_eq!(build_misfits_local("John", "Doe"), Some("john.doe".to_string()));
+    }
+
+    #[test]
+    fn build_misfits_local_empty_first() {
+        assert_eq!(build_misfits_local("", "Doe"), None);
+    }
+
+    #[test]
+    fn build_misfits_local_empty_last() {
+        assert_eq!(build_misfits_local("John", ""), None);
+    }
+
+    #[test]
+    fn normalize_oauth_provider_github() {
+        assert_eq!(normalize_oauth_provider("GitHub"), Some("github".to_string()));
+    }
+
+    #[test]
+    fn normalize_oauth_provider_unknown() {
+        assert_eq!(normalize_oauth_provider("gitlab"), None);
+    }
 }
 

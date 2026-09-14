@@ -14,6 +14,32 @@ pub(super) struct MailingListEmailRequest {
     pub mailing_list: String,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mailing_list_request_deserializes() {
+        let json = serde_json::json!({ "label": "newsletter", "emails": ["<EMAIL>"] });
+        let req: MailingListRequest = serde_json::from_value(json).unwrap();
+        assert_eq!(req.label, "newsletter");
+        assert_eq!(req.emails.len(), 1);
+    }
+
+    #[test]
+    fn mailing_list_email_request_deserializes() {
+        let json = serde_json::json!({
+            "from": "<EMAIL>",
+            "subject": "Hello",
+            "body": "World",
+            "mailingList": "newsletter"
+        });
+        let req: MailingListEmailRequest = serde_json::from_value(json).unwrap();
+        assert_eq!(req.from, "<EMAIL>");
+        assert_eq!(req.mailing_list, "newsletter");
+    }
+}
+
 pub(super) async fn create_mailing_list(mailing_list: web::Json<MailingListRequest>) -> impl Responder {
     let mailing_list_dir = Path::new("mailing-lists");
     if !mailing_list_dir.exists() {

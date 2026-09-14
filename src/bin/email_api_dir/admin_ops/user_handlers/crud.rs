@@ -132,3 +132,74 @@ pub(crate) async fn api_admin_whoami(
 // ================================================================
 
 // PR4 — audit trail admin.
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn admin_users_query_deserializes() {
+        let json = serde_json::json!({ "role": "admin", "status": "active", "page": 2, "size": 10 });
+        let q: AdminUsersQuery = serde_json::from_value(json).unwrap();
+        assert_eq!(q.role, Some("admin".to_string()));
+        assert_eq!(q.status, Some("active".to_string()));
+        assert_eq!(q.page, Some(2));
+        assert_eq!(q.size, Some(10));
+    }
+
+    #[test]
+    fn admin_users_query_defaults() {
+        let json = serde_json::json!({});
+        let q: AdminUsersQuery = serde_json::from_value(json).unwrap();
+        assert_eq!(q.role, None);
+        assert_eq!(q.status, None);
+        assert_eq!(q.q, None);
+        assert_eq!(q.page, None);
+        assert_eq!(q.size, None);
+    }
+
+    #[test]
+    fn create_admin_user_input_deserializes() {
+        let json = serde_json::json!({
+            "id": "user-1",
+            "email": "<EMAIL>",
+            "displayName": "Test User",
+            "role": "admin",
+            "status": "active",
+            "twoFactorEnabled": true
+        });
+        let input: CreateAdminUserInput = serde_json::from_value(json).unwrap();
+        assert_eq!(input.id, Some("user-1".to_string()));
+        assert_eq!(input.email, "<EMAIL>");
+        assert_eq!(input.display_name, Some("Test User".to_string()));
+        assert_eq!(input.role, "admin");
+        assert_eq!(input.status, Some("active".to_string()));
+        assert_eq!(input.two_factor_enabled, Some(true));
+    }
+
+    #[test]
+    fn create_admin_user_input_minimal() {
+        let json = serde_json::json!({ "email": "<EMAIL>", "role": "viewer" });
+        let input: CreateAdminUserInput = serde_json::from_value(json).unwrap();
+        assert_eq!(input.id, None);
+        assert_eq!(input.email, "<EMAIL>");
+        assert_eq!(input.role, "viewer");
+    }
+
+    #[test]
+    fn update_admin_user_input_deserializes() {
+        let json = serde_json::json!({ "role": "admin", "status": "suspended" });
+        let input: UpdateAdminUserInput = serde_json::from_value(json).unwrap();
+        assert_eq!(input.role, Some("admin".to_string()));
+        assert_eq!(input.status, Some("suspended".to_string()));
+    }
+
+    #[test]
+    fn update_admin_user_input_empty() {
+        let json = serde_json::json!({});
+        let input: UpdateAdminUserInput = serde_json::from_value(json).unwrap();
+        assert_eq!(input.role, None);
+        assert_eq!(input.status, None);
+        assert_eq!(input.email, None);
+    }
+}

@@ -117,3 +117,266 @@ pub(super) fn deserialize_email_document(doc: bson::Document) -> Option<Email> {
     );
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_sequence_number_i64() {
+        let mut doc = bson::Document::new();
+        doc.insert("sequence_number", 5i64);
+        let normalized = normalize_email_document_for_deser(doc);
+        assert_eq!(normalized.get_i32("sequence_number").unwrap(), 5);
+    }
+
+    #[test]
+    fn normalize_sequence_number_negative() {
+        let mut doc = bson::Document::new();
+        doc.insert("sequence_number", -1i64);
+        let normalized = normalize_email_document_for_deser(doc);
+        // Negative values should not be converted
+        assert!(normalized.get_i64("sequence_number").is_ok());
+    }
+
+    #[test]
+    fn normalize_uid_i64() {
+        let mut doc = bson::Document::new();
+        doc.insert("uid", 10i64);
+        let normalized = normalize_email_document_for_deser(doc);
+        assert_eq!(normalized.get_i32("uid").unwrap(), 10);
+    }
+
+    #[test]
+    fn normalize_uid_negative() {
+        let mut doc = bson::Document::new();
+        doc.insert("uid", -5i64);
+        let normalized = normalize_email_document_for_deser(doc);
+        // Negative values should not be converted
+        assert!(normalized.get_i64("uid").is_ok());
+    }
+
+    #[test]
+    fn normalize_preserves_other_fields() {
+        let mut doc = bson::Document::new();
+        doc.insert("id", "email-123");
+        doc.insert("from", "sender@example.com");
+        doc.insert("to", "recipient@example.com");
+        doc.insert("sequence_number", 1i64);
+        let normalized = normalize_email_document_for_deser(doc);
+        assert_eq!(normalized.get_str("id").unwrap(), "email-123");
+        assert_eq!(normalized.get_str("from").unwrap(), "sender@example.com");
+        assert_eq!(normalized.get_str("to").unwrap(), "recipient@example.com");
+    }
+
+    #[test]
+    fn deserialize_valid_email() {
+        let mut doc = bson::Document::new();
+        doc.insert("id", "email-123");
+        doc.insert("from", "sender@example.com");
+        doc.insert("to", "recipient@example.com");
+        doc.insert("subject", "Test Subject");
+        doc.insert("body", "Test Body");
+        doc.insert("internal_date", bson::DateTime::from_millis(1700000000000i64));
+        doc.insert("flags", bson::Array::new());
+        doc.insert("headers", bson::Array::new());
+        doc.insert("sequence_number", 1i32);
+        doc.insert("uid", 1i32);
+
+        let result = deserialize_email_document(doc);
+        assert!(result.is_some());
+        let email = result.unwrap();
+        assert_eq!(email.id, "email-123");
+        assert_eq!(email.from, "sender@example.com");
+        assert_eq!(email.to, "recipient@example.com");
+        assert_eq!(email.subject, "Test Subject");
+        assert_eq!(email.body, "Test Body");
+    }
+
+    #[test]
+    fn deserialize_missing_id() {
+        let mut doc = bson::Document::new();
+        doc.insert("from", "sender@example.com");
+        doc.insert("to", "recipient@example.com");
+        doc.insert("internal_date", bson::DateTime::from_millis(1700000000000i64));
+
+        let result = deserialize_email_document(doc);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn deserialize_missing_to() {
+        let mut doc = bson::Document::new();
+        doc.insert("id", "email-123");
+        doc.insert("from", "sender@example.com");
+        doc.insert("internal_date", bson::DateTime::from_millis(1700000000000i64));
+
+        let result = deserialize_email_document(doc);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn deserialize_with_flags() {
+        let mut doc = bson::Document::new();
+        doc.insert("id", "email-123");
+        doc.insert("from", "sender@example.com");
+        doc.insert("to", "recipient@example.com");
+        doc.insert("internal_date", bson::DateTime::from_millis(1700000000000i64));
+        doc.insert("flags", vec!["\\Seen", "\\Flagged"]);
+
+        let result = deserialize_email_document(doc);
+        assert!(result.is_some());
+        let email = result.unwrap();
+        assert_eq!(email.flags.len(), 2);
+        assert!(email.flags.contains(&"\\Seen".to_string()));
+        assert!(email.flags.contains(&"\\Flagged".to_string()));
+    }
+
+    #[test]
+    fn deserialize_with_headers_array() {
+        let mut doc = bson::Document::new();
+        doc.insert("id", "email-123");
+        doc.insert("from", "sender@example.com");
+        doc.insert("to", "recipient@example.com");
+        doc.insert("internal_date", bson::DateTime::from_millis(1700000000000i64));
+        doc.insert("headers", vec![vec!["Content-Type", "text/plain"], vec!["Subject", "Test"]]);
+
+        let result = deserialize_email_document(doc);
+        assert!(result.is_some());
+        let email = result.unwrap();
+        assert_eq!(email.headers.len(), 2);
+    }
+
+    #[test]
+    fn deserialize_with_headers_doc() {
+        let mut doc = bson::Document::new();
+        doc.insert("id", "email-123");
+        doc.insert("from", "sender@example.com");
+        doc.insert("to", "recipient@example.com");
+        doc.insert("internal_date", bson::DateTime::from_millis(1700000000000i64));
+
+        let mut header_doc = bson::Document::new();
+        header_doc.insert("name", "Content-Type");
+        header_doc.insert("value", "text/html");
+        doc.insert("headers", vec![header_doc]);
+
+        let result = deserialize_email_document(doc);
+        assert!(result.is_some());
+        let email = result.unwrap();
+        assert_eq!(email.headers.len(), 1);
+        assert_eq!(email.headers[0].0, "Content-Type");
+        assert_eq!(email.headers[0].1, "text/html");
+    }
+
+    #[test]
+    fn deserialize_with_dkim_signature() {
+        let mut doc = bson::Document::new();
+        doc.insert("id", "email-123");
+        doc.insert("from", "sender@example.com");
+        doc.insert("to", "recipient@example.com");
+        doc.insert("internal_date", bson::DateTime::from_millis(1700000000000i64));
+        doc.insert("dkim_signature", "v=1; a=rsa-sha256;");
+
+        let result = deserialize_email_document(doc);
+        assert!(result.is_some());
+        let email = result.unwrap();
+        assert_eq!(email.dkim_signature, Some("v=1; a=rsa-sha256;".to_string()));
+    }
+
+    #[test]
+    fn deserialize_without_dkim_signature() {
+        let mut doc = bson::Document::new();
+        doc.insert("id", "email-123");
+        doc.insert("from", "sender@example.com");
+        doc.insert("to", "recipient@example.com");
+        doc.insert("internal_date", bson::DateTime::from_millis(1700000000000i64));
+
+        let result = deserialize_email_document(doc);
+        assert!(result.is_some());
+        let email = result.unwrap();
+        assert_eq!(email.dkim_signature, None);
+    }
+
+    #[test]
+    fn deserialize_internal_date_string() {
+        let mut doc = bson::Document::new();
+        doc.insert("id", "email-123");
+        doc.insert("from", "sender@example.com");
+        doc.insert("to", "recipient@example.com");
+        doc.insert("internal_date", "2023-11-14T22:13:20Z");
+
+        let result = deserialize_email_document(doc);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn deserialize_internal_date_missing() {
+        let mut doc = bson::Document::new();
+        doc.insert("id", "email-123");
+        doc.insert("from", "sender@example.com");
+        doc.insert("to", "recipient@example.com");
+
+        let result = deserialize_email_document(doc);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn deserialize_sequence_number_i64() {
+        let mut doc = bson::Document::new();
+        doc.insert("id", "email-123");
+        doc.insert("from", "sender@example.com");
+        doc.insert("to", "recipient@example.com");
+        doc.insert("internal_date", bson::DateTime::from_millis(1700000000000i64));
+        doc.insert("sequence_number", 42i64);
+
+        let result = deserialize_email_document(doc);
+        assert!(result.is_some());
+        let email = result.unwrap();
+        assert_eq!(email.sequence_number, 42);
+    }
+
+    #[test]
+    fn deserialize_uid_i64() {
+        let mut doc = bson::Document::new();
+        doc.insert("id", "email-123");
+        doc.insert("from", "sender@example.com");
+        doc.insert("to", "recipient@example.com");
+        doc.insert("internal_date", bson::DateTime::from_millis(1700000000000i64));
+        doc.insert("uid", 99i64);
+
+        let result = deserialize_email_document(doc);
+        assert!(result.is_some());
+        let email = result.unwrap();
+        assert_eq!(email.uid, 99);
+    }
+
+    #[test]
+    fn deserialize_empty_flags() {
+        let mut doc = bson::Document::new();
+        doc.insert("id", "email-123");
+        doc.insert("from", "sender@example.com");
+        doc.insert("to", "recipient@example.com");
+        doc.insert("internal_date", bson::DateTime::from_millis(1700000000000i64));
+        doc.insert("flags", bson::Array::new());
+
+        let result = deserialize_email_document(doc);
+        assert!(result.is_some());
+        let email = result.unwrap();
+        assert_eq!(email.flags.len(), 0);
+    }
+
+    #[test]
+    fn deserialize_empty_headers() {
+        let mut doc = bson::Document::new();
+        doc.insert("id", "email-123");
+        doc.insert("from", "sender@example.com");
+        doc.insert("to", "recipient@example.com");
+        doc.insert("internal_date", bson::DateTime::from_millis(1700000000000i64));
+        doc.insert("headers", bson::Array::new());
+
+        let result = deserialize_email_document(doc);
+        assert!(result.is_some());
+        let email = result.unwrap();
+        assert_eq!(email.headers.len(), 0);
+    }
+}

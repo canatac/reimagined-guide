@@ -38,6 +38,70 @@ pub(crate) fn db_name() -> String {
     std::env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_env_u64_default() {
+        std::env::remove_var("TEST_U64_VAR");
+        assert_eq!(env_u64("TEST_U64_VAR", 42), 42);
+    }
+
+    #[test]
+    fn test_env_u64_reads_value() {
+        std::env::set_var("TEST_U64_VAR", "100");
+        assert_eq!(env_u64("TEST_U64_VAR", 0), 100);
+        std::env::remove_var("TEST_U64_VAR");
+    }
+
+    #[test]
+    fn test_env_u64_invalid_falls_back() {
+        std::env::set_var("TEST_U64_VAR", "abc");
+        assert_eq!(env_u64("TEST_U64_VAR", 99), 99);
+        std::env::remove_var("TEST_U64_VAR");
+    }
+
+    #[test]
+    fn test_env_f64_default() {
+        std::env::remove_var("TEST_F64_VAR");
+        assert_eq!(env_f64("TEST_F64_VAR", 3.14), 3.14);
+    }
+
+    #[test]
+    fn test_env_f64_reads_value() {
+        std::env::set_var("TEST_F64_VAR", "2.71");
+        assert_eq!(env_f64("TEST_F64_VAR", 0.0), 2.71);
+        std::env::remove_var("TEST_F64_VAR");
+    }
+
+    #[test]
+    fn test_env_list_empty() {
+        std::env::remove_var("TEST_LIST");
+        assert!(env_list("TEST_LIST").is_empty());
+    }
+
+    #[test]
+    fn test_env_list_splits() {
+        std::env::set_var("TEST_LIST", "a,b,c");
+        assert_eq!(env_list("TEST_LIST"), vec!["a", "b", "c"]);
+        std::env::remove_var("TEST_LIST");
+    }
+
+    #[test]
+    fn test_db_name_default() {
+        std::env::remove_var("MONGODB_DATABASE");
+        assert_eq!(db_name(), "mailserver");
+    }
+
+    #[test]
+    fn test_db_name_custom() {
+        std::env::set_var("MONGODB_DATABASE", "custom_db");
+        assert_eq!(db_name(), "custom_db");
+        std::env::remove_var("MONGODB_DATABASE");
+    }
+}
+
 
 pub(crate) async fn count(client: &Client, coll: &str, filter: mongodb::bson::Document) -> u64 {
     client
@@ -56,6 +120,67 @@ pub struct RuleContext<'a> {
     pub client: &'a Client,
     /// Optional: scope evaluation to a single tenant.
     pub tenant_id: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn env_f64_default() {
+        std::env::remove_var("TEST_F64_MISSING");
+        assert_eq!(env_f64("TEST_F64_MISSING", 3.14), 3.14);
+    }
+
+    #[test]
+    fn env_f64_from_env() {
+        std::env::set_var("TEST_F64_VAL", "2.718");
+        assert_eq!(env_f64("TEST_F64_VAL", 0.0), 2.718);
+        std::env::remove_var("TEST_F64_VAL");
+    }
+
+    #[test]
+    fn env_f64_invalid_falls_back() {
+        std::env::set_var("TEST_F64_BAD", "not-a-number");
+        assert_eq!(env_f64("TEST_F64_BAD", 1.5), 1.5);
+        std::env::remove_var("TEST_F64_BAD");
+    }
+
+    #[test]
+    fn env_list_default_empty() {
+        std::env::remove_var("TEST_LIST_MISSING");
+        assert!(env_list("TEST_LIST_MISSING").is_empty());
+    }
+
+    #[test]
+    fn env_list_from_env() {
+        std::env::set_var("TEST_LIST_VAL", "x,y,z");
+        assert_eq!(env_list("TEST_LIST_VAL"), vec!["x", "y", "z"]);
+        std::env::remove_var("TEST_LIST_VAL");
+    }
+
+    #[test]
+    fn env_list_filters_empty_values() {
+        std::env::set_var("TEST_LIST_EMPTY", "a,,b, ,c,");
+        assert_eq!(env_list("TEST_LIST_EMPTY"), vec!["a", "b", "c"]);
+        std::env::remove_var("TEST_LIST_EMPTY");
+    }
+
+    #[test]
+    fn since_returns_past_timestamp() {
+        let s = since(60);
+        let dt = chrono::DateTime::parse_from_rfc3339(&s).unwrap();
+        assert!(dt < chrono::Utc::now());
+    }
+
+    #[test]
+    fn since_different_minutes() {
+        let s5 = since(5);
+        let s60 = since(60);
+        let dt5 = chrono::DateTime::parse_from_rfc3339(&s5).unwrap();
+        let dt60 = chrono::DateTime::parse_from_rfc3339(&s60).unwrap();
+        assert!(dt60 < dt5);
+    }
 }
 
 // ---------------------------------------------------------------------------

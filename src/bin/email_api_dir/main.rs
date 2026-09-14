@@ -176,6 +176,11 @@ async fn main() -> std::io::Result<()> {
     let (event_tx, _) = broadcast::channel::<MailEvent>(256);
     let event_bus = web::Data::new(event_tx);
 
+    // Issue #486: incoming webhook secrets registry
+    let webhook_secrets = web::Data::new(
+        crate::monitoring_handlers::webhook_incoming::IncomingWebhookSecrets::new(),
+    );
+
     // Init global SMTP monitoring bus + background persistence task
     monitoring::init_bus();
     monitoring::storage::start_persistence_task(shared_mongo.clone());
@@ -214,6 +219,7 @@ async fn main() -> std::io::Result<()> {
     let http_mongo = mongo_data.clone();
     let http_event_bus = event_bus.clone();
     let http_external_imap = external_imap_service.clone();
+    let http_webhook_secrets = webhook_secrets.clone();
     let http_addr = env::var("API_SERVER_ADDR").unwrap_or_else(|_| "0.0.0.0:8000".to_string());
     let http_server = actix_web::rt::spawn(async move {
         let server = HttpServer::new(move || {
@@ -223,6 +229,7 @@ async fn main() -> std::io::Result<()> {
                 .app_data(http_mongo.clone())
                 .app_data(http_event_bus.clone())
                 .app_data(http_external_imap.clone())
+                .app_data(http_webhook_secrets.clone())
                 .configure(startup::register_http_routes)
         })
         .bind(http_addr.clone());

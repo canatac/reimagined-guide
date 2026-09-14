@@ -59,6 +59,67 @@ pub(crate) fn use_mongodb_env() -> bool {
     env::var("USE_MONGODB").unwrap_or_else(|_| "false".to_string()) == "true"
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn use_mongodb_env_default_false() {
+        std::env::remove_var("USE_MONGODB");
+        assert!(!use_mongodb_env());
+    }
+
+    #[test]
+    fn use_mongodb_env_true_values() {
+        for val in &["true", "True", "TRUE", "1"] {
+            std::env::set_var("USE_MONGODB", val);
+            assert!(use_mongodb_env(), "expected true for {val}");
+        }
+        std::env::remove_var("USE_MONGODB");
+    }
+
+    #[test]
+    fn use_mongodb_env_false_values() {
+        for val in &["false", "0", "no", "off", ""] {
+            std::env::set_var("USE_MONGODB", val);
+            assert!(!use_mongodb_env(), "expected false for {val}");
+        }
+        std::env::remove_var("USE_MONGODB");
+    }
+
+    #[test]
+    fn email_from_current_clones_fields() {
+        let current = CustomEmail {
+            email: Email {
+                id: "id-1".into(),
+                from: "<EMAIL>".into(),
+                to: "<EMAIL>".into(),
+                subject: "Test".into(),
+                body: "Body".into(),
+                headers: vec![("X-Test".into(), "val".into())],
+                flags: vec!["\\Seen".into()],
+                sequence_number: 42,
+                uid: 100,
+                internal_date: chrono::Utc::now(),
+                dkim_signature: Some("sig".into()),
+            },
+            raw_content: "raw".into(),
+            dkim_signature: Some("sig".into()),
+        };
+        let email = email_from_current(&current);
+        assert_eq!(email.id, "id-1");
+        assert_eq!(email.from, "<EMAIL>");
+        assert_eq!(email.to, "<EMAIL>");
+        assert_eq!(email.subject, "Test");
+        assert_eq!(email.body, "Body");
+        assert_eq!(email.headers.len(), 1);
+        assert_eq!(email.flags.len(), 1);
+        assert_eq!(email.sequence_number, 42);
+        assert_eq!(email.uid, 100);
+        assert_eq!(email.dkim_signature, Some("sig".into()));
+    }
+}
+
 /// Persiste + forward un mail via MongoDB. Écrit la réponse SMTP appropriée.
 pub(crate) async fn store_and_forward_mongo(
     stream: &mut StreamType,
@@ -189,4 +250,145 @@ pub(crate) fn absorb_data_line(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use simple_smtp_server::session::SessionManager;
+
+    #[test]
+    fn email_from_current_clones_all_fields() {
+        let current = CustomEmail {
+            email: Email {
+                id: "test-id".into(),
+                from: "from@example.com".into(),
+                to: "to@example.com".into(),
+                subject: "Test Subject".into(),
+                body: "Test body".into(),
+                headers: vec![("X-Custom".into(), "value".into())],
+                flags: vec!["\\Seen".into()],
+                sequence_number: 5,
+                uid: 42,
+                internal_date: chrono::Utc::now(),
+                dkim_signature: Some("dkim-sig".into()),
+            },
+            raw_content: "raw".into(),
+            dkim_signature: Some("dkim-sig".into()),
+        };
+        let email = email_from_current(&current);
+        assert_eq!(email.id, "test-id");
+        assert_eq!(email.from, "from@example.com");
+        assert_eq!(email.to, "to@example.com");
+        assert_eq!(email.subject, "Test Subject");
+        assert_eq!(email.body, "Test body");
+        assert_eq!(email.headers.len(), 1);
+        assert_eq!(email.flags, vec!["\\Seen".to_string()]);
+        assert_eq!(email.sequence_number, 5);
+        assert_eq!(email.uid, 42);
+        assert_eq!(email.dkim_signature, Some("dkim-sig".to_string()));
+    }
+
+    #[test]
+    fn resolve_route_authenticated() {
+        let mgr = Arc::new(SessionManager::new());
+        let session_id = mgr.create_session("testuser");
+        mgr.set_mailbox(&session_id, "INBOX");
+        let result = resolve_route(Some(&session_id), &mgr, "<EMAIL>");
+        assert_eq!(result, Some(("testuser".to_string(), "INBOX".to_string())));
+    }
+
+    #[test]
+    fn resolve_route_unauthenticated_local() {
+        let mgr = Arc::new(SessionManager::new());
+        let result = resolve_route(None, &mgr, "<EMAIL>");
+        assert_eq!(result, Some(("user".to_string(), "inbox".to_string())));
+    }
+
+    #[test]
+    fn resolve_route_unauthenticated_not_local() {
+        let mgr = Arc::new(SessionManager::new());
+        let result = resolve_route(None, &mgr, "<EMAIL>");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn resolve_route_authenticated_missing_mailbox() {
+        let mgr = Arc::new(SessionManager::new());
+        let session_id = mgr.create_session("testuser");
+        // No mailbox set
+        let result = resolve_route(Some(&session_id), &mgr, "<EMAIL>");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn use_mongodb_env_default_false() {
+        std::env::remove_var("USE_MONGODB");
+        assert!(!use_mongodb_env());
+    }
+
+    #[test]
+    fn use_mongodb_env_true() {
+        std::env::set_var("USE_MONGODB", "true");
+        assert!(use_mongodb_env());
+        std::env::remove_var("USE_MONGODB");
+    }
+
+    #[test]
+    fn use_mongodb_env_false_explicit() {
+        std::env::set_var("USE_MONGODB", "false");
+        assert!(!use_mongodb_env());
+        std::env::remove_var("USE_MONGODB");
+    }
+
+    #[test]
+    fn absorb_data_line_header_parsing() {
+        let mut current = CustomEmail {
+            email: Email::new("", "", "", "", ""),
+            raw_content: String::new(),
+            dkim_signature: None,
+        };
+        let mut in_body = false;
+        absorb_data_line(&mut current, &mut in_body, "From: <EMAIL>").unwrap();
+        assert!(!in_body);
+        assert!(current.email.headers.iter().any(|(k, _)| k == "From"));
+    }
+
+    #[test]
+    fn absorb_data_line_empty_line_transitions_to_body() {
+        let mut current = CustomEmail {
+            email: Email::new("", "", "", "", ""),
+            raw_content: String::new(),
+            dkim_signature: None,
+        };
+        let mut in_body = false;
+        absorb_data_line(&mut current, &mut in_body, "").unwrap();
+        assert!(in_body);
+    }
+
+    #[test]
+    fn absorb_data_line_body_appends() {
+        let mut current = CustomEmail {
+            email: Email::new("", "", "", "", ""),
+            raw_content: String::new(),
+            dkim_signature: None,
+        };
+        let mut in_body = true;
+        absorb_data_line(&mut current, &mut in_body, "Line 1").unwrap();
+        absorb_data_line(&mut current, &mut in_body, "Line 2").unwrap();
+        assert_eq!(current.email.body, "Line 1Line 2");
+    }
+
+    #[test]
+    fn absorb_data_line_skips_empty_header_lines() {
+        let mut current = CustomEmail {
+            email: Email::new("", "", "", "", ""),
+            raw_content: String::new(),
+            dkim_signature: None,
+        };
+        let mut in_body = false;
+        absorb_data_line(&mut current, &mut in_body, "   ").unwrap();
+        assert!(!in_body);
+        assert!(current.email.headers.is_empty());
+    }
 }

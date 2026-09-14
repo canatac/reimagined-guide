@@ -67,11 +67,6 @@ pub struct Mailbox {
 }
 
 pub struct Logic {
-    /// Client MongoDB brut — utilisé par les méthodes non-encore-migrées.
-    /// TODO(hex): à retirer une fois toutes les méthodes passent par `repo`.
-    #[cfg(not(test))]
-    #[allow(dead_code)]
-    client: Arc<Client>,
     /// Port du domaine (hexagonal). En prod : MongoDatabaseAdapter.
     /// En test : mock injecté. Utilisé par create_user, authenticate_user,
     /// find_user, find_emails, find_email (Boucle A — port honnête).
@@ -82,9 +77,9 @@ impl Logic {
     #[cfg(not(test))]
     pub fn new(client: Arc<Client>) -> Self {
         let repo: Arc<dyn DatabaseInterface + Send + Sync> = Arc::new(
-            crate::logic::mongo_adapter::MongoDatabaseAdapter::new(client.clone()),
+            crate::logic::mongo_adapter::MongoDatabaseAdapter::new(client),
         );
-        Logic { client, repo }
+        Logic { repo }
     }
 
     #[cfg(test)]

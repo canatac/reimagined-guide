@@ -22,6 +22,41 @@ fn validate_email_content(content: &str) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_email_content_valid() {
+        let content = "From: <<EMAIL>>\r\nTo: <<EMAIL>>\r\nSubject: Hello\r\n\r\nWorld";
+        assert!(validate_email_content(content).is_ok());
+    }
+
+    #[test]
+    fn validate_email_content_invalid_from() {
+        let content = "From: <EMAIL>\r\nTo: <<EMAIL>>\r\nSubject: Hello\r\n\r\nWorld";
+        assert!(validate_email_content(content).is_err());
+    }
+
+    #[test]
+    fn validate_email_content_invalid_to() {
+        let content = "From: <<EMAIL>>\r\nTo: <EMAIL>\r\nSubject: Hello\r\n\r\nWorld";
+        assert!(validate_email_content(content).is_err());
+    }
+
+    #[test]
+    fn validate_email_content_invalid_subject() {
+        let content = "From: <<EMAIL>>\r\nTo: <<EMAIL>>\r\nSubj: Hello\r\n\r\nWorld";
+        assert!(validate_email_content(content).is_err());
+    }
+
+    #[test]
+    fn validate_email_content_missing_blank_line() {
+        let content = "From: <<EMAIL>>\r\nTo: <<EMAIL>>\r\nSubject: Hello\r\nWorld";
+        assert!(validate_email_content(content).is_err());
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv().ok();

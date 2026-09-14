@@ -109,3 +109,27 @@ pub(crate) async fn api_email_action(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn email_action_request_deserializes() {
+        let json = serde_json::json!({
+            "action": "move",
+            "targetFolder": "archive"
+        });
+        let req: EmailActionRequest = serde_json::from_value(json).unwrap();
+        assert_eq!(req.action, "move");
+        assert_eq!(req.target_folder, Some("archive".to_string()));
+    }
+
+    #[test]
+    fn email_action_request_without_target() {
+        let json = serde_json::json!({ "action": "archive" });
+        let req: EmailActionRequest = serde_json::from_value(json).unwrap();
+        assert_eq!(req.action, "archive");
+        assert_eq!(req.target_folder, None);
+    }
+}
