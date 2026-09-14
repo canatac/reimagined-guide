@@ -13,8 +13,11 @@ mail.misfits.ai {
     }
 
     # Sensitive APIs: route through Next.js for auth middleware enforcement
+    reverse_proxy /api/hermes localhost:3001
     reverse_proxy /api/hermes/* localhost:3001
+    reverse_proxy /api/admin localhost:3001
     reverse_proxy /api/admin/* localhost:3001
+    reverse_proxy /api/external-accounts localhost:3001
     reverse_proxy /api/external-accounts/* localhost:3001
     reverse_proxy /api/emails/*/attachments/* localhost:3001
 
