@@ -237,3 +237,92 @@ pub async fn require_admin(
         role: session.role,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- rbac_enabled ---
+
+    #[test]
+    fn test_rbac_enabled_with_1() {
+        std::env::set_var("ADMIN_RBAC_ENFORCE", "1");
+        assert!(rbac_enabled());
+    }
+
+    #[test]
+    fn test_rbac_enabled_with_true() {
+        std::env::set_var("ADMIN_RBAC_ENFORCE", "true");
+        assert!(rbac_enabled());
+    }
+
+    #[test]
+    fn test_rbac_enabled_with_yes() {
+        std::env::set_var("ADMIN_RBAC_ENFORCE", "yes");
+        assert!(rbac_enabled());
+    }
+
+    #[test]
+    fn test_rbac_enabled_with_on() {
+        std::env::set_var("ADMIN_RBAC_ENFORCE", "on");
+        assert!(rbac_enabled());
+    }
+
+    #[test]
+    fn test_rbac_disabled_when_unset() {
+        std::env::remove_var("ADMIN_RBAC_ENFORCE");
+        assert!(!rbac_enabled());
+    }
+
+    #[test]
+    fn test_rbac_disabled_with_0() {
+        std::env::set_var("ADMIN_RBAC_ENFORCE", "0");
+        assert!(!rbac_enabled());
+    }
+
+    #[test]
+    fn test_rbac_disabled_with_false() {
+        std::env::set_var("ADMIN_RBAC_ENFORCE", "false");
+        assert!(!rbac_enabled());
+    }
+
+    #[test]
+    fn test_rbac_case_insensitive() {
+        std::env::set_var("ADMIN_RBAC_ENFORCE", "TRUE");
+        assert!(rbac_enabled());
+        std::env::set_var("ADMIN_RBAC_ENFORCE", "Yes");
+        assert!(rbac_enabled());
+    }
+
+    // --- session_ttl_secs ---
+
+    #[test]
+    fn test_session_ttl_secs_default() {
+        std::env::remove_var("ADMIN_SESSION_TTL_SECS");
+        assert_eq!(session_ttl_secs(), 24 * 3600);
+    }
+
+    #[test]
+    fn test_session_ttl_secs_custom() {
+        std::env::set_var("ADMIN_SESSION_TTL_SECS", "3600");
+        assert_eq!(session_ttl_secs(), 3600);
+        std::env::remove_var("ADMIN_SESSION_TTL_SECS");
+    }
+
+    #[test]
+    fn test_session_ttl_secs_invalid_falls_back() {
+        std::env::set_var("ADMIN_SESSION_TTL_SECS", "not-a-number");
+        assert_eq!(session_ttl_secs(), 24 * 3600);
+        std::env::remove_var("ADMIN_SESSION_TTL_SECS");
+    }
+
+    // --- AuthUser::system ---
+
+    #[test]
+    fn test_auth_user_system() {
+        let user = AuthUser::system();
+        assert_eq!(user.user_id, "system");
+        assert_eq!(user.email, "system@misfits.ai");
+        assert_eq!(user.role, "admin");
+    }
+}

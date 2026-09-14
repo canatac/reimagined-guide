@@ -51,6 +51,64 @@ pub(crate) fn compute_signal(summary: &str) -> i32 {
     (65 + boost).clamp(50, 98)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_topic_trims_whitespace() {
+        assert_eq!(normalize_topic(Some("  Rust  ")), "Rust");
+    }
+
+    #[test]
+    fn normalize_topic_defaults_for_empty() {
+        assert_eq!(normalize_topic(Some("")), "Tech");
+    }
+
+    #[test]
+    fn normalize_topic_defaults_for_none() {
+        assert_eq!(normalize_topic(None), "Tech");
+    }
+
+    #[test]
+    fn normalize_url_adds_https_prefix() {
+        assert_eq!(
+            normalize_url(Some("example.com")),
+            Some("https://example.com".to_string())
+        );
+    }
+
+    #[test]
+    fn normalize_url_keeps_https() {
+        assert_eq!(
+            normalize_url(Some("https://example.com")),
+            Some("https://example.com".to_string())
+        );
+    }
+
+    #[test]
+    fn normalize_url_returns_none_for_empty() {
+        assert_eq!(normalize_url(Some("")), None);
+    }
+
+    #[test]
+    fn compute_signal_short_summary() {
+        assert_eq!(compute_signal("short"), 65);
+    }
+
+    #[test]
+    fn compute_signal_long_summary() {
+        let long = "a".repeat(100);
+        assert_eq!(compute_signal(&long), 70);
+    }
+
+    #[test]
+    fn compute_signal_clamps_max() {
+        let very_long = "a".repeat(1000);
+        assert_eq!(compute_signal(&very_long), 98);
+    }
+}
+
 #[path = "newsletter_summarize_links.rs"]
 mod links;
 #[path = "newsletter_summarize_parsing.rs"]

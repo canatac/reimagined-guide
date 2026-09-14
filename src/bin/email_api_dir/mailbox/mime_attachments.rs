@@ -152,3 +152,135 @@ pub(crate) fn extract_attachments_for_ui(email: &Email) -> Vec<ExtractedAttachme
 
     Vec::new()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn infer_attachment_kind_image() {
+        assert_eq!(infer_attachment_kind("image/png", "photo.png"), "image");
+    }
+
+    #[test]
+    fn infer_attachment_kind_pdf() {
+        assert_eq!(
+            infer_attachment_kind("application/pdf", "doc.pdf"),
+            "pdf"
+        );
+    }
+
+    #[test]
+    fn infer_attachment_kind_doc() {
+        assert_eq!(
+            infer_attachment_kind("application/msword", "doc.doc"),
+            "doc"
+        );
+    }
+
+    #[test]
+    fn infer_attachment_kind_spreadsheet() {
+        assert_eq!(
+            infer_attachment_kind("application/vnd.ms-excel", "data.xls"),
+            "spreadsheet"
+        );
+    }
+
+    #[test]
+    fn infer_attachment_kind_presentation() {
+        assert_eq!(
+            infer_attachment_kind("application/vnd.ms-powerpoint", "slides.ppt"),
+            "presentation"
+        );
+    }
+
+    #[test]
+    fn infer_attachment_kind_archive() {
+        assert_eq!(infer_attachment_kind("application/zip", "file.zip"), "archive");
+    }
+
+    #[test]
+    fn infer_attachment_kind_audio() {
+        assert_eq!(
+            infer_attachment_kind("audio/mpeg", "song.mp3"),
+            "audio"
+        );
+    }
+
+    #[test]
+    fn infer_attachment_kind_video() {
+        assert_eq!(
+            infer_attachment_kind("video/mp4", "video.mp4"),
+            "video"
+        );
+    }
+
+    #[test]
+    fn infer_attachment_kind_other() {
+        assert_eq!(
+            infer_attachment_kind("application/octet-stream", "file.bin"),
+            "other"
+        );
+    }
+
+    #[test]
+    fn extract_attachments_for_ui_no_attachments() {
+        let email = Email {
+            id: String::new(),
+            from: String::new(),
+            to: String::new(),
+            subject: String::new(),
+            body: "plain text".to_string(),
+            headers: vec![],
+            flags: vec![],
+            sequence_number: 0,
+            uid: 0,
+            internal_date: chrono::Utc::now(),
+            dkim_signature: None,
+        };
+        let attachments = extract_attachments_for_ui(&email);
+        assert!(attachments.is_empty());
+    }
+
+    #[test]
+    fn extract_attachments_for_ui_with_pdf() {
+        let raw = "Content-Type: multipart/mixed; boundary=\"abc\"\r\n\r\n--abc\r\nContent-Type: application/pdf\r\nContent-Disposition: attachment; filename=\"test.pdf\"\r\n\r\nfakepdfcontent\r\n--abc--\r\n";
+        let email = Email {
+            id: String::new(),
+            from: String::new(),
+            to: String::new(),
+            subject: String::new(),
+            body: raw.to_string(),
+            headers: vec![("Content-Type".to_string(), "multipart/mixed; boundary=\"abc\"".to_string())],
+            flags: vec![],
+            sequence_number: 0,
+            uid: 0,
+            internal_date: chrono::Utc::now(),
+            dkim_signature: None,
+        };
+        let attachments = extract_attachments_for_ui(&email);
+        assert!(!attachments.is_empty());
+        assert_eq!(attachments[0].kind, "pdf");
+    }
+
+    #[test]
+    fn extract_attachments_for_ui_with_image() {
+        let raw = "Content-Type: multipart/mixed; boundary=\"xyz\"\r\n\r\n--xyz\r\nContent-Type: image/png\r\nContent-Disposition: attachment; filename=\"photo.png\"\r\n\r\nfakeimage\r\n--xyz--\r\n";
+        let email = Email {
+            id: String::new(),
+            from: String::new(),
+            to: String::new(),
+            subject: String::new(),
+            body: raw.to_string(),
+            headers: vec![("Content-Type".to_string(), "multipart/mixed; boundary=\"xyz\"".to_string())],
+            flags: vec![],
+            sequence_number: 0,
+            uid: 0,
+            internal_date: chrono::Utc::now(),
+            dkim_signature: None,
+        };
+        let attachments = extract_attachments_for_ui(&email);
+        assert!(!attachments.is_empty());
+        assert_eq!(attachments[0].kind, "image");
+    }
+}

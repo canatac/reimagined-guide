@@ -36,3 +36,67 @@ pub fn enforce_mode() -> bool {
         .map(|v| v == "true" || v == "1")
         .unwrap_or(false)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn security_enabled_default_false() {
+        std::env::remove_var("SECURITY_MONITORING_ENABLED");
+        assert!(!security_enabled());
+    }
+
+    #[test]
+    fn security_enabled_true() {
+        std::env::set_var("SECURITY_MONITORING_ENABLED", "true");
+        assert!(security_enabled());
+        std::env::remove_var("SECURITY_MONITORING_ENABLED");
+    }
+
+    #[test]
+    fn security_enabled_one() {
+        std::env::set_var("SECURITY_MONITORING_ENABLED", "1");
+        assert!(security_enabled());
+        std::env::remove_var("SECURITY_MONITORING_ENABLED");
+    }
+
+    #[test]
+    fn security_enabled_false_string() {
+        std::env::set_var("SECURITY_MONITORING_ENABLED", "false");
+        assert!(!security_enabled());
+        std::env::remove_var("SECURITY_MONITORING_ENABLED");
+    }
+
+    #[test]
+    fn enforce_mode_default_false() {
+        std::env::remove_var("SECURITY_ENFORCE_MODE");
+        assert!(!enforce_mode());
+    }
+
+    #[test]
+    fn enforce_mode_true() {
+        std::env::set_var("SECURITY_ENFORCE_MODE", "true");
+        assert!(enforce_mode());
+        std::env::remove_var("SECURITY_ENFORCE_MODE");
+    }
+
+    #[test]
+    fn enforce_mode_one() {
+        std::env::set_var("SECURITY_ENFORCE_MODE", "1");
+        assert!(enforce_mode());
+        std::env::remove_var("SECURITY_ENFORCE_MODE");
+    }
+
+    #[test]
+    fn init_bus_returns_sender() {
+        let bus = init_bus();
+        assert!(bus.receiver_count() >= 0);
+    }
+
+    #[test]
+    fn get_bus_returns_some_after_init() {
+        let _ = init_bus();
+        assert!(get_bus().is_some());
+    }
+}

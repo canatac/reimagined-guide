@@ -76,6 +76,96 @@ fn is_retryable_error(err: &std::io::Error) -> bool {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::ErrorKind;
+
+    #[test]
+    fn retry_policy_defaults() {
+        let (max, base, max_ms, jitter) = retry_policy();
+        assert!(max >= 1);
+        assert!(base >= 1);
+        assert!(max_ms >= base);
+        assert!(jitter >= 0);
+    }
+
+    #[test]
+    fn deterministic_jitter_ms_zero_cap() {
+        assert_eq!(deterministic_jitter_ms("msg-1", 1, 0), 0);
+    }
+
+    #[test]
+    fn deterministic_jitter_ms_within_cap() {
+        let jitter = deterministic_jitter_ms("msg-1", 1, 100);
+        assert!(jitter <= 100);
+    }
+
+    #[test]
+    fn deterministic_jitter_ms_deterministic() {
+        let a = deterministic_jitter_ms("msg-1", 1, 100);
+        let b = deterministic_jitter_ms("msg-1", 1, 100);
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn backoff_delay_ms_first_attempt() {
+        let delay = backoff_delay_ms("msg-1", 1, 500, 30_000, 0);
+        assert_eq!(delay, 500);
+    }
+
+    #[test]
+    fn backoff_delay_ms_exponential() {
+        let d1 = backoff_delay_ms("msg-1", 1, 500, 30_000, 0);
+        let d2 = backoff_delay_ms("msg-1", 2, 500, 30_000, 0);
+        let d3 = backoff_delay_ms("msg-1", 3, 500, 30_000, 0);
+        assert!(d2 > d1);
+        assert!(d3 > d2);
+    }
+
+    #[test]
+    fn backoff_delay_ms_caps_at_max() {
+        let delay = backoff_delay_ms("msg-1", 100, 500, 30_000, 0);
+        assert!(delay <= 30_000);
+    }
+
+    #[test]
+    fn is_retryable_error_timeout() {
+        let err = std::io::Error::new(ErrorKind::TimedOut, "timed out");
+        assert!(is_retryable_error(&err));
+    }
+
+    #[test]
+    fn is_retryable_error_connection_refused() {
+        let err = std::io::Error::new(ErrorKind::ConnectionRefused, "refused");
+        assert!(is_retryable_error(&err));
+    }
+
+    #[test]
+    fn is_retryable_error_temporary_message() {
+        let err = std::io::Error::new(ErrorKind::Other, "temporary failure");
+        assert!(is_retryable_error(&err));
+    }
+
+    #[test]
+    fn is_retryable_error_smtp_42x() {
+        let err = std::io::Error::new(ErrorKind::Other, "4.2.0 mailer busy");
+        assert!(is_retryable_error(&err));
+    }
+
+    #[test]
+    fn is_retryable_error_not_retryable() {
+        let err = std::io::Error::new(ErrorKind::PermissionDenied, "denied");
+        assert!(!is_retryable_error(&err));
+    }
+
+    #[test]
+    fn is_retryable_error_not_found() {
+        let err = std::io::Error::new(ErrorKind::NotFound, "not found");
+        assert!(!is_retryable_error(&err));
+    }
+}
+
 pub(crate) async fn send_queue_worker(mongo: Arc<mongodb::Client>) {
     let db_name = std::env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
     let logic = Arc::new(Logic::new(mongo.clone()));

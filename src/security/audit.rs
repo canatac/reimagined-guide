@@ -118,3 +118,21 @@ pub fn start_engine(client: std::sync::Arc<Client>) {
         }
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn db_default_mailserver() {
+        std::env::remove_var("MONGODB_DATABASE");
+        assert_eq!(db(), "mailserver");
+    }
+
+    #[test]
+    fn db_from_env() {
+        std::env::set_var("MONGODB_DATABASE", "test_db");
+        assert_eq!(db(), "test_db");
+        std::env::remove_var("MONGODB_DATABASE");
+    }
+}

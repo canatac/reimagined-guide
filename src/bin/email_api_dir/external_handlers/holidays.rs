@@ -33,6 +33,16 @@ fn default_official() -> bool {
     true
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_official_returns_true() {
+        assert_eq!(default_official(), true);
+    }
+}
+
 /// Query parameters for listing holidays
 #[derive(Debug, Deserialize)]
 pub struct HolidayQuery {

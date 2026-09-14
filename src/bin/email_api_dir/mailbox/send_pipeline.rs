@@ -257,3 +257,136 @@ pub(crate) fn build_email_and_message_id(
     (email, id, message_id)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_validated_send_request() -> ValidatedSendRequest {
+        ValidatedSendRequest {
+            user_id: "user-1".to_string(),
+            from: "sender@example.com".to_string(),
+            to: "recipient@example.com".to_string(),
+            cc: "cc@example.com".to_string(),
+            bcc: "bcc@example.com".to_string(),
+            subject: "Test Subject".to_string(),
+            mail_body: "<p>Hello</p>".to_string(),
+            smtp_body: "Hello".to_string(),
+            content_type_header: "text/html; charset=utf-8".to_string(),
+            in_reply_to: Some("<parent@example.com>".to_string()),
+            references: vec!["<ref1@example.com>".to_string()],
+            attachments: vec![],
+        }
+    }
+
+    fn make_dkim_outcome() -> DkimOutcome {
+        DkimOutcome {
+            dkim_sig: "v=1; a=rsa-sha256; ...".to_string(),
+            message_id_hdr: "<generated@example.com>".to_string(),
+            already_delivered: false,
+            dkim_remote_accepted: true,
+            dkim_remote_rejected: false,
+            dkim_response: Some("250 OK".to_string()),
+            dkim_mx_host: Some("mx.example.com".to_string()),
+            dkim_remote_ip: Some("192.0.2.1".to_string()),
+            dkim_remote_port: Some(25),
+        }
+    }
+
+    #[test]
+    fn build_email_and_message_id_uses_dkim_message_id() {
+        let v = make_validated_send_request();
+        let dkim = make_dkim_outcome();
+        let (_email, _id, message_id) = build_email_and_message_id(&v, &dkim);
+        assert_eq!(message_id, "<generated@example.com>");
+    }
+
+    #[test]
+    fn build_email_and_message_id_wraps_plain_message_id() {
+        let v = make_validated_send_request();
+        let mut dkim = make_dkim_outcome();
+        dkim.message_id_hdr = "plain@example.com".to_string();
+        let (_email, _id, message_id) = build_email_and_message_id(&v, &dkim);
+        assert_eq!(message_id, "<plain@example.com>");
+    }
+
+    #[test]
+    fn build_email_and_message_id_generates_when_empty() {
+        let v = make_validated_send_request();
+        let mut dkim = make_dkim_outcome();
+        dkim.message_id_hdr = String::new();
+        let (email, id, message_id) = build_email_and_message_id(&v, &dkim);
+        assert!(message_id.starts_with('<'));
+        assert!(message_id.ends_with('>'));
+        assert!(message_id.contains(&id));
+        assert_eq!(email.id, id);
+    }
+
+    #[test]
+    fn build_email_and_message_id_preserves_fields() {
+        let v = make_validated_send_request();
+        let dkim = make_dkim_outcome();
+        let (email, _id, _message_id) = build_email_and_message_id(&v, &dkim);
+        assert_eq!(email.from, "sender@example.com");
+        assert_eq!(email.to, "recipient@example.com");
+        assert_eq!(email.subject, "Test Subject");
+        assert_eq!(email.body, "Hello");
+        assert_eq!(email.dkim_signature, Some("v=1; a=rsa-sha256; ...".to_string()));
+    }
+
+    #[test]
+    fn build_email_and_message_id_includes_cc_bcc() {
+        let v = make_validated_send_request();
+        let dkim = make_dkim_outcome();
+        let (email, _id, _message_id) = build_email_and_message_id(&v, &dkim);
+        let header_names: Vec<&str> = email.headers.iter().map(|(k, _)| k.as_str()).collect();
+        assert!(header_names.contains(&"Cc"));
+        assert!(header_names.contains(&"Bcc"));
+    }
+
+    #[test]
+    fn build_email_and_message_id_includes_dkim_signature_header() {
+        let v = make_validated_send_request();
+        let dkim = make_dkim_outcome();
+        let (email, _id, _message_id) = build_email_and_message_id(&v, &dkim);
+        let header_names: Vec<&str> = email.headers.iter().map(|(k, _)| k.as_str()).collect();
+        assert!(header_names.contains(&"DKIM-Signature"));
+    }
+
+    #[test]
+    fn build_email_and_message_id_no_dkim_sig_when_empty() {
+        let v = make_validated_send_request();
+        let mut dkim = make_dkim_outcome();
+        dkim.dkim_sig = String::new();
+        let (email, _id, _message_id) = build_email_and_message_id(&v, &dkim);
+        assert_eq!(email.dkim_signature, None);
+    }
+
+    #[test]
+    fn build_email_and_message_id_includes_in_reply_to() {
+        let v = make_validated_send_request();
+        let dkim = make_dkim_outcome();
+        let (email, _id, _message_id) = build_email_and_message_id(&v, &dkim);
+        let header_names: Vec<&str> = email.headers.iter().map(|(k, _)| k.as_str()).collect();
+        assert!(header_names.contains(&"In-Reply-To"));
+    }
+
+    #[test]
+    fn build_email_and_message_id_includes_references() {
+        let v = make_validated_send_request();
+        let dkim = make_dkim_outcome();
+        let (email, _id, _message_id) = build_email_and_message_id(&v, &dkim);
+        let header_names: Vec<&str> = email.headers.iter().map(|(k, _)| k.as_str()).collect();
+        assert!(header_names.contains(&"References"));
+    }
+
+    #[test]
+    fn build_email_and_message_id_no_cc_when_empty() {
+        let mut v = make_validated_send_request();
+        v.cc = String::new();
+        let dkim = make_dkim_outcome();
+        let (email, _id, _message_id) = build_email_and_message_id(&v, &dkim);
+        let header_names: Vec<&str> = email.headers.iter().map(|(k, _)| k.as_str()).collect();
+        assert!(!header_names.contains(&"Cc"));
+    }
+}
+

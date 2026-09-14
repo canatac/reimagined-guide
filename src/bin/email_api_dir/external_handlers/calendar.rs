@@ -76,6 +76,50 @@ pub(crate) fn get_user_from_headers(req: &actix_web::HttpRequest) -> String {
     env::var("SMTP_USERNAME").unwrap_or_else(|_| "admin@misfits.ai".to_string())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_event_type_str_returns_default() {
+        assert_eq!(default_event_type_str(), "default");
+    }
+
+    #[test]
+    fn default_color_str_returns_blue() {
+        assert_eq!(default_color_str(), "#3788d8");
+    }
+
+    #[test]
+    fn default_agenda_days_returns_14() {
+        assert_eq!(default_agenda_days(), 14);
+    }
+
+    #[test]
+    fn parse_iso_to_bson_valid() {
+        let result = parse_iso_to_bson("2026-01-15T10:30:00Z");
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn parse_iso_to_bson_with_offset() {
+        let result = parse_iso_to_bson("2026-01-15T10:30:00+01:00");
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn parse_iso_to_bson_invalid() {
+        let result = parse_iso_to_bson("not-a-date");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn parse_iso_to_bson_empty() {
+        let result = parse_iso_to_bson("");
+        assert!(result.is_none());
+    }
+}
+
 // --- Calendar handlers ---
 
 pub(crate) async fn calendar_create_event(
