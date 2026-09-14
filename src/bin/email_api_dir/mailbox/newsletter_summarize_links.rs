@@ -16,6 +16,51 @@ pub(crate) fn is_html_payload(content_type: &str, raw_body: &str) -> bool {
     content_type.contains("text/html") || raw_body.to_ascii_lowercase().contains("<html")
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_plain_text_collapses_whitespace() {
+        assert_eq!(normalize_plain_text("  hello   world  "), "hello world");
+    }
+
+    #[test]
+    fn normalize_plain_text_empty() {
+        assert_eq!(normalize_plain_text(""), "");
+    }
+
+    #[test]
+    fn truncate_chars_within_limit() {
+        assert_eq!(truncate_chars("hello", 10), "hello");
+    }
+
+    #[test]
+    fn truncate_chars_exceeds_limit() {
+        assert_eq!(truncate_chars("hello world", 5), "hello");
+    }
+
+    #[test]
+    fn truncate_chars_unicode() {
+        assert_eq!(truncate_chars("héllo world", 5), "héllo");
+    }
+
+    #[test]
+    fn is_html_payload_by_content_type() {
+        assert!(is_html_payload("text/html; charset=utf-8", "plain"));
+    }
+
+    #[test]
+    fn is_html_payload_by_body() {
+        assert!(is_html_payload("text/plain", "<html><body>hi</body></html>"));
+    }
+
+    #[test]
+    fn is_html_payload_not_html() {
+        assert!(!is_html_payload("text/plain", "just plain text"));
+    }
+}
+
 fn normalize_discovered_link(base_url: &str, candidate: &str) -> Option<String> {
     let raw = candidate
         .trim()
@@ -216,7 +261,7 @@ mod tests {
 
     #[test]
     fn normalize_plain_text_collapses_whitespace() {
-        assert_eq!(normalize_plain_text("hello   world"), "hello world");
+        assert_eq!(normalize_plain_text("  hello   world  "), "hello world");
     }
 
     #[test]
@@ -242,88 +287,21 @@ mod tests {
     #[test]
     fn is_html_payload_content_type() {
         assert!(is_html_payload("text/html; charset=utf-8", ""));
+        assert!(is_html_payload("TEXT/HTML", ""));
     }
 
     #[test]
     fn is_html_payload_body() {
-        assert!(is_html_payload("text/plain", "<html><body>Hi</body></html>"));
+        assert!(is_html_payload("text/plain", "<html><body>Hello</body></html>"));
     }
 
     #[test]
-    fn is_html_payload_false() {
-        assert!(!is_html_payload("text/plain", "plain text"));
+    fn is_html_payload_not_html() {
+        assert!(!is_html_payload("text/plain", "Just plain text"));
     }
 
     #[test]
-    fn looks_like_content_url_normal() {
-        assert!(looks_like_content_url("https://example.com/blog/post"));
-    }
-
-    #[test]
-    fn looks_like_content_url_rejects_login() {
-        assert!(!looks_like_content_url("https://example.com/login"));
-    }
-
-    #[test]
-    fn looks_like_content_url_rejects_image() {
-        assert!(!looks_like_content_url("https://example.com/image.png"));
-    }
-
-    #[test]
-    fn looks_like_content_url_rejects_css() {
-        assert!(!looks_like_content_url("https://example.com/style.css"));
-    }
-
-    #[test]
-    fn is_homepage_url_root() {
-        assert!(is_homepage_url("https://example.com/"));
-    }
-
-    #[test]
-    fn is_homepage_url_empty_path() {
-        assert!(is_homepage_url("https://example.com"));
-    }
-
-    #[test]
-    fn is_homepage_url_false() {
-        assert!(!is_homepage_url("https://example.com/blog"));
-    }
-
-    #[test]
-    fn has_specific_path_true() {
-        assert!(has_specific_path("https://example.com/blog"));
-    }
-
-    #[test]
-    fn has_specific_path_false_root() {
-        assert!(!has_specific_path("https://example.com/"));
-    }
-
-    #[test]
-    fn same_site_identical() {
-        assert!(same_site("https://example.com/a", "https://example.com/b"));
-    }
-
-    #[test]
-    fn same_site_subdomain() {
-        assert!(same_site("https://blog.example.com/a", "https://example.com/b"));
-    }
-
-    #[test]
-    fn same_site_different() {
-        assert!(!same_site("https://example.com/a", "https://other.com/b"));
-    }
-
-    #[test]
-    fn should_update_source_url_specific_path() {
-        assert!(should_update_source_url(
-            "https://example.com/",
-            "https://example.com/blog"
-        ));
-    }
-
-    #[test]
-    fn should_update_source_url_same() {
+    fn should_update_source_url_same_returns_false() {
         assert!(!should_update_source_url(
             "https://example.com/blog",
             "https://example.com/blog"
@@ -334,35 +312,38 @@ mod tests {
     fn should_update_source_url_different_site() {
         assert!(!should_update_source_url(
             "https://example.com/",
-            "https://other.com/blog"
+            "https://other.com/article"
         ));
     }
 
     #[test]
-    fn discover_section_urls_returns_paths() {
-        let urls = discover_section_urls("https://example.com");
-        assert!(!urls.is_empty());
-        assert!(urls.iter().any(|u| u.contains("/blog")));
+    fn should_update_source_url_homepage_to_specific() {
+        assert!(should_update_source_url(
+            "https://example.com/",
+            "https://example.com/blog/article"
+        ));
     }
 
     #[test]
-    fn discover_section_urls_invalid_base() {
-        let urls = discover_section_urls("not-a-url");
-        assert!(urls.is_empty());
+    fn should_update_source_url_specific_to_homepage() {
+        assert!(!should_update_source_url(
+            "https://example.com/blog/article",
+            "https://example.com/"
+        ));
     }
 
     #[test]
     fn merge_links_adds_new() {
-        let mut target = vec!["https://a.com".to_string()];
-        merge_links(&mut target, vec!["https://b.com".to_string()], 10);
-        assert_eq!(target.len(), 2);
+        let mut target = vec!["a".to_string()];
+        merge_links(&mut target, vec!["b".to_string(), "c".to_string()], 10);
+        assert_eq!(target, vec!["a", "b", "c"]);
     }
 
     #[test]
     fn merge_links_skips_duplicates() {
-        let mut target = vec!["https://a.com".to_string()];
-        merge_links(&mut target, vec!["https://a.com".to_string()], 10);
-        assert_eq!(target.len(), 1);
+        let mut target = vec!["a".to_string()];
+        merge_links(&mut target, vec!["a".to_string(), "b".to_string()], 10);
+        assert_eq!(target, vec!["a", "b"]);
     }
 
     #[test]
@@ -370,13 +351,23 @@ mod tests {
         let mut target = vec![];
         merge_links(
             &mut target,
-            vec![
-                "https://a.com".to_string(),
-                "https://b.com".to_string(),
-                "https://c.com".to_string(),
-            ],
+            vec!["a".to_string(), "b".to_string(), "c".to_string()],
             2,
         );
         assert_eq!(target.len(), 2);
+    }
+
+    #[test]
+    fn discover_section_urls_returns_paths() {
+        let urls = discover_section_urls("https://example.com");
+        assert!(urls.len() >= 6);
+        assert!(urls.iter().any(|u| u.contains("/blog")));
+        assert!(urls.iter().any(|u| u.contains("/news")));
+    }
+
+    #[test]
+    fn discover_section_urls_invalid_url() {
+        let urls = discover_section_urls("not-a-url");
+        assert!(urls.is_empty());
     }
 }

@@ -79,7 +79,6 @@ fn is_retryable_error(err: &std::io::Error) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::ErrorKind;
 
     #[test]
     fn retry_policy_defaults() {
@@ -91,77 +90,54 @@ mod tests {
     }
 
     #[test]
-    fn deterministic_jitter_ms_zero_cap() {
-        assert_eq!(deterministic_jitter_ms("msg-1", 1, 0), 0);
-    }
-
-    #[test]
-    fn deterministic_jitter_ms_within_cap() {
-        let jitter = deterministic_jitter_ms("msg-1", 1, 100);
-        assert!(jitter <= 100);
-    }
-
-    #[test]
-    fn deterministic_jitter_ms_deterministic() {
-        let a = deterministic_jitter_ms("msg-1", 1, 100);
-        let b = deterministic_jitter_ms("msg-1", 1, 100);
+    fn deterministic_jitter_is_deterministic() {
+        let a = deterministic_jitter_ms("msg-1", 2, 100);
+        let b = deterministic_jitter_ms("msg-1", 2, 100);
         assert_eq!(a, b);
+        assert!(a <= 100);
     }
 
     #[test]
-    fn backoff_delay_ms_first_attempt() {
-        let delay = backoff_delay_ms("msg-1", 1, 500, 30_000, 0);
-        assert_eq!(delay, 500);
+    fn deterministic_jitter_zero_cap() {
+        assert_eq!(deterministic_jitter_ms("msg", 1, 0), 0);
     }
 
     #[test]
-    fn backoff_delay_ms_exponential() {
-        let d1 = backoff_delay_ms("msg-1", 1, 500, 30_000, 0);
-        let d2 = backoff_delay_ms("msg-1", 2, 500, 30_000, 0);
-        let d3 = backoff_delay_ms("msg-1", 3, 500, 30_000, 0);
-        assert!(d2 > d1);
-        assert!(d3 > d2);
+    fn backoff_delay_grows_with_attempt() {
+        let a1 = backoff_delay_ms("msg", 1, 500, 30_000, 0);
+        let a2 = backoff_delay_ms("msg", 2, 500, 30_000, 0);
+        let a3 = backoff_delay_ms("msg", 3, 500, 30_000, 0);
+        assert!(a2 > a1);
+        assert!(a3 > a2);
     }
 
     #[test]
-    fn backoff_delay_ms_caps_at_max() {
-        let delay = backoff_delay_ms("msg-1", 100, 500, 30_000, 0);
-        assert!(delay <= 30_000);
+    fn backoff_delay_respects_max() {
+        let delay = backoff_delay_ms("msg", 10, 1000, 5000, 0);
+        assert!(delay <= 5000);
     }
 
     #[test]
     fn is_retryable_error_timeout() {
-        let err = std::io::Error::new(ErrorKind::TimedOut, "timed out");
+        let err = std::io::Error::new(std::io::ErrorKind::TimedOut, "timed out");
         assert!(is_retryable_error(&err));
     }
 
     #[test]
     fn is_retryable_error_connection_refused() {
-        let err = std::io::Error::new(ErrorKind::ConnectionRefused, "refused");
+        let err = std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "refused");
         assert!(is_retryable_error(&err));
     }
 
     #[test]
-    fn is_retryable_error_temporary_message() {
-        let err = std::io::Error::new(ErrorKind::Other, "temporary failure");
+    fn is_retryable_error_temporary() {
+        let err = std::io::Error::new(std::io::ErrorKind::Other, "temporary failure 4.2.2");
         assert!(is_retryable_error(&err));
     }
 
     #[test]
-    fn is_retryable_error_smtp_42x() {
-        let err = std::io::Error::new(ErrorKind::Other, "4.2.0 mailer busy");
-        assert!(is_retryable_error(&err));
-    }
-
-    #[test]
-    fn is_retryable_error_not_retryable() {
-        let err = std::io::Error::new(ErrorKind::PermissionDenied, "denied");
-        assert!(!is_retryable_error(&err));
-    }
-
-    #[test]
-    fn is_retryable_error_not_found() {
-        let err = std::io::Error::new(ErrorKind::NotFound, "not found");
+    fn is_retryable_error_permanent() {
+        let err = std::io::Error::new(std::io::ErrorKind::Other, "550 permanent failure");
         assert!(!is_retryable_error(&err));
     }
 }

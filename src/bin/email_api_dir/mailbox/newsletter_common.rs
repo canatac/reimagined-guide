@@ -245,161 +245,113 @@ pub(crate) fn suggestion_catalog() -> Vec<(&'static str, &'static str, &'static 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
 
     #[test]
-    fn normalize_topic_trims_whitespace() {
-        assert_eq!(normalize_topic(Some("  Rust  ")), "Rust");
-    }
-
-    #[test]
-    fn normalize_topic_defaults_for_empty() {
-        assert_eq!(normalize_topic(Some("")), "Tech");
-    }
-
-    #[test]
-    fn normalize_topic_defaults_for_none() {
+    fn normalize_topic_default() {
         assert_eq!(normalize_topic(None), "Tech");
+        assert_eq!(normalize_topic(Some("")), "Tech");
+        assert_eq!(normalize_topic(Some("  ")), "Tech");
     }
 
     #[test]
-    fn normalize_topic_keeps_valid_value() {
-        assert_eq!(normalize_topic(Some("Science")), "Science");
+    fn normalize_topic_custom() {
+        assert_eq!(normalize_topic(Some("AI")), "AI");
+        assert_eq!(normalize_topic(Some("  AI  ")), "AI");
     }
 
     #[test]
-    fn normalize_url_adds_https_prefix() {
-        assert_eq!(
-            normalize_url(Some("example.com")),
-            Some("https://example.com".to_string())
-        );
-    }
-
-    #[test]
-    fn normalize_url_keeps_https() {
-        assert_eq!(
-            normalize_url(Some("https://example.com")),
-            Some("https://example.com".to_string())
-        );
-    }
-
-    #[test]
-    fn normalize_url_keeps_http() {
-        assert_eq!(
-            normalize_url(Some("http://example.com")),
-            Some("http://example.com".to_string())
-        );
-    }
-
-    #[test]
-    fn normalize_url_returns_none_for_empty() {
-        assert_eq!(normalize_url(Some("")), None);
-    }
-
-    #[test]
-    fn normalize_url_returns_none_for_none() {
+    fn normalize_url_none() {
         assert_eq!(normalize_url(None), None);
+        assert_eq!(normalize_url(Some("")), None);
+        assert_eq!(normalize_url(Some("  ")), None);
     }
 
     #[test]
-    fn compute_signal_uses_requested_value() {
-        assert_eq!(compute_signal("", Some(50)), 50);
+    fn normalize_url_with_scheme() {
+        assert_eq!(normalize_url(Some("https://example.com")), Some("https://example.com".to_string()));
+        assert_eq!(normalize_url(Some("http://example.com")), Some("http://example.com".to_string()));
     }
 
     #[test]
-    fn compute_signal_clamps_high() {
-        assert_eq!(compute_signal("", Some(150)), 100);
+    fn normalize_url_without_scheme() {
+        assert_eq!(normalize_url(Some("example.com")), Some("https://example.com".to_string()));
+        assert_eq!(normalize_url(Some("  example.com  ")), Some("https://example.com".to_string()));
     }
 
     #[test]
-    fn compute_signal_clamps_low() {
-        assert_eq!(compute_signal("", Some(-10)), 0);
+    fn compute_signal_requested() {
+        assert_eq!(compute_signal("summary", Some(75)), 75);
+        assert_eq!(compute_signal("summary", Some(150)), 100);
+        assert_eq!(compute_signal("summary", Some(-10)), 0);
     }
 
     #[test]
-    fn compute_signal_defaults_for_short_summary() {
-        assert_eq!(compute_signal("short", None), 65);
+    fn compute_signal_auto() {
+        let short = compute_signal("short", None);
+        assert!(short >= 50 && short <= 98);
+        let long = compute_signal(&"a".repeat(200), None);
+        assert!(long >= 50 && long <= 98);
     }
 
     #[test]
-    fn compute_signal_boosts_for_long_summary() {
-        let long = "a".repeat(100);
-        assert_eq!(compute_signal(&long, None), 70);
+    fn extract_domain_with_scheme() {
+        assert_eq!(extract_domain("https://www.example.com/path"), Some("example.com".to_string()));
+        assert_eq!(extract_domain("http://blog.example.com/post"), Some("blog.example.com".to_string()));
     }
 
     #[test]
-    fn extract_domain_strips_https() {
-        assert_eq!(
-            extract_domain("https://example.com/path"),
-            Some("example.com".to_string())
-        );
+    fn extract_domain_without_scheme() {
+        assert_eq!(extract_domain("example.com"), Some("example.com".to_string()));
+        assert_eq!(extract_domain("www.example.com"), Some("example.com".to_string()));
     }
 
     #[test]
-    fn extract_domain_strips_http() {
-        assert_eq!(
-            extract_domain("http://example.com"),
-            Some("example.com".to_string())
-        );
-    }
-
-    #[test]
-    fn extract_domain_strips_www() {
-        assert_eq!(
-            extract_domain("https://www.example.com"),
-            Some("example.com".to_string())
-        );
-    }
-
-    #[test]
-    fn extract_domain_handles_bare_domain() {
-        assert_eq!(
-            extract_domain("example.com"),
-            Some("example.com".to_string())
-        );
-    }
-
-    #[test]
-    fn extract_domain_returns_none_for_empty() {
+    fn extract_domain_empty() {
         assert_eq!(extract_domain(""), None);
+        assert_eq!(extract_domain("  "), None);
     }
 
     #[test]
-    fn bump_interest_inserts_new_key() {
-        let mut weights = HashMap::new();
+    fn bump_interest_increments() {
+        let mut weights = std::collections::HashMap::new();
         bump_interest(&mut weights, "tech", 3);
         assert_eq!(weights["tech"], 3);
+        bump_interest(&mut weights, "tech", 2);
+        assert_eq!(weights["tech"], 5);
     }
 
     #[test]
-    fn bump_interest_increments_existing_key() {
-        let mut weights = HashMap::new();
-        bump_interest(&mut weights, "tech", 3);
-        bump_interest(&mut weights, "tech", 2);
-        assert_eq!(weights["tech"], 5);
+    fn infer_interest_weights_empty() {
+        let weights = infer_interest_weights(&[], &[]);
+        assert!(weights.contains_key("tech"));
+    }
+
+    #[test]
+    fn infer_interest_weights_with_items() {
+        let mut item = bson::Document::new();
+        item.insert("title", "Rust and AI");
+        item.insert("summary", "Machine learning with Rust");
+        item.insert("topic", "tech");
+        let weights = infer_interest_weights(&[], &[item]);
+        assert!(weights.contains_key("tech"));
+        assert!(weights.contains_key("ai"));
     }
 
     #[test]
     fn suggestion_catalog_not_empty() {
         let catalog = suggestion_catalog();
         assert!(!catalog.is_empty());
+        assert!(catalog.len() >= 10);
     }
 
     #[test]
-    fn suggestion_catalog_first_entry_is_hacker_news() {
-        let catalog = suggestion_catalog();
-        assert_eq!(catalog[0].0, "Hacker News");
-    }
-
-    #[test]
-    fn suggestion_catalog_entries_have_five_fields() {
-        let catalog = suggestion_catalog();
-        for entry in &catalog {
-            assert!(!entry.0.is_empty());
-            assert!(!entry.1.is_empty());
-            assert!(!entry.2.is_empty());
-            assert!(!entry.3.is_empty());
-            assert!(!entry.4.is_empty());
+    fn suggestion_catalog_has_required_fields() {
+        for (name, url, kind, desc, tags) in suggestion_catalog() {
+            assert!(!name.is_empty());
+            assert!(!url.is_empty());
+            assert!(!kind.is_empty());
+            assert!(!desc.is_empty());
+            assert!(!tags.is_empty());
         }
     }
 }

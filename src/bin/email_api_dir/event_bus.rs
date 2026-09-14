@@ -97,6 +97,112 @@ pub(super) struct UserResponse {
     pub updated_at: String,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mail_event_kind_serializes() {
+        let kinds = vec![
+            MailEventKind::Sent,
+            MailEventKind::Received,
+            MailEventKind::Read,
+        ];
+        let json = serde_json::to_value(&kinds).unwrap();
+        assert_eq!(json[0], "sent");
+        assert_eq!(json[1], "received");
+        assert_eq!(json[2], "read");
+    }
+
+    #[test]
+    fn mail_event_deserializes() {
+        let json = serde_json::json!({
+            "id": "evt-1",
+            "kind": "sent",
+            "user_id": "user-1",
+            "email_id": "email-1",
+            "subject": "Test",
+            "from": "<EMAIL>",
+            "to": "<EMAIL>",
+            "timestamp": "2026-01-01T00:00:00Z"
+        });
+        let event: MailEvent = serde_json::from_value(json).unwrap();
+        assert_eq!(event.id, "evt-1");
+        assert_eq!(event.user_id, "user-1");
+        assert!(matches!(event.kind, MailEventKind::Sent));
+    }
+
+    #[test]
+    fn mail_event_kind_deserializes() {
+        let sent: MailEventKind = serde_json::from_str("\"sent\"").unwrap();
+        assert!(matches!(sent, MailEventKind::Sent));
+        let received: MailEventKind = serde_json::from_str("\"received\"").unwrap();
+        assert!(matches!(received, MailEventKind::Received));
+        let read: MailEventKind = serde_json::from_str("\"read\"").unwrap();
+        assert!(matches!(read, MailEventKind::Read));
+    }
+
+    #[test]
+    fn user_response_serializes() {
+        let user = UserResponse {
+            id: "user-1".into(),
+            email: "<EMAIL>".into(),
+            display_name: "John".into(),
+            role: "admin".into(),
+            two_factor_enabled: true,
+            created_at: "2026-01-01T00:00:00Z".into(),
+            updated_at: "2026-01-01T00:00:00Z".into(),
+        };
+        let json = serde_json::to_value(&user).unwrap();
+        assert_eq!(json["id"], "user-1");
+        assert_eq!(json["email"], "<EMAIL>");
+        assert_eq!(json["twoFactorEnabled"], true);
+    }
+
+    #[test]
+    fn github_token_response_deserializes() {
+        let json = serde_json::json!({
+            "access_token": "gho_123",
+            "error": null,
+            "error_description": null
+        });
+        let resp: GithubTokenResponse = serde_json::from_value(json).unwrap();
+        assert_eq!(resp.access_token, Some("gho_123".to_string()));
+    }
+
+    #[test]
+    fn github_user_deserializes() {
+        let json = serde_json::json!({
+            "id": 12345,
+            "login": "testuser",
+            "name": "Test User",
+            "email": "<EMAIL>"
+        });
+        let user: GithubUser = serde_json::from_value(json).unwrap();
+        assert_eq!(user.id, 12345);
+        assert_eq!(user.login, "testuser");
+        assert_eq!(user.name, Some("Test User".to_string()));
+    }
+
+    #[test]
+    fn github_email_deserializes() {
+        let json = serde_json::json!({
+            "email": "<EMAIL>",
+            "primary": true,
+            "verified": true
+        });
+        let email: GithubEmail = serde_json::from_value(json).unwrap();
+        assert_eq!(email.email, "<EMAIL>");
+        assert!(email.primary);
+        assert!(email.verified);
+    }
+
+    #[test]
+    fn send_queue_coll_constant() {
+        assert_eq!(SEND_QUEUE_COLL, "send_queue");
+    }
+}
+
 #[derive(Serialize)]
 pub(super) struct SessionResponse {
     pub id: String,

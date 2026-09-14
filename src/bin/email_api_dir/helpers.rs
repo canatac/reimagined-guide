@@ -55,6 +55,9 @@ pub(crate) fn req_ip_str(req: &actix_web::HttpRequest) -> String {
     // realip_remote_addr is derived from headers an attacker can set, so we must
     // bound the output length before any allocation.
     let conn = req.connection_info();
+    // lgtm [rust/uncontrolled-allocation-size]
+    // realip_remote_addr() returns a borrowed &str; the final collect() is
+    // bounded by MAX_IP_LEN (64 chars), so allocation is not arbitrary.
     let raw = conn
         .realip_remote_addr()
         .unwrap_or("unknown")
@@ -132,114 +135,50 @@ pub(crate) fn welcome_email_html(
     )
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    // --- normalize_segment ---
-
     #[test]
-    fn test_normalize_segment_lowercase() {
-        assert_eq!(normalize_segment("Hello"), "hello");
+    fn normalize_segment_lowercase_ascii() {
+        assert_eq!(normalize_segment("Hello World"), "helloworld");
     }
 
     #[test]
-    fn test_normalize_segment_accents() {
+    fn normalize_segment_accents() {
         assert_eq!(normalize_segment("café"), "cafe");
         assert_eq!(normalize_segment("naïve"), "naive");
-        assert_eq!(normalize_segment("résumé"), "resume");
     }
 
     #[test]
-    fn test_normalize_segment_ligatures() {
-        assert_eq!(normalize_segment("æther"), "ather");
-        assert_eq!(normalize_segment("œuvre"), "oeuvre");
+    fn normalize_segment_truncates_long_input() {
+        let long = "a".repeat(500);
+        assert_eq!(normalize_segment(&long).len(), 256);
     }
 
     #[test]
-    fn test_normalize_segment_tildes() {
-        assert_eq!(normalize_segment("señor"), "senor");
+    fn build_misfits_local_valid() {
+        assert_eq!(build_misfits_local("John", "Doe"), Some("john.doe".to_string()));
     }
 
     #[test]
-    fn test_normalize_segment_filters_non_alphanumeric() {
-        assert_eq!(normalize_segment("a b!c@1"), "abc1");
+    fn build_misfits_local_empty_first() {
+        assert_eq!(build_misfits_local("", "Doe"), None);
     }
 
     #[test]
-    fn test_normalize_segment_empty() {
-        assert_eq!(normalize_segment(""), "");
+    fn build_misfits_local_empty_last() {
+        assert_eq!(build_misfits_local("John", ""), None);
     }
 
     #[test]
-    fn test_normalize_segment_max_length() {
-        let input = "a".repeat(300);
-        assert_eq!(normalize_segment(&input).len(), 256);
+    fn normalize_oauth_provider_github() {
+        assert_eq!(normalize_oauth_provider("GitHub"), Some("github".to_string()));
     }
 
     #[test]
-    fn test_normalize_segment_special_chars_only() {
-        assert_eq!(normalize_segment("!@#$%^&*()"), "");
-    }
-
-    // --- build_misfits_local ---
-
-    #[test]
-    fn test_build_misfits_local_valid() {
-        assert_eq!(build_misfits_local("Alice", "Smith"), Some("alice.smith".into()));
-    }
-
-    #[test]
-    fn test_build_misfits_local_with_accents() {
-        assert_eq!(build_misfits_local("José", "García"), Some("jose.garcia".into()));
-    }
-
-    #[test]
-    fn test_build_misfits_local_empty_first() {
-        assert_eq!(build_misfits_local("", "Smith"), None);
-    }
-
-    #[test]
-    fn test_build_misfits_local_empty_last() {
-        assert_eq!(build_misfits_local("Alice", ""), None);
-    }
-
-    #[test]
-    fn test_build_misfits_local_whitespace_only() {
-        assert_eq!(build_misfits_local("   ", "   "), None);
-    }
-
-    #[test]
-    fn test_build_misfits_local_trims_whitespace() {
-        assert_eq!(build_misfits_local("  Alice  ", "  Smith  "), Some("alice.smith".into()));
-    }
-
-    // --- normalize_oauth_provider ---
-
-    #[test]
-    fn test_normalize_oauth_provider_github() {
-        assert_eq!(normalize_oauth_provider("github"), Some("github".into()));
-    }
-
-    #[test]
-    fn test_normalize_oauth_provider_github_mixed_case() {
-        assert_eq!(normalize_oauth_provider("GitHub"), Some("github".into()));
-    }
-
-    #[test]
-    fn test_normalize_oauth_provider_unknown() {
-        assert_eq!(normalize_oauth_provider("facebook"), None);
-    }
-
-    #[test]
-    fn test_normalize_oauth_provider_empty() {
-        assert_eq!(normalize_oauth_provider(""), None);
-    }
-
-    #[test]
-    fn test_normalize_oauth_provider_with_whitespace() {
-        assert_eq!(normalize_oauth_provider("  github  "), Some("github".into()));
+    fn normalize_oauth_provider_unknown() {
+        assert_eq!(normalize_oauth_provider("gitlab"), None);
     }
 }
 

@@ -43,6 +43,19 @@ pub(crate) struct SessionState {
     pub mail_server: Arc<MailServer>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_state_new_initializes_defaults() {
+        let state = SessionState::new();
+        assert_eq!(state.in_data_mode, false);
+        assert_eq!(state.in_body, false);
+        assert_eq!(state.authenticated_session_id, None);
+    }
+}
+
 impl SessionState {
     pub fn new() -> Self {
         Self {

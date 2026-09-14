@@ -86,6 +86,24 @@ fn source_name(source_doc: &bson::Document) -> String {
         .unwrap_or_else(|| "Source".to_string())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn source_name_returns_name() {
+        let mut doc = bson::Document::new();
+        doc.insert("name", "My Source");
+        assert_eq!(source_name(&doc), "My Source");
+    }
+
+    #[test]
+    fn source_name_fallback() {
+        let doc = bson::Document::new();
+        assert_eq!(source_name(&doc), "Source");
+    }
+}
+
 fn source_url(source_doc: &bson::Document) -> Result<String, HttpResponse> {
     source_doc
         .get_str("url")

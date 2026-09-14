@@ -61,6 +61,51 @@ pub fn compute_signature(body: &[u8], secret: &[u8]) -> String {
     hex::encode(result.into_bytes())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compute_signature_returns_hex() {
+        let sig = compute_signature(b"hello", b"secret");
+        assert_eq!(sig.len(), 64);
+        assert!(sig.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn compute_signature_deterministic() {
+        let sig1 = compute_signature(b"hello", b"secret");
+        let sig2 = compute_signature(b"hello", b"secret");
+        assert_eq!(sig1, sig2);
+    }
+
+    #[test]
+    fn verify_signature_valid() {
+        let body = b"test body";
+        let secret = b"mysecret";
+        let sig = compute_signature(body, secret);
+        assert!(verify_signature(body, secret, &sig));
+    }
+
+    #[test]
+    fn verify_signature_invalid() {
+        let body = b"test body";
+        let secret = b"mysecret";
+        assert!(!verify_signature(body, secret, "invalidsig"));
+    }
+
+    #[test]
+    fn incoming_webhook_secrets_register_and_get() {
+        let secrets = IncomingWebhookSecrets::new();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            secrets.register("github".to_string(), "gh-secret".to_string()).await;
+            assert_eq!(secrets.get("github").await, Some("gh-secret".to_string()));
+            assert_eq!(secrets.get("unknown").await, None);
+        });
+    }
+}
+
 /// Verify an HMAC-SHA256 signature using constant-time comparison.
 pub fn verify_signature(body: &[u8], secret: &[u8], signature: &str) -> bool {
     let expected = compute_signature(body, secret);

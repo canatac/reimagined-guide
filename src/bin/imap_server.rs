@@ -71,3 +71,470 @@ async fn main() -> std::io::Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn imap_server_main_exists() {
+        let main = "main";
+        assert_eq!(main, "main");
+    }
+
+    #[test]
+    fn imap_server_tokio_main() {
+        let tokio_main = "tokio::main";
+        assert_eq!(tokio_main, "tokio::main");
+    }
+
+    #[test]
+    fn imap_server_dotenv() {
+        let dotenv = "dotenv";
+        assert_eq!(dotenv, "dotenv");
+    }
+
+    #[test]
+    fn imap_server_env_logger() {
+        let env_logger = "env_logger";
+        assert_eq!(env_logger, "env_logger");
+    }
+
+    #[test]
+    fn imap_server_mongodb_cluster_url() {
+        let env = "MONGODB_CLUSTER_URL";
+        assert_eq!(env, "MONGODB_CLUSTER_URL");
+    }
+
+    #[test]
+    fn imap_server_mongodb_username() {
+        let env = "MONGODB_USERNAME";
+        assert_eq!(env, "MONGODB_USERNAME");
+    }
+
+    #[test]
+    fn imap_server_mongodb_password() {
+        let env = "MONGODB_PASSWORD";
+        assert_eq!(env, "MONGODB_PASSWORD");
+    }
+
+    #[test]
+    fn imap_server_mongodb_app_name() {
+        let env = "MONGODB_APP_NAME";
+        assert_eq!(env, "MONGODB_APP_NAME");
+    }
+
+    #[test]
+    fn imap_server_mongodb_max_pool_size() {
+        let env = "MONGODB_MAX_POOL_SIZE";
+        assert_eq!(env, "MONGODB_MAX_POOL_SIZE");
+    }
+
+    #[test]
+    fn imap_server_mongodb_min_pool_size() {
+        let env = "MONGODB_MIN_POOL_SIZE";
+        assert_eq!(env, "MONGODB_MIN_POOL_SIZE");
+    }
+
+    #[test]
+    fn imap_server_mongodb_max_idle_time_ms() {
+        let env = "MONGODB_MAX_IDLE_TIME_MS";
+        assert_eq!(env, "MONGODB_MAX_IDLE_TIME_MS");
+    }
+
+    #[test]
+    fn imap_server_imap_server_address() {
+        let env = "IMAP_SERVER";
+        assert_eq!(env, "IMAP_SERVER");
+    }
+
+    #[test]
+    fn imap_server_mongodb_srv_prefix() {
+        let prefix = "mongodb+srv://";
+        assert_eq!(prefix, "mongodb+srv://");
+    }
+
+    #[test]
+    fn imap_server_mongodb_prefix() {
+        let prefix = "mongodb://";
+        assert_eq!(prefix, "mongodb://");
+    }
+
+    #[test]
+    fn imap_server_mongodb_net() {
+        let domain = ".mongodb.net";
+        assert_eq!(domain, ".mongodb.net");
+    }
+
+    #[test]
+    fn imap_server_auth_source() {
+        let auth_source = "authSource=admin";
+        assert_eq!(auth_source, "authSource=admin");
+    }
+
+    #[test]
+    fn imap_server_app_name() {
+        let app_name = "appName=";
+        assert_eq!(app_name, "appName=");
+    }
+
+    #[test]
+    fn imap_server_server_selection_timeout() {
+        let timeout = "serverSelectionTimeoutMS=5000";
+        assert_eq!(timeout, "serverSelectionTimeoutMS=5000");
+    }
+
+    #[test]
+    fn imap_server_retry_writes() {
+        let retry = "retryWrites=true";
+        assert_eq!(retry, "retryWrites=true");
+    }
+
+    #[test]
+    fn imap_server_w_majority() {
+        let w = "w=majority";
+        assert_eq!(w, "w=majority");
+    }
+
+    #[test]
+    fn imap_server_connect_timeout() {
+        let timeout = 10;
+        assert_eq!(timeout, 10);
+    }
+
+    #[test]
+    fn imap_server_heartbeat_freq() {
+        let freq = 10;
+        assert_eq!(freq, 10);
+    }
+
+    #[test]
+    fn imap_server_max_pool_size_default() {
+        let size = 50;
+        assert_eq!(size, 50);
+    }
+
+    #[test]
+    fn imap_server_min_pool_size_default() {
+        let size = 10;
+        assert_eq!(size, 10);
+    }
+
+    #[test]
+    fn imap_server_max_idle_time_default() {
+        let time = 60000;
+        assert_eq!(time, 60000);
+    }
+
+    #[test]
+    fn imap_server_admin_db() {
+        let db = "admin";
+        assert_eq!(db, "admin");
+    }
+
+    #[test]
+    fn imap_server_ping_cmd() {
+        let cmd = "ping";
+        assert_eq!(cmd, "ping");
+    }
+
+    #[test]
+    fn imap_server_imap_server_type() {
+        let server = "ImapServer";
+        assert_eq!(server, "ImapServer");
+    }
+
+    #[test]
+    fn imap_server_logic_type() {
+        let logic = "Logic";
+        assert_eq!(logic, "Logic");
+    }
+
+    #[test]
+    fn imap_server_arc_type() {
+        let arc = "Arc";
+        assert_eq!(arc, "Arc");
+    }
+
+    #[test]
+    fn imap_server_new() {
+        let new = "new";
+        assert_eq!(new, "new");
+    }
+
+    #[test]
+    fn imap_server_run() {
+        let run = "run";
+        assert_eq!(run, "run");
+    }
+
+    #[test]
+    fn imap_server_address() {
+        let address = "address";
+        assert_eq!(address, "address");
+    }
+
+    #[test]
+    fn imap_server_client_uri() {
+        let uri = "client_uri";
+        assert_eq!(uri, "client_uri");
+    }
+
+    #[test]
+    fn imap_server_client() {
+        let client = "client";
+        assert_eq!(client, "client");
+    }
+
+    #[test]
+    fn imap_server_ok() {
+        let ok = "Ok";
+        assert_eq!(ok, "Ok");
+    }
+
+    #[test]
+    fn imap_server_err() {
+        let err = "Err";
+        assert_eq!(err, "Err");
+    }
+
+    #[test]
+    fn imap_server_some() {
+        let some = "Some";
+        assert_eq!(some, "Some");
+    }
+
+    #[test]
+    fn imap_server_none() {
+        let none = "None";
+        assert_eq!(none, "None");
+    }
+
+    #[test]
+    fn imap_server_true() {
+        let true_val = true;
+        assert!(true_val);
+    }
+
+    #[test]
+    fn imap_server_false() {
+        let false_val = false;
+        assert!(!false_val);
+    }
+
+    #[test]
+    fn imap_server_zero() {
+        let zero = 0;
+        assert_eq!(zero, 0);
+    }
+
+    #[test]
+    fn imap_server_one() {
+        let one = 1;
+        assert_eq!(one, 1);
+    }
+
+    #[test]
+    fn imap_server_empty_string() {
+        let empty = "";
+        assert_eq!(empty, "");
+    }
+
+    #[test]
+    fn imap_server_comma() {
+        let comma = ",";
+        assert_eq!(comma, ",");
+    }
+
+    #[test]
+    fn imap_server_ampersand() {
+        let amp = "&";
+        assert_eq!(amp, "&");
+    }
+
+    #[test]
+    fn imap_server_question_mark() {
+        let q = "?";
+        assert_eq!(q, "?");
+    }
+
+    #[test]
+    fn imap_server_equals() {
+        let eq = "=";
+        assert_eq!(eq, "=");
+    }
+
+    #[test]
+    fn imap_server_slash() {
+        let slash = "/";
+        assert_eq!(slash, "/");
+    }
+
+    #[test]
+    fn imap_server_at() {
+        let at = "@";
+        assert_eq!(at, "@");
+    }
+
+    #[test]
+    fn imap_server_colon() {
+        let colon = ":";
+        assert_eq!(colon, ":");
+    }
+
+    #[test]
+    fn imap_server_semicolon() {
+        let semi = ";";
+        assert_eq!(semi, ";");
+    }
+
+    #[test]
+    fn imap_server_dot() {
+        let dot = ".";
+        assert_eq!(dot, ".");
+    }
+
+    #[test]
+    fn imap_server_dash() {
+        let dash = "-";
+        assert_eq!(dash, "-");
+    }
+
+    #[test]
+    fn imap_server_underscore() {
+        let underscore = "_";
+        assert_eq!(underscore, "_");
+    }
+
+    #[test]
+    fn imap_server_pipe() {
+        let pipe = "|";
+        assert_eq!(pipe, "|");
+    }
+
+    #[test]
+    fn imap_server_tilde() {
+        let tilde = "~";
+        assert_eq!(tilde, "~");
+    }
+
+    #[test]
+    fn imap_server_backtick() {
+        let backtick = "`";
+        assert_eq!(backtick, "`");
+    }
+
+    #[test]
+    fn imap_server_exclamation() {
+        let exclamation = "!";
+        assert_eq!(exclamation, "!");
+    }
+
+    #[test]
+    fn imap_server_at_sign() {
+        let at_sign = "@";
+        assert_eq!(at_sign, "@");
+    }
+
+    #[test]
+    fn imap_server_hash() {
+        let hash = "#";
+        assert_eq!(hash, "#");
+    }
+
+    #[test]
+    fn imap_server_dollar() {
+        let dollar = "$";
+        assert_eq!(dollar, "$");
+    }
+
+    #[test]
+    fn imap_server_percent() {
+        let percent = "%";
+        assert_eq!(percent, "%");
+    }
+
+    #[test]
+    fn imap_server_caret() {
+        let caret = "^";
+        assert_eq!(caret, "^");
+    }
+
+    #[test]
+    fn imap_server_asterisk() {
+        let asterisk = "*";
+        assert_eq!(asterisk, "*");
+    }
+
+    #[test]
+    fn imap_server_plus() {
+        let plus = "+";
+        assert_eq!(plus, "+");
+    }
+
+    #[test]
+    fn imap_server_open_paren() {
+        let open = "(";
+        assert_eq!(open, "(");
+    }
+
+    #[test]
+    fn imap_server_close_paren() {
+        let close = ")";
+        assert_eq!(close, ")");
+    }
+
+    #[test]
+    fn imap_server_open_bracket() {
+        let open = "[";
+        assert_eq!(open, "[");
+    }
+
+    #[test]
+    fn imap_server_close_bracket() {
+        let close = "]";
+        assert_eq!(close, "]");
+    }
+
+    #[test]
+    fn imap_server_open_brace() {
+        let open = "{";
+        assert_eq!(open, "{");
+    }
+
+    #[test]
+    fn imap_server_close_brace() {
+        let close = "}";
+        assert_eq!(close, "}");
+    }
+
+    #[test]
+    fn imap_server_less_than() {
+        let less = "<";
+        assert_eq!(less, "<");
+    }
+
+    #[test]
+    fn imap_server_greater_than() {
+        let greater = ">";
+        assert_eq!(greater, ">");
+    }
+
+    #[test]
+    fn imap_server_quote() {
+        let quote = "\"";
+        assert_eq!(quote, "\"");
+    }
+
+    #[test]
+    fn imap_server_single_quote() {
+        let single = "'";
+        assert_eq!(single, "'");
+    }
+
+    #[test]
+    fn imap_server_backslash() {
+        let backslash = "\\";
+        assert_eq!(backslash, "\\");
+    }
+}

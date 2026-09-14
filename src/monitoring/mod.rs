@@ -278,5 +278,116 @@ fn smtp_code_risk(code: Option<u16>) -> f32 {
 }
 
 #[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_env_list_upper_basic() {
+        std::env::set_var("TEST_UPPER", "a,b,c");
+        assert_eq!(parse_env_list_upper("TEST_UPPER"), vec!["A", "B", "C"]);
+        std::env::remove_var("TEST_UPPER");
+    }
+
+    #[test]
+    fn parse_env_list_upper_mixed_case() {
+        std::env::set_var("TEST_UPPER_MIXED", "hello,World");
+        assert_eq!(parse_env_list_upper("TEST_UPPER_MIXED"), vec!["HELLO", "WORLD"]);
+        std::env::remove_var("TEST_UPPER_MIXED");
+    }
+
+    #[test]
+    fn parse_env_list_lower_basic() {
+        std::env::set_var("TEST_LOWER", "A,B,C");
+        assert_eq!(parse_env_list_lower("TEST_LOWER"), vec!["a", "b", "c"]);
+        std::env::remove_var("TEST_LOWER");
+    }
+
+    #[test]
+    fn country_risk_forbidden() {
+        assert_eq!(country_risk(Some("CN"), &["CN".to_string(), "RU".to_string()]), 50.0);
+    }
+
+    #[test]
+    fn country_risk_high_risk() {
+        assert_eq!(country_risk(Some("CN"), &[]), 25.0);
+        assert_eq!(country_risk(Some("RU"), &[]), 25.0);
+    }
+
+    #[test]
+    fn country_risk_none() {
+        assert_eq!(country_risk(None, &["CN".to_string()]), 0.0);
+    }
+
+    #[test]
+    fn country_risk_clean() {
+        assert_eq!(country_risk(Some("FR"), &["CN".to_string()]), 0.0);
+    }
+
+    #[test]
+    fn company_risk_risky() {
+        assert_eq!(company_risk(Some("BadCorp"), &["badcorp".to_string()]), 30.0);
+    }
+
+    #[test]
+    fn company_risk_unknown() {
+        assert_eq!(company_risk(Some("unknown"), &[]), 15.0);
+    }
+
+    #[test]
+    fn company_risk_none() {
+        assert_eq!(company_risk(None, &[]), 15.0);
+    }
+
+    #[test]
+    fn company_risk_clean() {
+        assert_eq!(company_risk(Some("Google"), &[]), 0.0);
+    }
+
+    #[test]
+    fn latency_risk_high() {
+        assert_eq!(latency_risk(Some(15_000)), 10.0);
+    }
+
+    #[test]
+    fn latency_risk_medium() {
+        assert_eq!(latency_risk(Some(7_000)), 5.0);
+    }
+
+    #[test]
+    fn latency_risk_low() {
+        assert_eq!(latency_risk(Some(1_000)), 0.0);
+        assert_eq!(latency_risk(None), 0.0);
+    }
+
+    #[test]
+    fn status_risk_bounced() {
+        assert_eq!(status_risk(&SmtpStatus::Bounced), 10.0);
+    }
+
+    #[test]
+    fn status_risk_delivered() {
+        assert_eq!(status_risk(&SmtpStatus::Delivered), 0.0);
+    }
+
+    #[test]
+    fn smtp_code_risk_high() {
+        assert_eq!(smtp_code_risk(Some(550)), 15.0);
+        assert_eq!(smtp_code_risk(Some(554)), 15.0);
+    }
+
+    #[test]
+    fn smtp_code_risk_medium() {
+        assert_eq!(smtp_code_risk(Some(421)), 5.0);
+        assert_eq!(smtp_code_risk(Some(450)), 5.0);
+    }
+
+    #[test]
+    fn smtp_code_risk_none() {
+        assert_eq!(smtp_code_risk(Some(250)), 0.0);
+        assert_eq!(smtp_code_risk(None), 0.0);
+    }
+}
+
+#[cfg(test)]
 #[path = "mod_tests.rs"]
 mod tests;

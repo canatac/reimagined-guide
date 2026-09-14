@@ -59,6 +59,113 @@ fn default_agenda_days() -> u32 {
     14
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_event_type_str_is_default() {
+        assert_eq!(default_event_type_str(), "default");
+    }
+
+    #[test]
+    fn default_color_str_is_blue() {
+        assert_eq!(default_color_str(), "#3788d8");
+    }
+
+    #[test]
+    fn default_agenda_days_is_14() {
+        assert_eq!(default_agenda_days(), 14);
+    }
+
+    #[test]
+    fn parse_iso_to_bson_valid() {
+        let result = parse_iso_to_bson("2026-01-15T10:30:00Z");
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn parse_iso_to_bson_invalid() {
+        let result = parse_iso_to_bson("not-a-date");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn parse_iso_to_bson_with_offset() {
+        let result = parse_iso_to_bson("2026-01-15T10:30:00+02:00");
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn create_calendar_event_request_deserializes() {
+        let json = serde_json::json!({
+            "title": "Meeting",
+            "description": "Team sync",
+            "start": "2026-01-15T10:00:00Z",
+            "end": "2026-01-15T11:00:00Z",
+            "event_type": "meeting",
+            "color": "#ff0000",
+            "location": "Office"
+        });
+        let req: CreateCalendarEventRequest = serde_json::from_value(json).unwrap();
+        assert_eq!(req.title, "Meeting");
+        assert_eq!(req.description, "Team sync");
+        assert_eq!(req.event_type, "meeting");
+        assert_eq!(req.color, "#ff0000");
+    }
+
+    #[test]
+    fn create_calendar_event_request_defaults() {
+        let json = serde_json::json!({
+            "title": "Meeting",
+            "start": "2026-01-15T10:00:00Z",
+            "end": "2026-01-15T11:00:00Z"
+        });
+        let req: CreateCalendarEventRequest = serde_json::from_value(json).unwrap();
+        assert_eq!(req.event_type, "default");
+        assert_eq!(req.color, "#3788d8");
+        assert_eq!(req.description, "");
+        assert_eq!(req.location, "");
+    }
+
+    #[test]
+    fn update_calendar_event_request_deserializes() {
+        let json = serde_json::json!({
+            "title": "Updated Meeting",
+            "color": "#00ff00"
+        });
+        let req: UpdateCalendarEventRequest = serde_json::from_value(json).unwrap();
+        assert_eq!(req.title, Some("Updated Meeting".to_string()));
+        assert_eq!(req.color, Some("#00ff00".to_string()));
+        assert_eq!(req.description, None);
+    }
+
+    #[test]
+    fn calendar_query_params_deserializes() {
+        let json = serde_json::json!({
+            "start": "2026-01-01T00:00:00Z",
+            "end": "2026-01-31T23:59:59Z"
+        });
+        let params: CalendarQueryParams = serde_json::from_value(json).unwrap();
+        assert_eq!(params.start, Some("2026-01-01T00:00:00Z".to_string()));
+        assert_eq!(params.end, Some("2026-01-31T23:59:59Z".to_string()));
+    }
+
+    #[test]
+    fn calendar_agenda_query_default_days() {
+        let json = serde_json::json!({});
+        let query: CalendarAgendaQuery = serde_json::from_value(json).unwrap();
+        assert_eq!(query.days, 14);
+    }
+
+    #[test]
+    fn calendar_agenda_query_custom_days() {
+        let json = serde_json::json!({ "days": 7 });
+        let query: CalendarAgendaQuery = serde_json::from_value(json).unwrap();
+        assert_eq!(query.days, 7);
+    }
+}
+
 pub(crate) fn parse_iso_to_bson(s: &str) -> Option<chrono::DateTime<chrono::Utc>> {
     chrono::DateTime::parse_from_rfc3339(s)
         .ok()
