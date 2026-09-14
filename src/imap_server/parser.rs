@@ -52,6 +52,118 @@ pub(super) fn parse_email(email_content: &str) -> (HashMap<String, String>, Stri
     (headers, body)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_fetch_arguments_valid() {
+        let parts = vec![
+            "1".to_string(),
+            "FETCH".to_string(),
+            "1:5".to_string(),
+            "BODY[]".to_string(),
+        ];
+        let result = parse_fetch_arguments(&parts).unwrap();
+        assert_eq!(result.sequence_set, "1:5");
+        assert_eq!(result.data_items, "BODY[]");
+    }
+
+    #[test]
+    fn parse_fetch_arguments_lowercase() {
+        let parts = vec![
+            "1".to_string(),
+            "fetch".to_string(),
+            "1".to_string(),
+            "FLAGS".to_string(),
+        ];
+        let result = parse_fetch_arguments(&parts).unwrap();
+        assert_eq!(result.data_items, "FLAGS");
+    }
+
+    #[test]
+    fn parse_fetch_arguments_multiple_data_items() {
+        let parts = vec![
+            "1".to_string(),
+            "FETCH".to_string(),
+            "1".to_string(),
+            "BODY[]".to_string(),
+            "FLAGS".to_string(),
+        ];
+        let result = parse_fetch_arguments(&parts).unwrap();
+        assert_eq!(result.data_items, "BODY[] FLAGS");
+    }
+
+    #[test]
+    fn parse_fetch_arguments_returns_none_for_short_input() {
+        let parts = vec!["1".to_string(), "FETCH".to_string()];
+        assert!(parse_fetch_arguments(&parts).is_none());
+    }
+
+    #[test]
+    fn parse_fetch_arguments_returns_none_for_wrong_command() {
+        let parts = vec![
+            "1".to_string(),
+            "SELECT".to_string(),
+            "1".to_string(),
+            "BODY[]".to_string(),
+        ];
+        assert!(parse_fetch_arguments(&parts).is_none());
+    }
+
+    #[test]
+    fn parse_fetch_arguments_empty_sequence() {
+        let parts = vec![
+            "1".to_string(),
+            "FETCH".to_string(),
+            "".to_string(),
+            "BODY[]".to_string(),
+        ];
+        assert!(parse_fetch_arguments(&parts).is_none());
+    }
+
+    #[test]
+    fn parse_email_headers_and_body() {
+        let content = "From: a@b.com\nTo: c@d.com\nSubject: Test\n\nHello World";
+        let (headers, body) = parse_email(content);
+        assert_eq!(headers.get("From"), Some(&"a@b.com".to_string()));
+        assert_eq!(headers.get("To"), Some(&"c@d.com".to_string()));
+        assert_eq!(headers.get("Subject"), Some(&"Test".to_string()));
+        assert_eq!(body.trim(), "Hello World");
+    }
+
+    #[test]
+    fn parse_email_multiline_body() {
+        let content = "From: x@y.com\n\nLine 1\nLine 2\nLine 3";
+        let (_, body) = parse_email(content);
+        assert!(body.contains("Line 1"));
+        assert!(body.contains("Line 2"));
+        assert!(body.contains("Line 3"));
+    }
+
+    #[test]
+    fn parse_email_empty_body() {
+        let content = "From: a@b.com\n\n";
+        let (headers, body) = parse_email(content);
+        assert_eq!(headers.len(), 1);
+        assert!(body.is_empty() || body.trim().is_empty());
+    }
+
+    #[test]
+    fn parse_email_colon_in_header_value() {
+        let content = "Subject: Re: Fw: Test\n\nBody";
+        let (headers, _) = parse_email(content);
+        assert_eq!(headers.get("Subject"), Some(&"Re: Fw: Test".to_string()));
+    }
+
+    #[test]
+    fn parse_email_handles_trailing_whitespace() {
+        let content = "From:   a@b.com  \nTo: c@d.com\n\nBody";
+        let (headers, _) = parse_email(content);
+        assert_eq!(headers.get("From"), Some(&"a@b.com".to_string()));
+    }
+}
+
 impl ImapServer {
     /// Handle raw message content received after an APPEND literal.
     pub(super) async fn handle_append_data(

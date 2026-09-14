@@ -60,6 +60,65 @@ pub(crate) struct AdminAuditQuery {
     limit: Option<i64>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn admin_audit_coll_name() {
+        assert_eq!(ADMIN_AUDIT_COLL, "admin_audit_log");
+    }
+
+    #[test]
+    fn admin_audit_entry_fields() {
+        let entry = AdminAuditEntry {
+            id: "test-id".to_string(),
+            at: "2024-01-01T00:00:00Z".to_string(),
+            actor_id: "actor1".to_string(),
+            actor_email: "actor@test.com".to_string(),
+            action: "user.create".to_string(),
+            target_kind: "admin_user".to_string(),
+            target_id: "user1".to_string(),
+            note: Some("test note".to_string()),
+            diff: None,
+        };
+        assert_eq!(entry.id, "test-id");
+        assert_eq!(entry.actor_id, "actor1");
+        assert_eq!(entry.action, "user.create");
+        assert_eq!(entry.target_kind, "admin_user");
+        assert_eq!(entry.note, Some("test note".to_string()));
+        assert!(entry.diff.is_none());
+    }
+
+    #[test]
+    fn admin_audit_query_fields() {
+        let query = AdminAuditQuery {
+            target: Some("user1".to_string()),
+            actor: Some("actor1".to_string()),
+            action: Some("user.create".to_string()),
+            limit: Some(50),
+        };
+        assert_eq!(query.target, Some("user1".to_string()));
+        assert_eq!(query.actor, Some("actor1".to_string()));
+        assert_eq!(query.action, Some("user.create".to_string()));
+        assert_eq!(query.limit, Some(50));
+    }
+
+    #[test]
+    fn admin_audit_query_defaults() {
+        let query = AdminAuditQuery {
+            target: None,
+            actor: None,
+            action: None,
+            limit: None,
+        };
+        assert!(query.target.is_none());
+        assert!(query.actor.is_none());
+        assert!(query.action.is_none());
+        assert!(query.limit.is_none());
+    }
+}
+
 /// GET /api/admin/audit-log
 pub(crate) async fn api_admin_audit_log(
     req: HttpRequest,

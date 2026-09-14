@@ -110,70 +110,27 @@ pub(crate) async fn api_email_action(
     }
 }
 
-/// Pure helper to validate an email action string.
-fn is_valid_email_action(action: &str) -> bool {
-    matches!(
-        action,
-        "archive" | "trash" | "delete" | "restore" | "move" | "markread" | "markunread" | "star" | "unstar"
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn is_valid_email_action_archive() {
-        assert!(is_valid_email_action("archive"));
+    fn email_action_request_fields() {
+        let req = EmailActionRequest {
+            action: "archive".to_string(),
+            target_folder: None,
+        };
+        assert_eq!(req.action, "archive");
+        assert!(req.target_folder.is_none());
     }
 
     #[test]
-    fn is_valid_email_action_trash() {
-        assert!(is_valid_email_action("trash"));
-    }
-
-    #[test]
-    fn is_valid_email_action_delete() {
-        assert!(is_valid_email_action("delete"));
-    }
-
-    #[test]
-    fn is_valid_email_action_restore() {
-        assert!(is_valid_email_action("restore"));
-    }
-
-    #[test]
-    fn is_valid_email_action_move() {
-        assert!(is_valid_email_action("move"));
-    }
-
-    #[test]
-    fn is_valid_email_action_markread() {
-        assert!(is_valid_email_action("markread"));
-    }
-
-    #[test]
-    fn is_valid_email_action_markunread() {
-        assert!(is_valid_email_action("markunread"));
-    }
-
-    #[test]
-    fn is_valid_email_action_star() {
-        assert!(is_valid_email_action("star"));
-    }
-
-    #[test]
-    fn is_valid_email_action_unstar() {
-        assert!(is_valid_email_action("unstar"));
-    }
-
-    #[test]
-    fn is_valid_email_action_invalid() {
-        assert!(!is_valid_email_action("invalid"));
-    }
-
-    #[test]
-    fn is_valid_email_action_empty() {
-        assert!(!is_valid_email_action(""));
+    fn email_action_request_with_target() {
+        let req = EmailActionRequest {
+            action: "move".to_string(),
+            target_folder: Some("inbox".to_string()),
+        };
+        assert_eq!(req.action, "move");
+        assert_eq!(req.target_folder, Some("inbox".to_string()));
     }
 }

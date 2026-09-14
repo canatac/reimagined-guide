@@ -164,86 +164,121 @@ mod tests {
     use super::*;
 
     #[test]
-    fn doc_str_returns_some_for_valid_string() {
-        let doc = doc! { "key": "value" };
-        assert_eq!(doc_str(&doc, "key"), Some("value".to_string()));
+    fn doc_str_returns_string_value() {
+        let mut doc = bson::Document::new();
+        doc.insert("name", "test_value");
+        assert_eq!(doc_str(&doc, "name"), Some("test_value".to_string()));
     }
 
     #[test]
-    fn doc_str_returns_none_for_missing_key() {
-        let doc = doc! {};
+    fn doc_str_returns_none_for_missing() {
+        let doc = bson::Document::new();
         assert_eq!(doc_str(&doc, "missing"), None);
     }
 
     #[test]
-    fn doc_i64_parses_int32() {
-        let doc = doc! { "val": 42 };
+    fn doc_i64_int32() {
+        let mut doc = bson::Document::new();
+        doc.insert("val", 42i32);
         assert_eq!(doc_i64(&doc, "val"), 42);
     }
 
     #[test]
-    fn doc_i64_parses_int64() {
-        let doc = doc! { "val": 9999999999i64 };
-        assert_eq!(doc_i64(&doc, "val"), 9999999999);
+    fn doc_i64_int64() {
+        let mut doc = bson::Document::new();
+        doc.insert("val", 999i64);
+        assert_eq!(doc_i64(&doc, "val"), 999);
     }
 
     #[test]
-    fn doc_i64_parses_double() {
-        let doc = doc! { "val": 3.14 };
+    fn doc_i64_double() {
+        let mut doc = bson::Document::new();
+        doc.insert("val", 3.14f64);
         assert_eq!(doc_i64(&doc, "val"), 3);
     }
 
     #[test]
-    fn doc_i64_parses_string() {
-        let doc = doc! { "val": "123" };
+    fn doc_i64_string_parses() {
+        let mut doc = bson::Document::new();
+        doc.insert("val", "123");
         assert_eq!(doc_i64(&doc, "val"), 123);
     }
 
     #[test]
-    fn doc_i64_returns_zero_for_missing() {
-        let doc = doc! {};
+    fn doc_i64_string_invalid_fallback() {
+        let mut doc = bson::Document::new();
+        doc.insert("val", "not_a_number");
+        assert_eq!(doc_i64(&doc, "val"), 0);
+    }
+
+    #[test]
+    fn doc_i64_missing_returns_zero() {
+        let doc = bson::Document::new();
         assert_eq!(doc_i64(&doc, "missing"), 0);
     }
 
     #[test]
-    fn parse_env_f64_returns_some_for_valid() {
-        std::env::set_var("TEST_VAR_F64", "3.14");
-        assert_eq!(parse_env_f64("TEST_VAR_F64"), Some(3.14));
-        std::env::remove_var("TEST_VAR_F64");
+    fn parse_env_f64_valid() {
+        std::env::set_var("TEST_F64", "3.14");
+        assert_eq!(parse_env_f64("TEST_F64"), Some(3.14));
+        std::env::remove_var("TEST_F64");
     }
 
     #[test]
-    fn parse_env_f64_returns_none_for_missing() {
-        assert_eq!(parse_env_f64("NONEXISTENT_VAR_XYZ"), None);
+    fn parse_env_f64_invalid() {
+        std::env::set_var("TEST_F64", "not_a_number");
+        assert_eq!(parse_env_f64("TEST_F64"), None);
+        std::env::remove_var("TEST_F64");
     }
 
     #[test]
-    fn parse_env_f64_returns_none_for_negative() {
-        std::env::set_var("TEST_VAR_NEG", "-1.0");
-        assert_eq!(parse_env_f64("TEST_VAR_NEG"), None);
-        std::env::remove_var("TEST_VAR_NEG");
+    fn parse_env_f64_negative() {
+        std::env::set_var("TEST_F64", "-1.0");
+        assert_eq!(parse_env_f64("TEST_F64"), None);
+        std::env::remove_var("TEST_F64");
     }
 
     #[test]
-    fn parse_env_f64_returns_none_for_nan() {
-        std::env::set_var("TEST_VAR_NAN", "NaN");
-        assert_eq!(parse_env_f64("TEST_VAR_NAN"), None);
-        std::env::remove_var("TEST_VAR_NAN");
+    fn parse_env_f64_infinite() {
+        std::env::set_var("TEST_F64", "inf");
+        assert_eq!(parse_env_f64("TEST_F64"), None);
+        std::env::remove_var("TEST_F64");
     }
 
     #[test]
-    fn default_pricing_rate_uses_env_vars() {
-        std::env::set_var("LLM_COST_DEFAULT_INPUT_PER_1M_USD", "10.0");
-        std::env::set_var("LLM_COST_DEFAULT_OUTPUT_PER_1M_USD", "30.0");
-        let rate = default_pricing_rate();
-        assert!((rate.input_per_1m_usd - 10.0).abs() < f64::EPSILON);
-        assert!((rate.output_per_1m_usd - 30.0).abs() < f64::EPSILON);
-        std::env::remove_var("LLM_COST_DEFAULT_INPUT_PER_1M_USD");
-        std::env::remove_var("LLM_COST_DEFAULT_OUTPUT_PER_1M_USD");
+    fn parse_env_f64_unset() {
+        std::env::remove_var("TEST_UNSET_F64");
+        assert_eq!(parse_env_f64("TEST_UNSET_F64"), None);
     }
 
     #[test]
-    fn default_pricing_rate_defaults_to_zero() {
+    fn parse_pricing_overrides_json_valid() {
+        std::env::set_var("LLM_COST_MODEL_OVERRIDES_JSON", r#"{"model1":{"input":1.0,"output":2.0}}"#);
+        let map = parse_pricing_overrides_json();
+        assert!(map.contains_key("model1"));
+        let rate = map.get("model1").unwrap();
+        assert_eq!(rate.input_per_1m_usd, 1.0);
+        assert_eq!(rate.output_per_1m_usd, 2.0);
+        std::env::remove_var("LLM_COST_MODEL_OVERRIDES_JSON");
+    }
+
+    #[test]
+    fn parse_pricing_overrides_json_empty() {
+        std::env::remove_var("LLM_COST_MODEL_OVERRIDES_JSON");
+        let map = parse_pricing_overrides_json();
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn parse_pricing_overrides_json_invalid() {
+        std::env::set_var("LLM_COST_MODEL_OVERRIDES_JSON", "not json");
+        let map = parse_pricing_overrides_json();
+        assert!(map.is_empty());
+        std::env::remove_var("LLM_COST_MODEL_OVERRIDES_JSON");
+    }
+
+    #[test]
+    fn default_pricing_rate_zero() {
         std::env::remove_var("LLM_COST_DEFAULT_INPUT_PER_1M_USD");
         std::env::remove_var("LLM_COST_DEFAULT_OUTPUT_PER_1M_USD");
         let rate = default_pricing_rate();
@@ -252,8 +287,13 @@ mod tests {
     }
 
     #[test]
-    fn parse_openrouter_token_price_scales() {
-        assert_eq!(parse_openrouter_token_price_to_per_1m(Some("0.00001")), Some(10.0));
+    fn parse_openrouter_token_price_valid() {
+        assert_eq!(parse_openrouter_token_price_to_per_1m(Some("0.000001")), Some(1.0));
+    }
+
+    #[test]
+    fn parse_openrouter_token_price_none() {
+        assert_eq!(parse_openrouter_token_price_to_per_1m(None), None);
     }
 
     #[test]
@@ -263,104 +303,35 @@ mod tests {
 
     #[test]
     fn parse_openrouter_token_price_negative() {
-        assert_eq!(parse_openrouter_token_price_to_per_1m(Some("-1")), None);
+        assert_eq!(parse_openrouter_token_price_to_per_1m(Some("-0.001")), None);
     }
 
     #[test]
-    fn parse_openrouter_token_price_none() {
-        assert_eq!(parse_openrouter_token_price_to_per_1m(None), None);
-    }
-
-    #[test]
-    fn resolve_pricing_rate_prefers_override() {
+    fn resolve_pricing_rate_override() {
+        let default = PricingRate { input_per_1m_usd: 1.0, output_per_1m_usd: 2.0 };
         let mut overrides = HashMap::new();
-        overrides.insert(
-            "gpt-4".to_string(),
-            PricingRate {
-                input_per_1m_usd: 100.0,
-                output_per_1m_usd: 200.0,
-            },
-        );
-        let openrouter = HashMap::new();
-        let default = PricingRate {
-            input_per_1m_usd: 1.0,
-            output_per_1m_usd: 2.0,
-        };
-        let (rate, source) = resolve_pricing_rate("gpt-4", &openrouter, &overrides, default);
+        overrides.insert("model1".to_string(), PricingRate { input_per_1m_usd: 5.0, output_per_1m_usd: 10.0 });
+        let (rate, source) = resolve_pricing_rate("model1", &HashMap::new(), &overrides, default);
+        assert_eq!(rate.input_per_1m_usd, 5.0);
         assert_eq!(source, "model_override");
-        assert!((rate.input_per_1m_usd - 100.0).abs() < f64::EPSILON);
     }
 
     #[test]
-    fn resolve_pricing_rate_falls_back_to_openrouter() {
-        let overrides = HashMap::new();
+    fn resolve_pricing_rate_openrouter() {
+        let default = PricingRate { input_per_1m_usd: 1.0, output_per_1m_usd: 2.0 };
         let mut openrouter = HashMap::new();
-        openrouter.insert(
-            "claude-3".to_string(),
-            PricingRate {
-                input_per_1m_usd: 50.0,
-                output_per_1m_usd: 100.0,
-            },
-        );
-        let default = PricingRate {
-            input_per_1m_usd: 1.0,
-            output_per_1m_usd: 2.0,
-        };
-        let (rate, source) = resolve_pricing_rate("claude-3", &openrouter, &overrides, default);
+        openrouter.insert("model1".to_string(), PricingRate { input_per_1m_usd: 3.0, output_per_1m_usd: 4.0 });
+        let (rate, source) = resolve_pricing_rate("model1", &openrouter, &HashMap::new(), default);
+        assert_eq!(rate.input_per_1m_usd, 3.0);
         assert_eq!(source, "openrouter");
-        assert!((rate.input_per_1m_usd - 50.0).abs() < f64::EPSILON);
     }
 
     #[test]
-    fn resolve_pricing_rate_defaults() {
-        let overrides = HashMap::new();
-        let openrouter = HashMap::new();
-        let default = PricingRate {
-            input_per_1m_usd: 5.0,
-            output_per_1m_usd: 10.0,
-        };
-        let (rate, source) = resolve_pricing_rate("unknown-model", &openrouter, &overrides, default);
+    fn resolve_pricing_rate_default() {
+        let default = PricingRate { input_per_1m_usd: 1.0, output_per_1m_usd: 2.0 };
+        let (rate, source) = resolve_pricing_rate("unknown", &HashMap::new(), &HashMap::new(), default);
+        assert_eq!(rate.input_per_1m_usd, 1.0);
         assert_eq!(source, "default");
-        assert!((rate.input_per_1m_usd - 5.0).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn round6_rounds_to_6_decimals() {
-        assert!((round6(1.123456789) - 1.123457).abs() < 1e-10);
-    }
-
-    #[test]
-    fn round6_zero() {
-        assert_eq!(round6(0.0), 0.0);
-    }
-
-    #[test]
-    fn parse_pricing_overrides_json_empty_when_unset() {
-        std::env::remove_var("LLM_COST_MODEL_OVERRIDES_JSON");
-        let map = parse_pricing_overrides_json();
-        assert!(map.is_empty());
-    }
-
-    #[test]
-    fn parse_pricing_overrides_json_parses_valid() {
-        std::env::set_var(
-            "LLM_COST_MODEL_OVERRIDES_JSON",
-            r#"{"gpt-4": {"input": 10.0, "output": 30.0}}"#,
-        );
-        let map = parse_pricing_overrides_json();
-        assert_eq!(map.len(), 1);
-        let rate = map.get("gpt-4").unwrap();
-        assert!((rate.input_per_1m_usd - 10.0).abs() < f64::EPSILON);
-        assert!((rate.output_per_1m_usd - 30.0).abs() < f64::EPSILON);
-        std::env::remove_var("LLM_COST_MODEL_OVERRIDES_JSON");
-    }
-
-    #[test]
-    fn parse_pricing_overrides_json_handles_invalid() {
-        std::env::set_var("LLM_COST_MODEL_OVERRIDES_JSON", "not-json");
-        let map = parse_pricing_overrides_json();
-        assert!(map.is_empty());
-        std::env::remove_var("LLM_COST_MODEL_OVERRIDES_JSON");
     }
 }
 

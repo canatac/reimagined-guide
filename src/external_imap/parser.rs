@@ -316,11 +316,25 @@ mod tests {
     }
 
     #[test]
+    fn escape_imap_no_special_chars() {
+        assert_eq!(escape_imap("hello"), "hello");
+        assert_eq!(escape_imap(""), "");
+    }
+
+    #[test]
     fn format_imap_date_formats_correctly() {
         let dt = chrono::DateTime::parse_from_rfc3339("2026-09-10T12:00:00Z")
             .unwrap()
             .with_timezone(&chrono::Utc);
         assert_eq!(format_imap_date(&dt), "10-Sep-2026");
+    }
+
+    #[test]
+    fn format_imap_date_january() {
+        let dt = chrono::DateTime::parse_from_rfc3339("2026-01-05T00:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        assert_eq!(format_imap_date(&dt), "05-Jan-2026");
     }
 
     #[test]

@@ -99,3 +99,52 @@ pub struct GenerateRequest {
     pub max_age: u64,
     pub mx: Vec<String>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn policy_query_fields() {
+        let q = PolicyQuery {
+            domain: "example.com".to_string(),
+        };
+        assert_eq!(q.domain, "example.com");
+    }
+
+    #[test]
+    fn validate_query_fields() {
+        let q = ValidateQuery {
+            domain: "example.com".to_string(),
+            mx: "mail.example.com".to_string(),
+        };
+        assert_eq!(q.domain, "example.com");
+        assert_eq!(q.mx, "mail.example.com");
+    }
+
+    #[test]
+    fn validate_response_fields() {
+        let resp = ValidateResponse {
+            domain: "example.com".to_string(),
+            mx: "mail.example.com".to_string(),
+            result: "Valid".to_string(),
+            enforce: true,
+            block_on_failure: false,
+        };
+        assert_eq!(resp.domain, "example.com");
+        assert!(resp.enforce);
+        assert!(!resp.block_on_failure);
+    }
+
+    #[test]
+    fn generate_request_fields() {
+        let req = GenerateRequest {
+            mode: "enforce".to_string(),
+            max_age: 86400,
+            mx: vec!["mail.example.com".to_string()],
+        };
+        assert_eq!(req.mode, "enforce");
+        assert_eq!(req.max_age, 86400);
+        assert_eq!(req.mx.len(), 1);
+    }
+}

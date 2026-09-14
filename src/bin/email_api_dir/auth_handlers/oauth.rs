@@ -9,6 +9,31 @@ pub(crate) struct OAuthCallbackQuery {
     pub state: Option<String>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn oauth_callback_query_fields() {
+        let query = OAuthCallbackQuery {
+            code: Some("auth_code".to_string()),
+            state: Some("state_token".to_string()),
+        };
+        assert_eq!(query.code, Some("auth_code".to_string()));
+        assert_eq!(query.state, Some("state_token".to_string()));
+    }
+
+    #[test]
+    fn oauth_callback_query_defaults() {
+        let query = OAuthCallbackQuery {
+            code: None,
+            state: None,
+        };
+        assert!(query.code.is_none());
+        assert!(query.state.is_none());
+    }
+}
+
 pub(crate) async fn auth_oauth_start(path: web::Path<String>) -> impl Responder {
     let provider_raw = path.into_inner();
     let provider = match normalize_oauth_provider(&provider_raw) {

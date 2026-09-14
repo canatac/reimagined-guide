@@ -285,13 +285,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_analytics_days_returns_30() {
+    fn default_analytics_days_is_30() {
         assert_eq!(default_analytics_days(), 30);
     }
 
     #[test]
     fn normalize_label_name_trims() {
-        assert_eq!(normalize_label_name("  Work  "), "Work");
+        assert_eq!(normalize_label_name("  work  "), "work");
     }
 
     #[test]
@@ -300,7 +300,7 @@ mod tests {
     }
 
     #[test]
-    fn normalize_label_color_defaults() {
+    fn normalize_label_color_default() {
         assert_eq!(normalize_label_color(None), "#64748b");
     }
 
@@ -310,7 +310,7 @@ mod tests {
     }
 
     #[test]
-    fn normalize_label_color_whitespace() {
+    fn normalize_label_color_whitespace_only() {
         assert_eq!(normalize_label_color(Some("   ".to_string())), "#64748b");
     }
 
@@ -321,7 +321,7 @@ mod tests {
 
     #[test]
     fn normalize_label_color_trims() {
-        assert_eq!(normalize_label_color(Some("  #ff0000  ".to_string())), "#ff0000");
+        assert_eq!(normalize_label_color(Some("  #abc  ".to_string())), "#abc");
     }
 }
 

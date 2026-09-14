@@ -225,3 +225,140 @@ pub(crate) async fn api_admin_change_request_patch(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_test_item() -> ChangeRequestItem {
+        ChangeRequestItem {
+            id: "cr_test".to_string(),
+            title: "Original Title".to_string(),
+            problem: "Original Problem".to_string(),
+            desired_outcome: "Original Outcome".to_string(),
+            scope: "backend".to_string(),
+            priority: "P2".to_string(),
+            status: "submitted".to_string(),
+            requested_by: "tester".to_string(),
+            linked_repo: "reimagined-guide".to_string(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+            taken_in_charge_at: None,
+            taken_in_charge_by: None,
+            target_release_window: "next-72h".to_string(),
+            acceptance_criteria: vec![],
+            workflow: vec![],
+            workflow_events: vec![],
+            execution_state: "idle".to_string(),
+            execution_run_id: None,
+            execution_started_at: None,
+            execution_last_heartbeat_at: None,
+            execution_finished_at: None,
+            execution_last_error: None,
+            changelog_entry: None,
+        }
+    }
+
+    fn make_patch_body(title: Option<&str>, problem: Option<&str>, desired: Option<&str>, status: Option<&str>) -> PatchChangeRequestInputApi {
+        PatchChangeRequestInputApi {
+            action: None,
+            note: None,
+            actor: None,
+            title: title.map(|s| s.to_string()),
+            problem: problem.map(|s| s.to_string()),
+            desired_outcome: desired.map(|s| s.to_string()),
+            status: status.map(|s| s.to_string()),
+            execution_run_id: None,
+            execution_error: None,
+        }
+    }
+
+    #[test]
+    fn apply_simple_field_patches_title() {
+        let mut item = make_test_item();
+        let body = make_patch_body(Some("Updated Title"), None, None, None);
+        apply_simple_field_patches(&mut item, &body);
+        assert_eq!(item.title, "Updated Title");
+        assert_eq!(item.problem, "Original Problem");
+    }
+
+    #[test]
+    fn apply_simple_field_patches_problem() {
+        let mut item = make_test_item();
+        let body = make_patch_body(None, Some("Updated Problem"), None, None);
+        apply_simple_field_patches(&mut item, &body);
+        assert_eq!(item.problem, "Updated Problem");
+    }
+
+    #[test]
+    fn apply_simple_field_patches_desired_outcome() {
+        let mut item = make_test_item();
+        let body = make_patch_body(None, None, Some("Updated Outcome"), None);
+        apply_simple_field_patches(&mut item, &body);
+        assert_eq!(item.desired_outcome, "Updated Outcome");
+    }
+
+    #[test]
+    fn apply_simple_field_patches_valid_status() {
+        let mut item = make_test_item();
+        let body = make_patch_body(None, None, None, Some("triaged"));
+        apply_simple_field_patches(&mut item, &body);
+        assert_eq!(item.status, "triaged");
+    }
+
+    #[test]
+    fn apply_simple_field_patches_invalid_status_rejected() {
+        let mut item = make_test_item();
+        let body = make_patch_body(None, None, None, Some("not_a_real_status"));
+        apply_simple_field_patches(&mut item, &body);
+        assert_eq!(item.status, "submitted");
+    }
+
+    #[test]
+    fn apply_simple_field_patches_none_values_no_change() {
+        let mut item = make_test_item();
+        let body = make_patch_body(None, None, None, None);
+        apply_simple_field_patches(&mut item, &body);
+        assert_eq!(item.title, "Original Title");
+        assert_eq!(item.problem, "Original Problem");
+        assert_eq!(item.desired_outcome, "Original Outcome");
+        assert_eq!(item.status, "submitted");
+    }
+
+    #[test]
+    fn apply_simple_field_patches_all_fields() {
+        let mut item = make_test_item();
+        let body = make_patch_body(Some("New Title"), Some("New Problem"), Some("New Outcome"), Some("planned"));
+        apply_simple_field_patches(&mut item, &body);
+        assert_eq!(item.title, "New Title");
+        assert_eq!(item.problem, "New Problem");
+        assert_eq!(item.desired_outcome, "New Outcome");
+        assert_eq!(item.status, "planned");
+    }
+
+    #[test]
+    fn apply_simple_field_patches_whitespace_trimmed() {
+        let mut item = make_test_item();
+        let body = make_patch_body(Some("  Padded Title  "), None, None, None);
+        apply_simple_field_patches(&mut item, &body);
+        assert_eq!(item.title, "Padded Title");
+    }
+
+    #[test]
+    fn apply_simple_field_patches_status_case_insensitive() {
+        let mut item = make_test_item();
+        let body = make_patch_body(None, None, None, Some("Triaged"));
+        apply_simple_field_patches(&mut item, &body);
+        assert_eq!(item.status, "triaged");
+    }
+
+    #[test]
+    fn apply_simple_field_patches_all_valid_statuses() {
+        for status in &["submitted", "triaged", "planned", "in_progress", "qa", "released", "rejected"] {
+            let mut item = make_test_item();
+            let body = make_patch_body(None, None, None, Some(status));
+            apply_simple_field_patches(&mut item, &body);
+            assert_eq!(item.status, *status, "failed for status: {}", status);
+        }
+    }
+}

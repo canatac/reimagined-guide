@@ -42,82 +42,83 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_build_new_admin_user_basic() {
+    fn build_new_admin_user_fields_propagated() {
         let user = build_new_admin_user(
-            "usr-1".into(),
-            "a@b.com".into(),
-            Some("Alice".into()),
-            "admin".into(),
-            "active".into(),
+            "u1".to_string(),
+            "a@b.com".to_string(),
+            Some("Alice".to_string()),
+            "admin".to_string(),
+            "active".to_string(),
             false,
-            "2026-01-01T00:00:00Z".into(),
+            "2026-01-01T00:00:00Z".to_string(),
         );
-        assert_eq!(user.id, "usr-1");
+        assert_eq!(user.id, "u1");
         assert_eq!(user.email, "a@b.com");
-        assert_eq!(user.display_name, Some("Alice".into()));
+        assert_eq!(user.display_name, Some("Alice".to_string()));
         assert_eq!(user.role, "admin");
         assert_eq!(user.status, "active");
         assert!(!user.two_factor_enabled);
     }
 
     #[test]
-    fn test_build_new_admin_user_timestamps() {
+    fn build_new_admin_user_timestamps() {
+        let now = "2026-01-01T00:00:00Z".to_string();
         let user = build_new_admin_user(
-            "usr-2".into(),
-            "b@c.com".into(),
+            "u1".to_string(),
+            "a@b.com".to_string(),
             None,
-            "viewer".into(),
-            "active".into(),
-            true,
-            "2026-02-02T12:00:00Z".into(),
-        );
-        assert_eq!(user.created_at, "2026-02-02T12:00:00Z");
-        assert_eq!(user.updated_at, "2026-02-02T12:00:00Z");
-        assert_eq!(user.last_activity_at, Some("2026-02-02T12:00:00Z".into()));
-        assert_eq!(user.last_login_at, None);
-    }
-
-    #[test]
-    fn test_build_new_admin_user_two_factor() {
-        let user = build_new_admin_user(
-            "usr-3".into(),
-            "c@d.com".into(),
-            Some("Carol".into()),
-            "admin".into(),
-            "active".into(),
-            true,
-            "2026-03-03T00:00:00Z".into(),
-        );
-        assert!(user.two_factor_enabled);
-    }
-
-    #[test]
-    fn test_build_new_admin_user_recent_activity() {
-        let user = build_new_admin_user(
-            "usr-4".into(),
-            "d@e.com".into(),
-            Some("Dan".into()),
-            "editor".into(),
-            "active".into(),
+            "admin".to_string(),
+            "active".to_string(),
             false,
-            "2026-04-04T00:00:00Z".into(),
+            now.clone(),
         );
-        assert_eq!(user.recent_activity.len(), 1);
-        assert_eq!(user.recent_activity[0].label, "User created");
-        assert_eq!(user.recent_activity[0].kind, "admin_action");
-        assert_eq!(user.recent_activity[0].at, "2026-04-04T00:00:00Z");
+        assert_eq!(user.created_at, now);
+        assert_eq!(user.updated_at, now);
+        assert_eq!(user.last_activity_at, Some(now));
     }
 
     #[test]
-    fn test_build_new_admin_user_counters_zero() {
+    fn build_new_admin_user_optional_fields_none() {
         let user = build_new_admin_user(
-            "usr-5".into(),
-            "e@f.com".into(),
+            "u1".to_string(),
+            "a@b.com".to_string(),
             None,
-            "viewer".into(),
-            "pending".into(),
+            "admin".to_string(),
+            "active".to_string(),
             false,
-            "2026-05-05T00:00:00Z".into(),
+            "2026-01-01".to_string(),
+        );
+        assert!(user.password_hash.is_none());
+        assert!(user.invite_token.is_none());
+        assert!(user.invite_expires_at.is_none());
+        assert!(user.invited_at.is_none());
+        assert!(user.notes.is_none());
+    }
+
+    #[test]
+    fn build_new_admin_user_login_null() {
+        let user = build_new_admin_user(
+            "u1".to_string(),
+            "a@b.com".to_string(),
+            None,
+            "admin".to_string(),
+            "active".to_string(),
+            false,
+            "2026-01-01".to_string(),
+        );
+        assert!(user.last_login_at.is_none());
+    }
+
+    #[test]
+    fn build_new_admin_user_initial_counters_zero() {
+        let user = build_new_admin_user(
+            "u1".to_string(),
+            "a@b.com".to_string(),
+            None,
+            "admin".to_string(),
+            "active".to_string(),
+            false,
+            "2026-01-01".to_string(),
         );
         assert_eq!(user.sessions24h, 0);
         assert_eq!(user.actions7d, 0);
@@ -125,17 +126,18 @@ mod tests {
     }
 
     #[test]
-    fn test_build_new_admin_user_no_password() {
+    fn build_new_admin_user_activity_record() {
         let user = build_new_admin_user(
-            "usr-6".into(),
-            "f@g.com".into(),
-            Some("Eve".into()),
-            "admin".into(),
-            "active".into(),
-            true,
-            "2026-06-06T00:00:00Z".into(),
+            "u1".to_string(),
+            "a@b.com".to_string(),
+            None,
+            "admin".to_string(),
+            "active".to_string(),
+            false,
+            "2026-01-01".to_string(),
         );
-        assert_eq!(user.password_hash, None);
-        assert_eq!(user.invite_token, None);
+        assert_eq!(user.recent_activity.len(), 1);
+        assert_eq!(user.recent_activity[0].label, "User created");
+        assert_eq!(user.recent_activity[0].kind, "admin_action");
     }
 }

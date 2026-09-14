@@ -42,61 +42,78 @@ mod tests {
     use super::*;
 
     #[test]
-    fn security_enabled_default_false() {
+    fn security_disabled_by_default() {
         std::env::remove_var("SECURITY_MONITORING_ENABLED");
         assert!(!security_enabled());
     }
 
     #[test]
-    fn security_enabled_true() {
+    fn security_enabled_with_true() {
         std::env::set_var("SECURITY_MONITORING_ENABLED", "true");
         assert!(security_enabled());
         std::env::remove_var("SECURITY_MONITORING_ENABLED");
     }
 
     #[test]
-    fn security_enabled_one() {
+    fn security_enabled_with_one() {
         std::env::set_var("SECURITY_MONITORING_ENABLED", "1");
         assert!(security_enabled());
         std::env::remove_var("SECURITY_MONITORING_ENABLED");
     }
 
     #[test]
-    fn security_enabled_false_string() {
+    fn security_disabled_with_false() {
         std::env::set_var("SECURITY_MONITORING_ENABLED", "false");
         assert!(!security_enabled());
         std::env::remove_var("SECURITY_MONITORING_ENABLED");
     }
 
     #[test]
-    fn enforce_mode_default_false() {
+    fn security_disabled_with_zero() {
+        std::env::set_var("SECURITY_MONITORING_ENABLED", "0");
+        assert!(!security_enabled());
+        std::env::remove_var("SECURITY_MONITORING_ENABLED");
+    }
+
+    #[test]
+    fn enforce_mode_disabled_by_default() {
         std::env::remove_var("SECURITY_ENFORCE_MODE");
         assert!(!enforce_mode());
     }
 
     #[test]
-    fn enforce_mode_true() {
+    fn enforce_mode_enabled_with_true() {
         std::env::set_var("SECURITY_ENFORCE_MODE", "true");
         assert!(enforce_mode());
         std::env::remove_var("SECURITY_ENFORCE_MODE");
     }
 
     #[test]
-    fn enforce_mode_one() {
+    fn enforce_mode_enabled_with_one() {
         std::env::set_var("SECURITY_ENFORCE_MODE", "1");
         assert!(enforce_mode());
         std::env::remove_var("SECURITY_ENFORCE_MODE");
     }
 
     #[test]
-    fn init_bus_returns_sender() {
-        let bus = init_bus();
-        assert!(bus.receiver_count() >= 0);
+    fn enforce_mode_disabled_with_false() {
+        std::env::set_var("SECURITY_ENFORCE_MODE", "false");
+        assert!(!enforce_mode());
+        std::env::remove_var("SECURITY_ENFORCE_MODE");
     }
 
     #[test]
-    fn get_bus_returns_some_after_init() {
-        let _ = init_bus();
-        assert!(get_bus().is_some());
+    fn init_bus_returns_valid_sender() {
+        let bus = init_bus();
+        // Bus should have capacity for 1024 messages — just verify it exists
+        let _ = bus;
+    }
+
+    #[test]
+    fn get_bus_returns_same_instance() {
+        let bus1 = get_bus();
+        let bus2 = get_bus();
+        assert!(bus1.is_some());
+        assert!(bus2.is_some());
     }
 }

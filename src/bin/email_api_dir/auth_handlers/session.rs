@@ -35,6 +35,80 @@ pub(crate) struct PasswordResetConfirmBody {
     pub new_password: String,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn login_request_fields() {
+        let req = LoginRequest {
+            email: "test@example.com".to_string(),
+            password: "secret".to_string(),
+        };
+        assert_eq!(req.email, "test@example.com");
+        assert_eq!(req.password, "secret");
+    }
+
+    #[test]
+    fn register_request_fields() {
+        let req = RegisterRequest {
+            first_name: "Alice".to_string(),
+            last_name: "Smith".to_string(),
+            alias: Some("alice.smith".to_string()),
+            password: "pass123".to_string(),
+            condition_accepted: true,
+        };
+        assert_eq!(req.first_name, "Alice");
+        assert_eq!(req.alias, Some("alice.smith".to_string()));
+        assert!(req.condition_accepted);
+    }
+
+    #[test]
+    fn password_reset_request_body_fields() {
+        let req = PasswordResetRequestBody {
+            email: "test@example.com".to_string(),
+        };
+        assert_eq!(req.email, "test@example.com");
+    }
+
+    #[test]
+    fn password_reset_confirm_body_fields() {
+        let req = PasswordResetConfirmBody {
+            token: "tok123".to_string(),
+            new_password: "newpass".to_string(),
+        };
+        assert_eq!(req.token, "tok123");
+        assert_eq!(req.new_password, "newpass");
+    }
+
+    #[test]
+    fn patch_locale_request_fields() {
+        let req = PatchLocaleRequest {
+            locale: "fr".to_string(),
+        };
+        assert_eq!(req.locale, "fr");
+    }
+
+    #[test]
+    fn user_session_fields() {
+        let session = UserSession {
+            user_id: "u1".to_string(),
+            email: "a@b.com".to_string(),
+            display_name: "Test".to_string(),
+            role: "admin".to_string(),
+            access_token: "access".to_string(),
+            refresh_token: "refresh".to_string(),
+            access_expires_at: 1000,
+            refresh_expires_at: 2000,
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+        };
+        assert_eq!(session.user_id, "u1");
+        assert_eq!(session.role, "admin");
+        assert_eq!(session.access_token, "access");
+        assert_eq!(session.access_expires_at, 1000);
+    }
+}
+
 #[derive(Deserialize)]
 pub(crate) struct PatchLocaleRequest {
     pub locale: String,

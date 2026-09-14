@@ -15,3 +15,18 @@ pub use delete::*;
 // --- AI settings (Phase B1, issue #173) ----------------------------------------
 pub(crate) const AI_SETTINGS_ID: &str = "global";
 pub(crate) const DEFAULT_AI_MODEL: &str = "qwen/qwen3.7-flash";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ai_settings_id_is_global() {
+        assert_eq!(AI_SETTINGS_ID, "global");
+    }
+
+    #[test]
+    fn default_ai_model_is_qwen() {
+        assert_eq!(DEFAULT_AI_MODEL, "qwen/qwen3.7-flash");
+    }
+}

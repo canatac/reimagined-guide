@@ -64,3 +64,54 @@ impl ImapServer {
         sessions.lock().unwrap().get(id).cloned()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn current_user_returns_none_for_no_session() {
+        let sessions: Sessions = Arc::new(Mutex::new(HashMap::new()));
+        let result = current_user(&sessions, &None);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn current_user_returns_none_for_unknown_session() {
+        let sessions: Sessions = Arc::new(Mutex::new(HashMap::new()));
+        let result = current_user(&sessions, &Some("unknown-id".to_string()));
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn current_user_returns_username_for_known_session() {
+        let mut map = HashMap::new();
+        map.insert("session-123".to_string(), "testuser".to_string());
+        let sessions: Sessions = Arc::new(Mutex::new(map));
+        let result = current_user(&sessions, &Some("session-123".to_string()));
+        assert_eq!(result, Some("testuser".to_string()));
+    }
+
+    #[test]
+    fn current_user_returns_none_for_empty_session_id() {
+        let mut map = HashMap::new();
+        map.insert("session-123".to_string(), "testuser".to_string());
+        let sessions: Sessions = Arc::new(Mutex::new(map));
+        let result = current_user(&sessions, &Some("".to_string()));
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn current_user_with_multiple_sessions() {
+        let mut map = HashMap::new();
+        map.insert("session-1".to_string(), "user1".to_string());
+        map.insert("session-2".to_string(), "user2".to_string());
+        let sessions: Sessions = Arc::new(Mutex::new(map));
+        
+        let result1 = current_user(&sessions, &Some("session-1".to_string()));
+        let result2 = current_user(&sessions, &Some("session-2".to_string()));
+        
+        assert_eq!(result1, Some("user1".to_string()));
+        assert_eq!(result2, Some("user2".to_string()));
+    }
+}

@@ -18,3 +18,40 @@ pub(crate) fn load_key(path: &Path) -> std::io::Result<PrivateKeyDer<'static>> {
     })?;
     Ok(key)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn load_certs_missing_file_returns_err() {
+        let result = load_certs(Path::new("/nonexistent/cert.pem"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn load_key_missing_file_returns_err() {
+        let result = load_key(Path::new("/nonexistent/key.pem"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn load_certs_invalid_content_returns_err() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("invalid_cert.pem");
+        std::fs::write(&path, "not a valid cert").unwrap();
+        let result = load_certs(&path);
+        assert!(result.is_err());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn load_key_invalid_content_returns_err() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("invalid_key.pem");
+        std::fs::write(&path, "not a valid key").unwrap();
+        let result = load_key(&path);
+        assert!(result.is_err());
+        let _ = std::fs::remove_file(&path);
+    }
+}

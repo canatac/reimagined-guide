@@ -8,7 +8,7 @@ use std::time::Duration;
 use super::*;
 
 /// Build the MongoDB client URI from env vars, matching the historical logic.
-pub(crate) fn build_mongo_uri() -> String {
+pub fn build_mongo_uri() -> String {
     let mongo_user = env::var("MONGODB_USERNAME").unwrap_or_default();
     let mongo_pass = env::var("MONGODB_PASSWORD").unwrap_or_default();
     let mongo_cluster =
@@ -29,6 +29,44 @@ pub(crate) fn build_mongo_uri() -> String {
             "mongodb://{}:{}@{}/?authSource=admin&appName={}&serverSelectionTimeoutMS=5000",
             mongo_user, mongo_pass, mongo_cluster, mongo_app
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_mongo_uri_uses_default_when_unset() {
+        std::env::remove_var("MONGODB_CLUSTER_URL");
+        std::env::remove_var("MONGODB_APP_NAME");
+        let uri = build_mongo_uri();
+        assert!(uri.contains("mongodb:27017"));
+        assert!(uri.contains("appName=mailserver"));
+    }
+
+    #[test]
+    fn build_mongo_uri_reads_cluster_from_env() {
+        std::env::set_var("MONGODB_CLUSTER_URL", "mycluster.mongodb.net");
+        let uri = build_mongo_uri();
+        assert!(uri.contains("mycluster.mongodb.net"));
+        std::env::remove_var("MONGODB_CLUSTER_URL");
+    }
+
+    #[test]
+    fn build_mongo_uri_reads_app_name_from_env() {
+        std::env::set_var("MONGODB_APP_NAME", "myapp");
+        let uri = build_mongo_uri();
+        assert!(uri.contains("appName=myapp"));
+        std::env::remove_var("MONGODB_APP_NAME");
+    }
+
+    #[test]
+    fn build_mongo_uri_mongodb_srv_prefix() {
+        std::env::set_var("MONGODB_CLUSTER_URL", "mongodb+srv://cluster0.example.net");
+        let uri = build_mongo_uri();
+        assert!(uri.contains("mongodb+srv://"));
+        std::env::set_var("MONGODB_CLUSTER_URL", "mongodb:27017");
     }
 }
 
