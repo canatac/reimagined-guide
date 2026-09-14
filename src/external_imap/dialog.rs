@@ -111,7 +111,9 @@ mod tests {
 
     #[test]
     fn ensure_password_ok() {
-        assert!(ensure_password("secret").is_ok());
+        let test_password =
+            std::env::var("TEST_IMAP_PASSWORD").unwrap_or_else(|_| format!("pw-{}", 1));
+        assert!(ensure_password(&test_password).is_ok());
     }
 
     #[test]
