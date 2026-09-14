@@ -169,12 +169,17 @@ fn format_cluster_uri(cluster_url: &str, username: &str, password: &str, app_nam
 mod tests {
     use super::*;
 
+    fn test_password() -> String {
+        std::env::var("TEST_MONGODB_PASSWORD").unwrap_or_else(|_| "test_password".to_string())
+    }
+
     #[test]
     fn format_cluster_uri_standard_mongodb() {
+        let password = test_password();
         let result = format_cluster_uri(
             "mongodb://localhost:27017",
             "user",
-            "pass",
+            &password,
             "myapp",
         );
         assert_eq!(result, "mongodb://localhost:27017?appName=myapp&serverSelectionTimeoutMS=5000");
@@ -182,21 +187,29 @@ mod tests {
 
     #[test]
     fn format_cluster_uri_mongodb_srv() {
+        let password = test_password();
         let result = format_cluster_uri(
             "mongodb+srv://cluster0.mongodb.net",
             "user",
-            "pass",
+            &password,
             "myapp",
         );
-        assert_eq!(result, "mongodb+srv://user:pass@cluster0.mongodb.net/?retryWrites=true&w=majority&appName=myapp&serverSelectionTimeoutMS=5000");
+        assert_eq!(
+            result,
+            format!(
+                "mongodb+srv://user:{}@cluster0.mongodb.net/?retryWrites=true&w=majority&appName=myapp&serverSelectionTimeoutMS=5000",
+                password
+            )
+        );
     }
 
     #[test]
     fn format_cluster_uri_with_existing_query() {
+        let password = test_password();
         let result = format_cluster_uri(
             "mongodb://localhost:27017?retryWrites=true",
             "user",
-            "pass",
+            &password,
             "myapp",
         );
         assert_eq!(result, "mongodb://localhost:27017?retryWrites=true&appName=myapp&serverSelectionTimeoutMS=5000");
@@ -204,13 +217,20 @@ mod tests {
 
     #[test]
     fn format_cluster_uri_plain_host() {
+        let password = test_password();
         let result = format_cluster_uri(
             "localhost:27017",
             "admin",
-            "secret",
+            &password,
             "smtp-server",
         );
-        assert_eq!(result, "mongodb://admin:secret@localhost:27017/?authSource=admin&appName=smtp-server&serverSelectionTimeoutMS=5000");
+        assert_eq!(
+            result,
+            format!(
+                "mongodb://admin:{}@localhost:27017/?authSource=admin&appName=smtp-server&serverSelectionTimeoutMS=5000",
+                password
+            )
+        );
     }
 }
 async fn init_mongo_client(client_uri: &str) -> Result<Arc<mongodb::Client>, MainError> {
