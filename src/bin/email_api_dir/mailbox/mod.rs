@@ -34,6 +34,7 @@ pub use single_handlers::*;
 pub use drafts_handlers::*;
 pub use newsletter_handlers::*;
 pub use newsletter_summarize::*;
+pub use scheduled_drafts::*;
 
 pub(crate) use folder_utils::{
     canonical_folder, folder_to_mailboxes, resolve_user_id, EmailListQuery,
