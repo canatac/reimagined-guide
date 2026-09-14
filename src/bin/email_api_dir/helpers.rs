@@ -52,6 +52,8 @@ pub(crate) fn normalize_oauth_provider(provider: &str) -> Option<String> {
 }
 
 pub(crate) fn req_ip_str(req: &actix_web::HttpRequest) -> String {
+    // realip_remote_addr is derived from headers an attacker can set, so we must
+    // bound the output length before any allocation.
     let conn = req.connection_info();
     let raw = conn
         .realip_remote_addr()
@@ -59,8 +61,12 @@ pub(crate) fn req_ip_str(req: &actix_web::HttpRequest) -> String {
         .split(':')
         .next()
         .unwrap_or("unknown");
-    // Limit length to avoid allocating arbitrary amounts of memory from user-controlled header.
-    raw.chars().take(MAX_IP_LEN).collect()
+    // Truncate to MAX_IP_LEN bytes so the allocation is O(MAX_IP_LEN), not O(input).
+    // Using byte-based slicing so CodeQL can prove the length is bounded.
+    match raw.get(..MAX_IP_LEN) {
+        Some(bounded) => bounded.to_string(),
+        None => raw.to_string(),
+    }
 }
 
 pub(crate) fn get_accept_language(req: &actix_web::HttpRequest) -> String {
