@@ -93,8 +93,9 @@ use simple_smtp_server::entities::{
     WorkflowStage,
 };
 use simple_smtp_server::external_imap::{
-    CreateExternalAccountInput, ExternalFolderMappingInput, ExternalImapService,
-    ExternalMessageActionInput, StartSyncInput, UpdateExternalAccountInput,
+    CreateExternalAccountInput, ExternalAccountCredentials, ExternalFolderMappingInput,
+    ExternalImapServerConfig, ExternalImapService, ExternalMessageActionInput,
+    ExternalSmtpServerConfig, StartSyncInput, UpdateExternalAccountInput,
 };
 use simple_smtp_server::i18n;
 use simple_smtp_server::logic::Logic;
