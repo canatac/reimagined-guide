@@ -103,6 +103,7 @@ impl ImapServer {
 
 #[cfg(test)]
 mod tests {
+    use super::parse_email;
     use super::parse_fetch_arguments;
 
     #[test]
@@ -132,5 +133,75 @@ mod tests {
         let args = parse_fetch_arguments(&parts).expect("expected valid FETCH args");
         assert_eq!(args.sequence_set, "1:*");
         assert_eq!(args.data_items, "(FLAGS BODY.PEEK[HEADER])");
+    }
+
+    // --- parse_email tests ---
+
+    #[test]
+    fn parse_email_extracts_headers_and_body() {
+        let raw = "From: alice@example.com\r\nTo: bob@example.com\r\nSubject: Hello World\r\n\r\nThis is the body.\r\n";
+        let (headers, body) = parse_email(raw);
+        assert_eq!(headers.get("From").unwrap(), "alice@example.com");
+        assert_eq!(headers.get("To").unwrap(), "bob@example.com");
+        assert_eq!(headers.get("Subject").unwrap(), "Hello World");
+        assert!(body.contains("This is the body."));
+    }
+
+    #[test]
+    fn parse_email_handles_empty_body() {
+        let raw = "From: a@b.com\r\nTo: c@d.com\r\n\r\n";
+        let (headers, body) = parse_email(raw);
+        assert_eq!(headers.len(), 2);
+        assert!(body.is_empty());
+    }
+
+    #[test]
+    fn parse_email_handles_empty_input() {
+        let (headers, body) = parse_email("");
+        assert!(headers.is_empty());
+        assert!(body.is_empty());
+    }
+
+    #[test]
+    fn parse_email_handles_multiline_body() {
+        let raw = "From: a@b.com\r\n\r\nLine 1\r\nLine 2\r\nLine 3\r\n";
+        let (headers, body) = parse_email(raw);
+        assert_eq!(headers.len(), 1);
+        assert!(body.contains("Line 1"));
+        assert!(body.contains("Line 2"));
+        assert!(body.contains("Line 3"));
+    }
+
+    #[test]
+    fn parse_email_handles_colon_in_value() {
+        let raw = "Subject: Re: meeting notes\r\n\r\nBody here";
+        let (headers, body) = parse_email(raw);
+        assert_eq!(headers.get("Subject").unwrap(), "Re: meeting notes");
+        assert!(body.contains("Body here"));
+    }
+
+    #[test]
+    fn parse_email_handles_whitespace_in_headers() {
+        let raw = "From:   alice@example.com  \r\nTo:  bob@example.com\r\n\r\nBody";
+        let (headers, body) = parse_email(raw);
+        assert_eq!(headers.get("From").unwrap(), "alice@example.com");
+        assert_eq!(headers.get("To").unwrap(), "bob@example.com");
+    }
+
+    #[test]
+    fn parse_email_handles_no_body_separator() {
+        let raw = "From: a@b.com\r\nTo: c@d.com\r\n";
+        let (headers, body) = parse_email(raw);
+        assert_eq!(headers.len(), 2);
+        assert!(body.is_empty());
+    }
+
+    #[test]
+    fn parse_email_handles_multiple_headers_same_line_format() {
+        let raw = "From: a@b.com\r\nTo: c@d.com\r\nX-Custom: value123\r\n\r\nBody text";
+        let (headers, body) = parse_email(raw);
+        assert_eq!(headers.len(), 3);
+        assert_eq!(headers.get("X-Custom").unwrap(), "value123");
+        assert!(body.contains("Body text"));
     }
 }

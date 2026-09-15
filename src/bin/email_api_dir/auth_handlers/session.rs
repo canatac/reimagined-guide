@@ -168,6 +168,73 @@ fn extract_refresh_token(req: &actix_web::HttpRequest) -> Option<String> {
     None
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_web::http::header::HeaderValue;
+
+    #[test]
+    fn extract_refresh_token_from_bearer() {
+        let req = actix_web::test::TestRequest::default()
+            .insert_header(("Authorization", "Bearer <PASSWORD>"))
+            .to_http_request();
+        assert_eq!(extract_refresh_token(&req), Some("my-token-123".to_string()));
+    }
+
+    #[test]
+    fn extract_refresh_token_from_bearer_with_whitespace() {
+        let req = actix_web::test::TestRequest::default()
+            .insert_header(("Authorization", "Bearer   my-token  "))
+            .to_http_request();
+        assert_eq!(extract_refresh_token(&req), Some("my-token".to_string()));
+    }
+
+    #[test]
+    fn extract_refresh_token_missing_header() {
+        let req = actix_web::test::TestRequest::default()
+            .to_http_request();
+        assert_eq!(extract_refresh_token(&req), None);
+    }
+
+    #[test]
+    fn extract_refresh_token_invalid_bearer_format() {
+        let req = actix_web::test::TestRequest::default()
+            .insert_header(("Authorization", "Basic dXNlcjpwYXNz"))
+            .to_http_request();
+        assert_eq!(extract_refresh_token(&req), None);
+    }
+
+    #[test]
+    fn extract_refresh_token_empty_bearer() {
+        let req = actix_web::test::TestRequest::default()
+            .insert_header(("Authorization", "Bearer   "))
+            .to_http_request();
+        assert_eq!(extract_refresh_token(&req), None);
+    }
+
+    #[test]
+    fn user_session_serialization() {
+        let session = UserSession {
+            user_id: "user-1".into(),
+            email: "<EMAIL>".into(),
+            display_name: "Test User".into(),
+            role: "admin".into(),
+            access_token: "access-123".into(),
+            refresh_token: "refresh-456".into(),
+            access_expires_at: 1234567890,
+            refresh_expires_at: 9999999999,
+            created_at: "2026-01-01T00:00:00Z".into(),
+        };
+        let json = serde_json::to_value(&session).unwrap();
+        assert_eq!(json["user_id"], "user-1");
+        assert_eq!(json["email"], "<EMAIL>");
+        assert_eq!(json["role"], "admin");
+        let parsed: UserSession = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed.user_id, "user-1");
+        assert_eq!(parsed.refresh_token, "refresh-456");
+    }
+}
+
 /// Look up a user session by refresh token.
 pub(crate) async fn lookup_user_session_by_refresh(
     mongo: &mongodb::Client,

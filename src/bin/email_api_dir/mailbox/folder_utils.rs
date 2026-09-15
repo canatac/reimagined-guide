@@ -66,3 +66,53 @@ pub(crate) fn resolve_user_id(req: &actix_web::HttpRequest) -> String {
     }
     env::var("SMTP_USERNAME").unwrap_or_else(|_| "admin".to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn folder_to_mailboxes_inbox() {
+        assert_eq!(folder_to_mailboxes("INBOX"), vec!["inbox", "INBOX"]);
+        assert_eq!(folder_to_mailboxes("inbox"), vec!["inbox", "INBOX"]);
+        assert_eq!(folder_to_mailboxes("  Inbox  "), vec!["inbox", "INBOX"]);
+    }
+
+    #[test]
+    fn folder_to_mailboxes_sent() {
+        assert_eq!(folder_to_mailboxes("sent"), vec!["sent", "SENT", "Sent"]);
+    }
+
+    #[test]
+    fn folder_to_mailboxes_spam() {
+        assert_eq!(folder_to_mailboxes("spam"), vec!["spam", "SPAM", "Spam", "Junk"]);
+    }
+
+    #[test]
+    fn folder_to_mailboxes_unknown() {
+        assert_eq!(folder_to_mailboxes("MyFolder"), vec!["myfolder", "MYFOLDER"]);
+    }
+
+    #[test]
+    fn canonical_folder_supported() {
+        assert_eq!(canonical_folder("INBOX"), Some("inbox".to_string()));
+        assert_eq!(canonical_folder("Sent"), Some("sent".to_string()));
+        assert_eq!(canonical_folder("drafts"), Some("drafts".to_string()));
+        assert_eq!(canonical_folder("ARCHIVE"), Some("archive".to_string()));
+        assert_eq!(canonical_folder("Trash"), Some("trash".to_string()));
+        assert_eq!(canonical_folder("SPAM"), Some("spam".to_string()));
+    }
+
+    #[test]
+    fn canonical_folder_unknown() {
+        assert_eq!(canonical_folder("MyFolder"), None);
+        assert_eq!(canonical_folder(""), None);
+    }
+
+    #[test]
+    fn defaults() {
+        assert_eq!(default_folder(), "inbox");
+        assert_eq!(default_page(), 1);
+        assert_eq!(default_page_size(), 50);
+    }
+}

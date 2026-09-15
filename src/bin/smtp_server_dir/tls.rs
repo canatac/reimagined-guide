@@ -18,3 +18,20 @@ pub(crate) fn load_key(path: &Path) -> std::io::Result<PrivateKeyDer<'static>> {
     })?;
     Ok(key)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn load_certs_missing_file_returns_err() {
+        let result = load_certs(Path::new("/tmp/nonexistent_cert.pem"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn load_key_missing_file_returns_err() {
+        let result = load_key(Path::new("/tmp/nonexistent_key.pem"));
+        assert!(result.is_err());
+    }
+}

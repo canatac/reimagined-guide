@@ -33,6 +33,75 @@ fn default_official() -> bool {
     true
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn holiday_serializes() {
+        let holiday = Holiday {
+            id: "hol-1".into(),
+            country_code: "FR".into(),
+            date: NaiveDate::from_ymd_opt(2026, 7, 14).unwrap(),
+            name: "Bastille Day".into(),
+            is_official: true,
+            created_at: chrono::Utc::now(),
+        };
+        let json = serde_json::to_value(&holiday).unwrap();
+        assert_eq!(json["id"], "hol-1");
+        assert_eq!(json["countryCode"], "FR");
+        assert_eq!(json["name"], "Bastille Day");
+        assert_eq!(json["isOfficial"], true);
+    }
+
+    #[test]
+    fn holiday_deserializes() {
+        let json = serde_json::json!({
+            "id": "hol-1",
+            "countryCode": "US",
+            "date": "2026-07-04",
+            "name": "Independence Day",
+            "isOfficial": true,
+            "createdAt": "2026-01-01T00:00:00Z"
+        });
+        let holiday: Holiday = serde_json::from_value(json).unwrap();
+        assert_eq!(holiday.id, "hol-1");
+        assert_eq!(holiday.country_code, "US");
+        assert_eq!(holiday.name, "Independence Day");
+    }
+
+    #[test]
+    fn holiday_request_deserializes() {
+        let json = serde_json::json!({
+            "countryCode": "FR",
+            "date": "2026-07-14",
+            "name": "Bastille Day"
+        });
+        let req: HolidayRequest = serde_json::from_value(json).unwrap();
+        assert_eq!(req.country_code, "FR");
+        assert_eq!(req.date, "2026-07-14");
+        assert!(req.is_official);
+    }
+
+    #[test]
+    fn default_official_is_true() {
+        assert!(default_official());
+    }
+
+    #[test]
+    fn holiday_query_deserializes() {
+        let json = serde_json::json!({
+            "countryCode": "FR",
+            "year": 2026,
+            "month": 7
+        });
+        let query: HolidayQuery = serde_json::from_value(json).unwrap();
+        assert_eq!(query.country_code, Some("FR".to_string()));
+        assert_eq!(query.year, Some(2026));
+        assert_eq!(query.month, Some(7));
+    }
+}
+
 /// Query parameters for listing holidays
 #[derive(Debug, Deserialize)]
 pub struct HolidayQuery {

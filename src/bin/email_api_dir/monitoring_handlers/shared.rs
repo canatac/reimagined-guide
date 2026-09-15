@@ -90,6 +90,116 @@ pub(crate) fn env_bool(name: &str, default: bool) -> bool {
     }
 }
 
+#[cfg(test)]
+mod shared_tests {
+    use super::*;
+
+    #[test]
+    fn parse_window_minutes_suffix() {
+        assert_eq!(parse_window("15m"), chrono::Duration::minutes(15));
+        assert_eq!(parse_window("1m"), chrono::Duration::minutes(1));
+        assert_eq!(parse_window("90m"), chrono::Duration::minutes(90));
+    }
+
+    #[test]
+    fn parse_window_hours_suffix() {
+        assert_eq!(parse_window("1h"), chrono::Duration::hours(1));
+        assert_eq!(parse_window("24h"), chrono::Duration::hours(24));
+    }
+
+    #[test]
+    fn parse_window_days_suffix() {
+        assert_eq!(parse_window("1d"), chrono::Duration::days(1));
+        assert_eq!(parse_window("7d"), chrono::Duration::days(7));
+    }
+
+    #[test]
+    fn parse_window_defaults_to_15_minutes() {
+        assert_eq!(parse_window(""), chrono::Duration::minutes(15));
+        assert_eq!(parse_window("invalid"), chrono::Duration::minutes(15));
+        assert_eq!(parse_window("15"), chrono::Duration::minutes(15));
+        assert_eq!(parse_window("15x"), chrono::Duration::minutes(15));
+    }
+
+    #[test]
+    fn parse_window_handles_whitespace() {
+        assert_eq!(parse_window(" 15m "), chrono::Duration::minutes(15));
+        assert_eq!(parse_window("\t1h\n"), chrono::Duration::hours(1));
+    }
+
+    #[test]
+    fn default_monitoring_window_is_15m() {
+        assert_eq!(default_monitoring_window(), "15m");
+    }
+
+    #[test]
+    fn default_window_is_1h() {
+        assert_eq!(default_window(), "1h");
+    }
+
+    #[test]
+    fn one_returns_1() {
+        assert_eq!(one(), 1);
+    }
+
+    #[test]
+    fn twenty_returns_20() {
+        assert_eq!(twenty(), 20);
+    }
+
+    #[test]
+    fn default_monitoring_page_is_1() {
+        assert_eq!(default_mon_page(), 1);
+    }
+
+    #[test]
+    fn default_monitoring_page_size_is_50() {
+        assert_eq!(default_mon_page_size(), 50);
+    }
+
+    #[test]
+    fn env_bool_returns_default_when_unset() {
+        std::env::remove_var("TEST_VAR_XYZ");
+        assert!(env_bool("TEST_VAR_XYZ", true));
+        assert!(!env_bool("TEST_VAR_XYZ", false));
+    }
+
+    #[test]
+    fn env_bool_reads_truthy_values() {
+        std::env::set_var("TEST_VAR_XYZ", "true");
+        assert!(env_bool("TEST_VAR_XYZ", false));
+        std::env::set_var("TEST_VAR_XYZ", "1");
+        assert!(env_bool("TEST_VAR_XYZ", false));
+        std::env::set_var("TEST_VAR_XYZ", "yes");
+        assert!(env_bool("TEST_VAR_XYZ", false));
+        std::env::set_var("TEST_VAR_XYZ", "on");
+        assert!(env_bool("TEST_VAR_XYZ", false));
+        std::env::remove_var("TEST_VAR_XYZ");
+    }
+
+    #[test]
+    fn env_bool_reads_falsy_values() {
+        std::env::set_var("TEST_VAR_XYZ", "false");
+        assert!(!env_bool("TEST_VAR_XYZ", true));
+        std::env::set_var("TEST_VAR_XYZ", "0");
+        assert!(!env_bool("TEST_VAR_XYZ", true));
+        std::env::set_var("TEST_VAR_XYZ", "no");
+        assert!(!env_bool("TEST_VAR_XYZ", true));
+        std::env::set_var("TEST_VAR_XYZ", "off");
+        assert!(!env_bool("TEST_VAR_XYZ", true));
+        std::env::remove_var("TEST_VAR_XYZ");
+    }
+
+    #[test]
+    fn env_bool_case_insensitive() {
+        std::env::set_var("TEST_VAR_XYZ", "TRUE");
+        assert!(env_bool("TEST_VAR_XYZ", false));
+        std::env::set_var("TEST_VAR_XYZ", "Yes");
+        assert!(env_bool("TEST_VAR_XYZ", false));
+        std::env::remove_var("TEST_VAR_XYZ");
+    }
+}
+
 pub(crate) async fn dns_txt_lookup(name: &str) -> Vec<String> {
     use trust_dns_resolver::config::{ResolverConfig, ResolverOpts};
     use trust_dns_resolver::TokioAsyncResolver;

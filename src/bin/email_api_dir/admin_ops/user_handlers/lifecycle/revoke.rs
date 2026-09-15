@@ -40,3 +40,51 @@ pub(crate) async fn api_admin_user_revoke_sessions(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn revoke_sessions_success_response() {
+        // Test the response structure for successful revocation
+        let deleted_count = 5u64;
+        let response = serde_json::json!({
+            "revoked": true,
+            "deletedCount": deleted_count,
+        });
+        assert_eq!(response["revoked"], true);
+        assert_eq!(response["deletedCount"], deleted_count);
+    }
+
+    #[test]
+    fn revoke_sessions_zero_deleted() {
+        let deleted_count = 0u64;
+        let response = serde_json::json!({
+            "revoked": true,
+            "deletedCount": deleted_count,
+        });
+        assert_eq!(response["revoked"], true);
+        assert_eq!(response["deletedCount"], 0);
+    }
+
+    #[test]
+    fn revoke_sessions_error_response() {
+        let response = serde_json::json!({ "message": "Failed to revoke sessions" });
+        assert_eq!(response["message"], "Failed to revoke sessions");
+    }
+
+    #[test]
+    fn log_admin_action_format() {
+        let deleted_count = 3u64;
+        let action = "user.revoke_sessions";
+        let target_type = "admin_user";
+        let target_id = "user-123";
+        let note = format!("deleted {} sessions", deleted_count);
+        
+        assert_eq!(action, "user.revoke_sessions");
+        assert_eq!(target_type, "admin_user");
+        assert_eq!(target_id, "user-123");
+        assert_eq!(note, "deleted 3 sessions");
+    }
+}

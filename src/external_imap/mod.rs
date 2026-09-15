@@ -197,3 +197,89 @@ mod folder_ops;
 mod sync_ops;
 mod message_ops;
 mod imap_client_ops;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn redact_account_clears_secret_value() {
+        let account = ExternalImapAccount {
+            id: "acct-1".into(),
+            owner_user_id: "user-1".into(),
+            provider: "gmail".into(),
+            email: "a@gmail.com".into(),
+            auth_type: "oauth2".into(),
+            secret_ref: Some("ref-1".into()),
+            secret_value: Some("super-secret".into()),
+            imap_host: "imap.gmail.com".into(),
+            imap_port: 993,
+            imap_tls: true,
+            smtp_host: Some("smtp.gmail.com".into()),
+            smtp_port: Some(587),
+            smtp_tls: Some(true),
+            status: "active".into(),
+            last_sync_at: None,
+            last_error: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        let redacted = redact_account(account);
+        assert_eq!(redacted.secret_value, None);
+        assert_eq!(redacted.secret_ref, Some("ref-1".into()));
+        assert_eq!(redacted.email, "a@gmail.com");
+    }
+
+    #[test]
+    fn parse_rfc3339_as_bson_valid() {
+        let result = parse_rfc3339_as_bson("2026-09-10T12:00:00Z");
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn parse_rfc3339_as_bson_invalid() {
+        assert!(parse_rfc3339_as_bson("not-a-date").is_none());
+        assert!(parse_rfc3339_as_bson("").is_none());
+    }
+
+    #[test]
+    fn infer_role_inbox() {
+        assert_eq!(infer_role("INBOX"), "inbox");
+        assert_eq!(infer_role("Inbox"), "inbox");
+    }
+
+    #[test]
+    fn infer_role_sent() {
+        assert_eq!(infer_role("Sent"), "sent");
+        assert_eq!(infer_role("Sent Items"), "sent");
+    }
+
+    #[test]
+    fn infer_role_drafts() {
+        assert_eq!(infer_role("Drafts"), "drafts");
+        assert_eq!(infer_role("Draft"), "drafts");
+    }
+
+    #[test]
+    fn infer_role_trash() {
+        assert_eq!(infer_role("Trash"), "trash");
+        assert_eq!(infer_role("Bin"), "trash");
+    }
+
+    #[test]
+    fn infer_role_spam() {
+        assert_eq!(infer_role("Spam"), "spam");
+        assert_eq!(infer_role("Junk"), "spam");
+    }
+
+    #[test]
+    fn infer_role_archive() {
+        assert_eq!(infer_role("Archive"), "archive");
+    }
+
+    #[test]
+    fn infer_role_custom() {
+        assert_eq!(infer_role("MyFolder"), "custom");
+        assert_eq!(infer_role("Work"), "custom");
+    }
+}

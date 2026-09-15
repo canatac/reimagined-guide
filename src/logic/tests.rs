@@ -3,3 +3,4 @@
 #[path = "tests_dir/emails.rs"] mod emails;
 #[path = "tests_dir/mailbox.rs"] mod mailbox;
 #[path = "tests_dir/store.rs"] mod store;
+#[path = "tests_dir/calendar.rs"] mod calendar;
