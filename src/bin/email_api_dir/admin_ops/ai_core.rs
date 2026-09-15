@@ -69,6 +69,75 @@ pub(crate) fn mongo_db_name() -> String {
     env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_ai_feature_models_contains_expected_keys() {
+        let models = default_ai_feature_models();
+        assert!(models.contains_key("compose"));
+        assert!(models.contains_key("translate"));
+        assert!(models.contains_key("triage"));
+        assert!(models.contains_key("security"));
+        assert!(models.contains_key("rewrite"));
+        assert!(models.contains_key("subject"));
+        assert!(models.contains_key("complete"));
+    }
+
+    #[test]
+    fn default_ai_feature_models_uses_default_model() {
+        let models = default_ai_feature_models();
+        assert_eq!(models.get("compose").unwrap(), DEFAULT_AI_MODEL);
+    }
+
+    #[test]
+    fn ai_settings_doc_defaults() {
+        let doc = AiSettingsDoc::defaults();
+        assert_eq!(doc.id, AI_SETTINGS_ID);
+        assert_eq!(doc.default_model, DEFAULT_AI_MODEL);
+        assert!(doc.features.contains_key("compose"));
+    }
+
+    #[test]
+    fn ai_settings_doc_merge_with_defaults() {
+        let doc = AiSettingsDoc {
+            id: AI_SETTINGS_ID.to_string(),
+            default_model: "".into(),
+            features: HashMap::new(),
+            updated_at: None,
+        };
+        let merged = doc.merge_with_defaults();
+        assert_eq!(merged.default_model, DEFAULT_AI_MODEL);
+        assert!(merged.features.contains_key("compose"));
+        assert!(merged.features.contains_key("triage"));
+    }
+
+    #[test]
+    fn ai_settings_doc_merge_preserves_existing() {
+        let mut features = HashMap::new();
+        features.insert("compose".to_string(), "custom-model".to_string());
+        let doc = AiSettingsDoc {
+            id: AI_SETTINGS_ID.to_string(),
+            default_model: "my-model".into(),
+            features,
+            updated_at: None,
+        };
+        let merged = doc.merge_with_defaults();
+        assert_eq!(merged.default_model, "my-model");
+        assert_eq!(merged.features.get("compose").unwrap(), "custom-model");
+        assert_eq!(merged.features.get("triage").unwrap(), DEFAULT_AI_MODEL);
+    }
+
+    #[test]
+    fn ai_settings_doc_to_public_json() {
+        let doc = AiSettingsDoc::defaults();
+        let json = doc.to_public_json();
+        assert_eq!(json["defaultModel"], DEFAULT_AI_MODEL);
+        assert!(json["features"].is_object());
+    }
+}
+
 pub(crate) async fn load_ai_settings(client: &mongodb::Client) -> AiSettingsDoc {
     let coll = client
         .database(&mongo_db_name())
@@ -281,6 +350,170 @@ pub(crate) async fn log_llm_usage_event(client: &mongodb::Client, event: LlmUsag
 
     if let Err(e) = coll.insert_one(doc).await {
         eprintln!("log_llm_usage_event insert error: {}", e);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_ai_feature_models_has_expected_keys() {
+        let models = default_ai_feature_models();
+        for key in ["compose", "translate", "triage", "security", "rewrite", "subject", "complete"] {
+            assert!(models.contains_key(key), "missing key: {}", key);
+        }
+    }
+
+    #[test]
+    fn default_ai_feature_models_all_use_default_model() {
+        let models = default_ai_feature_models();
+        for (key, value) in &models {
+            assert_eq!(value, DEFAULT_AI_MODEL, "key {} has wrong model", key);
+        }
+    }
+
+    #[test]
+    fn normalize_hermes_base_url_strips_trailing_slash() {
+        assert_eq!(normalize_hermes_base_url("https://example.com/"), "https://example.com");
+    }
+
+    #[test]
+    fn normalize_hermes_base_url_strips_v1_suffix() {
+        assert_eq!(normalize_hermes_base_url("https://example.com/v1"), "https://example.com");
+    }
+
+    #[test]
+    fn normalize_hermes_base_url_strips_v1_with_slash() {
+        assert_eq!(normalize_hermes_base_url("https://example.com/v1/"), "https://example.com");
+    }
+
+    #[test]
+    fn normalize_hermes_base_url_plain_url_unchanged() {
+        assert_eq!(normalize_hermes_base_url("https://example.com"), "https://example.com");
+    }
+
+    #[test]
+    fn ai_settings_doc_defaults_populates_features() {
+        let doc = AiSettingsDoc::defaults();
+        assert_eq!(doc.id, AI_SETTINGS_ID);
+        assert_eq!(doc.default_model, DEFAULT_AI_MODEL);
+        assert!(doc.features.contains_key("compose"));
+        assert!(doc.updated_at.is_some());
+    }
+
+    #[test]
+    fn ai_settings_doc_merge_with_defaults_fills_missing_keys() {
+        let doc = AiSettingsDoc {
+            id: AI_SETTINGS_ID.to_string(),
+            default_model: "custom-model".to_string(),
+            features: HashMap::new(),
+            updated_at: None,
+        };
+        let merged = doc.merge_with_defaults();
+        assert_eq!(merged.default_model, "custom-model");
+        assert!(merged.features.contains_key("compose"));
+    }
+
+    #[test]
+    fn ai_settings_doc_merge_with_defaults_replaces_empty_model() {
+        let doc = AiSettingsDoc {
+            id: AI_SETTINGS_ID.to_string(),
+            default_model: "  ".to_string(),
+            features: HashMap::new(),
+            updated_at: None,
+        };
+        let merged = doc.merge_with_defaults();
+        assert_eq!(merged.default_model, DEFAULT_AI_MODEL);
+    }
+
+    #[test]
+    fn as_i64_parses_i64() {
+        assert_eq!(as_i64(Some(&serde_json::json!(42))), 42);
+    }
+
+    #[test]
+    fn as_i64_parses_u64() {
+        assert_eq!(as_i64(Some(&serde_json::json!(100))), 100);
+    }
+
+    #[test]
+    fn as_i64_parses_string() {
+        assert_eq!(as_i64(Some(&serde_json::json!("50"))), 50);
+    }
+
+    #[test]
+    fn as_i64_returns_zero_for_null() {
+        assert_eq!(as_i64(Some(&serde_json::Value::Null)), 0);
+    }
+
+    #[test]
+    fn as_i64_returns_zero_for_none() {
+        assert_eq!(as_i64(None), 0);
+    }
+
+    #[test]
+    fn extract_llm_usage_tokens_explicit_total() {
+        let payload = serde_json::json!({
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 20,
+                "total_tokens": 30
+            }
+        });
+        let (p, c, t) = extract_llm_usage_tokens(&payload);
+        assert_eq!((p, c, t), (10, 20, 30));
+    }
+
+    #[test]
+    fn extract_llm_usage_tokens_computed_total() {
+        let payload = serde_json::json!({
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 20
+            }
+        });
+        let (p, c, t) = extract_llm_usage_tokens(&payload);
+        assert_eq!((p, c, t), (10, 20, 30));
+    }
+
+    #[test]
+    fn extract_llm_usage_tokens_handles_camel_case() {
+        let payload = serde_json::json!({
+            "usage": {
+                "promptTokens": 5,
+                "completionTokens": 15,
+                "totalTokens": 20
+            }
+        });
+        let (p, c, t) = extract_llm_usage_tokens(&payload);
+        assert_eq!((p, c, t), (5, 15, 20));
+    }
+
+    #[test]
+    fn trim_opt_returns_none_for_empty() {
+        assert_eq!(trim_opt(Some("  ".to_string())), None);
+    }
+
+    #[test]
+    fn trim_opt_returns_trimmed() {
+        assert_eq!(trim_opt(Some("  hello  ".to_string())), Some("hello".to_string()));
+    }
+
+    #[test]
+    fn trim_opt_returns_none_for_none() {
+        assert_eq!(trim_opt(None), None);
+    }
+
+    #[test]
+    fn to_public_json_shape() {
+        let doc = AiSettingsDoc::defaults();
+        let json = doc.to_public_json();
+        assert!(json.get("defaultModel").is_some());
+        assert!(json.get("features").is_some());
+        assert!(json.get("updatedAt").is_some());
+        assert!(json.get("_id").is_none());
+        assert!(json.get("id").is_none());
     }
 }
 

@@ -86,6 +86,24 @@ fn source_name(source_doc: &bson::Document) -> String {
         .unwrap_or_else(|| "Source".to_string())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn source_name_returns_name() {
+        let mut doc = bson::Document::new();
+        doc.insert("name", "My Source");
+        assert_eq!(source_name(&doc), "My Source");
+    }
+
+    #[test]
+    fn source_name_fallback() {
+        let doc = bson::Document::new();
+        assert_eq!(source_name(&doc), "Source");
+    }
+}
+
 fn source_url(source_doc: &bson::Document) -> Result<String, HttpResponse> {
     source_doc
         .get_str("url")
@@ -241,4 +259,76 @@ async fn fetch_link_contexts(client: &reqwest::Client, discovered_links: &[Strin
     }
 
     link_contexts
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn source_name_returns_name_field() {
+        let doc = doc! { "name": "TechCrunch" };
+        assert_eq!(source_name(&doc), "TechCrunch");
+    }
+
+    #[test]
+    fn source_name_defaults_to_source() {
+        let doc = doc! { "url": "https://example.com" };
+        assert_eq!(source_name(&doc), "Source");
+    }
+
+    #[test]
+    fn source_name_empty_doc() {
+        let doc = doc! {};
+        assert_eq!(source_name(&doc), "Source");
+    }
+
+    #[test]
+    fn normalize_source_text_html() {
+        let result = normalize_source_text("text/html", "<p>Hello   World</p>");
+        assert_eq!(result, "Hello World");
+    }
+
+    #[test]
+    fn normalize_source_text_plain() {
+        let result = normalize_source_text("text/plain", "Hello   World");
+        assert_eq!(result, "Hello World");
+    }
+
+    #[test]
+    fn normalize_source_text_html_body_without_content_type() {
+        let result = normalize_source_text("text/plain", "<html><body>Hello   World</body></html>");
+        assert_eq!(result, "Hello World");
+    }
+
+    #[test]
+    fn normalize_source_text_empty() {
+        let result = normalize_source_text("text/plain", "");
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn source_url_valid() {
+        let doc = doc! { "url": "example.com" };
+        assert!(source_url(&doc).is_ok());
+        assert_eq!(source_url(&doc).unwrap(), "https://example.com");
+    }
+
+    #[test]
+    fn source_url_with_https() {
+        let doc = doc! { "url": "https://example.com" };
+        assert_eq!(source_url(&doc).unwrap(), "https://example.com");
+    }
+
+    #[test]
+    fn source_url_missing() {
+        let doc = doc! { "name": "No URL" };
+        assert!(source_url(&doc).is_err());
+    }
+
+    #[test]
+    fn source_url_empty() {
+        let doc = doc! { "url": "" };
+        assert!(source_url(&doc).is_err());
+    }
 }

@@ -106,3 +106,95 @@ pub(crate) async fn api_external_account_test(
         ),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn create_external_account_input_deserializes() {
+        let json = serde_json::json!({
+            "provider": "gmail",
+            "email": "<EMAIL>",
+            "authType": "oauth2",
+            "imap": {"host": "imap.gmail.com", "port": 993, "tls": true},
+            "smtp": {"host": "smtp.gmail.com", "port": 587, "tls": true},
+            "credentials": {"secretValue": "token123", "secretRef": null}
+        });
+        let input: CreateExternalAccountInput = serde_json::from_value(json).unwrap();
+        assert_eq!(input.provider, "gmail");
+        assert_eq!(input.email, "<EMAIL>");
+        assert_eq!(input.auth_type, "oauth2");
+        assert_eq!(input.imap.host, "imap.gmail.com");
+        assert_eq!(input.imap.port, 993);
+        assert!(input.imap.tls);
+        assert!(input.smtp.is_some());
+        assert!(input.credentials.is_some());
+    }
+
+    #[test]
+    fn create_external_account_input_minimal() {
+        let json = serde_json::json!({
+            "provider": "outlook",
+            "email": "<EMAIL>",
+            "authType": "password",
+            "imap": {"host": "outlook.office365.com", "port": 993}
+        });
+        let input: CreateExternalAccountInput = serde_json::from_value(json).unwrap();
+        assert_eq!(input.provider, "outlook");
+        assert!(input.smtp.is_none());
+        assert!(input.credentials.is_none());
+    }
+
+    #[test]
+    fn update_external_account_input_deserializes() {
+        let json = serde_json::json!({
+            "provider": "gmail",
+            "status": "active",
+            "lastError": null
+        });
+        let input: UpdateExternalAccountInput = serde_json::from_value(json).unwrap();
+        assert_eq!(input.provider, Some("gmail".to_string()));
+        assert_eq!(input.status, Some("active".to_string()));
+        assert_eq!(input.last_error, None);
+    }
+
+    #[test]
+    fn update_external_account_input_empty() {
+        let json = serde_json::json!({});
+        let input: UpdateExternalAccountInput = serde_json::from_value(json).unwrap();
+        assert_eq!(input.provider, None);
+        assert_eq!(input.email, None);
+    }
+
+    #[test]
+    fn external_account_credentials_deserializes() {
+        let json = serde_json::json!({"secretValue": "my-token", "secretRef": "op://vault/item"});
+        let creds: ExternalAccountCredentials = serde_json::from_value(json).unwrap();
+        assert_eq!(creds.secret_value, Some("my-token".to_string()));
+        assert_eq!(creds.secret_ref, Some("op://vault/item".to_string()));
+    }
+
+    #[test]
+    fn external_imap_server_config_defaults_tls() {
+        let json = serde_json::json!({"host": "imap.example.com", "port": 993});
+        let config: ExternalImapServerConfig = serde_json::from_value(json).unwrap();
+        assert_eq!(config.host, "imap.example.com");
+        assert_eq!(config.port, 993);
+        assert!(config.tls);
+    }
+
+    #[test]
+    fn imap_test_result_deserializes() {
+        let json = serde_json::json!({
+            "ok": true,
+            "capabilities": ["IMAP4rev1", "AUTH=PLAIN"],
+            "greeting": "* OK IMAP server ready",
+            "message": "Connection successful"
+        });
+        let result: ImapTestResult = serde_json::from_value(json).unwrap();
+        assert!(result.ok);
+        assert_eq!(result.capabilities.len(), 2);
+        assert_eq!(result.greeting, "* OK IMAP server ready");
+    }
+}

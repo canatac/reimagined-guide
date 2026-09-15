@@ -65,3 +65,51 @@ pub(crate) async fn write_response(stream: &mut StreamType, response: &str) -> s
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn env_bool_true_values() {
+        std::env::set_var("TEST_BOOL_TRUE", "1");
+        assert!(env_bool("TEST_BOOL_TRUE", false));
+        std::env::set_var("TEST_BOOL_TRUE", "true");
+        assert!(env_bool("TEST_BOOL_TRUE", false));
+        std::env::set_var("TEST_BOOL_TRUE", "yes");
+        assert!(env_bool("TEST_BOOL_TRUE", false));
+        std::env::set_var("TEST_BOOL_TRUE", "on");
+        assert!(env_bool("TEST_BOOL_TRUE", false));
+        std::env::remove_var("TEST_BOOL_TRUE");
+    }
+
+    #[test]
+    fn env_bool_false_values() {
+        std::env::set_var("TEST_BOOL_FALSE", "0");
+        assert!(!env_bool("TEST_BOOL_FALSE", true));
+        std::env::set_var("TEST_BOOL_FALSE", "false");
+        assert!(!env_bool("TEST_BOOL_FALSE", true));
+        std::env::set_var("TEST_BOOL_FALSE", "no");
+        assert!(!env_bool("TEST_BOOL_FALSE", true));
+        std::env::set_var("TEST_BOOL_FALSE", "off");
+        assert!(!env_bool("TEST_BOOL_FALSE", true));
+        std::env::remove_var("TEST_BOOL_FALSE");
+    }
+
+    #[test]
+    fn env_bool_default_when_unset() {
+        std::env::remove_var("TEST_BOOL_UNSET");
+        assert!(env_bool("TEST_BOOL_UNSET", true));
+        assert!(!env_bool("TEST_BOOL_UNSET", false));
+    }
+
+    #[test]
+    fn mail_server_new_creates_dir() {
+        let dir = "/tmp/test_mail_server_dir";
+        let _ = fs::remove_dir_all(dir);
+        let server = MailServer::new(dir);
+        assert_eq!(server.mail_dir, dir);
+        assert!(Path::new(dir).exists());
+        let _ = fs::remove_dir_all(dir);
+    }
+}

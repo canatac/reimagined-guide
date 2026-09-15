@@ -11,6 +11,7 @@ pub mod auth_event;
 pub mod bus;
 pub mod remediation;
 pub mod rules;
+pub mod e2e;
 
 // Public re-exports for backwards compatibility.
 pub use alert::{

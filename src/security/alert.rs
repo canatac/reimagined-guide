@@ -169,3 +169,80 @@ impl SecurityAlert {
         self.audit_hash = Some(format!("hash:{:x}", h.finish()));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn alert_new_sets_default_fields() {
+        let alert = SecurityAlert::new(
+            "ABUSE_VOLUME_SPIKE",
+            "Volume sortant anormal",
+            SecuritySeverity::Critical,
+            RemediationLevel::THROTTLE,
+        );
+        assert_eq!(alert.rule_id, "ABUSE_VOLUME_SPIKE");
+        assert_eq!(alert.rule_name, "Volume sortant anormal");
+        assert_eq!(alert.severity, SecuritySeverity::Critical);
+        assert_eq!(alert.remediation_level, 2);
+        assert_eq!(alert.action, RemediationAction::Throttle);
+        assert_eq!(alert.status, AlertStatus::Active);
+        assert!(!alert.rolled_back);
+        assert!(alert.audit_hash.is_none());
+    }
+
+    #[test]
+    fn alert_builder_with_tenant() {
+        let alert = SecurityAlert::new("TEST", "Test", SecuritySeverity::Low, RemediationLevel::ALERT)
+            .with_tenant("tenant-42");
+        assert_eq!(alert.tenant_id, Some("tenant-42".to_string()));
+    }
+
+    #[test]
+    fn alert_builder_with_signal() {
+        let alert = SecurityAlert::new("TEST", "Test", SecuritySeverity::Low, RemediationLevel::ALERT)
+            .with_signal(serde_json::json!({ "ratio": 30.0 }));
+        assert_eq!(alert.signal["ratio"], 30.0);
+    }
+
+    #[test]
+    fn alert_builder_with_duration() {
+        let alert = SecurityAlert::new("TEST", "Test", SecuritySeverity::Low, RemediationLevel::ALERT)
+            .with_duration(3600);
+        assert_eq!(alert.action_duration_s, Some(3600));
+    }
+
+    #[test]
+    fn alert_stamp_audit_hash_produces_hash() {
+        let mut alert = SecurityAlert::new("TEST", "Test", SecuritySeverity::Low, RemediationLevel::ALERT);
+        alert.stamp_audit_hash();
+        assert!(alert.audit_hash.is_some());
+        assert!(alert.audit_hash.as_ref().unwrap().starts_with("hash:"));
+    }
+
+    #[test]
+    fn alert_serialization_roundtrip() {
+        let alert = SecurityAlert::new("TEST", "Test", SecuritySeverity::High, RemediationLevel::QUARANTINE);
+        let json = serde_json::to_value(&alert).unwrap();
+        assert_eq!(json["rule_id"], "TEST");
+        assert_eq!(json["severity"], "high");
+        assert_eq!(json["remediation_level"], 3);
+    }
+
+    #[test]
+    fn remediation_level_constants() {
+        assert_eq!(RemediationLevel::ALERT.0, 1);
+        assert_eq!(RemediationLevel::THROTTLE.0, 2);
+        assert_eq!(RemediationLevel::QUARANTINE.0, 3);
+        assert_eq!(RemediationLevel::BLOCK.0, 4);
+    }
+
+    #[test]
+    fn severity_numeric_ordering() {
+        assert!(SecuritySeverity::Critical.numeric() > SecuritySeverity::High.numeric());
+        assert!(SecuritySeverity::High.numeric() > SecuritySeverity::Medium.numeric());
+        assert!(SecuritySeverity::Medium.numeric() > SecuritySeverity::Low.numeric());
+        assert!(SecuritySeverity::Low.numeric() > SecuritySeverity::Info.numeric());
+    }
+}

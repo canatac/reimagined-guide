@@ -9,6 +9,24 @@ fn db() -> String {
     std::env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn db_default() {
+        std::env::remove_var("MONGODB_DATABASE");
+        assert_eq!(db(), "mailserver");
+    }
+
+    #[test]
+    fn db_from_env() {
+        std::env::set_var("MONGODB_DATABASE", "test-db");
+        assert_eq!(db(), "test-db");
+        std::env::remove_var("MONGODB_DATABASE");
+    }
+}
+
 pub async fn ensure_indexes(client: &Client) {
     use mongodb::IndexModel;
     let coll = client.database(&db()).collection::<bson::Document>(ALERTS_COLL);
@@ -117,4 +135,22 @@ pub fn start_engine(client: std::sync::Arc<Client>) {
             super::remediation::cleanup_expired_states(&client).await;
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn db_default_mailserver() {
+        std::env::remove_var("MONGODB_DATABASE");
+        assert_eq!(db(), "mailserver");
+    }
+
+    #[test]
+    fn db_from_env() {
+        std::env::set_var("MONGODB_DATABASE", "test_db");
+        assert_eq!(db(), "test_db");
+        std::env::remove_var("MONGODB_DATABASE");
+    }
 }

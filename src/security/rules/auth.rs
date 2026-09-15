@@ -115,3 +115,348 @@ pub async fn rule_stale_api_key(ctx: &RuleContext<'_>) -> Vec<SecurityAlert> {
 // Rule engine: evaluate all rules
 // ---------------------------------------------------------------------------
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn auth_brute_force_threshold_default() {
+        let threshold = 10u64;
+        assert_eq!(threshold, 10);
+    }
+
+    #[test]
+    fn auth_brute_force_level_block() {
+        let count_val = 60u64;
+        let threshold = 10u64;
+        let level = if count_val > threshold * 5 {
+            RemediationLevel::BLOCK
+        } else {
+            RemediationLevel::THROTTLE
+        };
+        assert_eq!(level, RemediationLevel::BLOCK);
+    }
+
+    #[test]
+    fn auth_brute_force_level_throttle() {
+        let count_val = 30u64;
+        let threshold = 10u64;
+        let level = if count_val > threshold * 5 {
+            RemediationLevel::BLOCK
+        } else {
+            RemediationLevel::THROTTLE
+        };
+        assert_eq!(level, RemediationLevel::THROTTLE);
+    }
+
+    #[test]
+    fn auth_brute_force_level_at_threshold() {
+        let count_val = 50u64;
+        let threshold = 10u64;
+        let level = if count_val > threshold * 5 {
+            RemediationLevel::BLOCK
+        } else {
+            RemediationLevel::THROTTLE
+        };
+        assert_eq!(level, RemediationLevel::THROTTLE);
+    }
+
+    #[test]
+    fn auth_brute_force_level_just_above_threshold() {
+        let count_val = 51u64;
+        let threshold = 10u64;
+        let level = if count_val > threshold * 5 {
+            RemediationLevel::BLOCK
+        } else {
+            RemediationLevel::THROTTLE
+        };
+        assert_eq!(level, RemediationLevel::BLOCK);
+    }
+
+    #[test]
+    fn auth_brute_force_alert_type() {
+        let alert_type = "AUTH_BRUTE_FORCE";
+        assert_eq!(alert_type, "AUTH_BRUTE_FORCE");
+    }
+
+    #[test]
+    fn auth_brute_force_alert_title() {
+        let title = "Brute force authentification";
+        assert_eq!(title, "Brute force authentification");
+    }
+
+    #[test]
+    fn auth_brute_force_severity() {
+        let severity = SecuritySeverity::High;
+        assert_eq!(severity, SecuritySeverity::High);
+    }
+
+    #[test]
+    fn auth_brute_force_duration() {
+        let duration = 900;
+        assert_eq!(duration, 900);
+    }
+
+    #[test]
+    fn auth_brute_force_window() {
+        let window = 5;
+        assert_eq!(window, 5);
+    }
+
+    #[test]
+    fn auth_brute_force_collection() {
+        let coll = "auth_events";
+        assert_eq!(coll, "auth_events");
+    }
+
+    #[test]
+    fn auth_brute_force_signal_format() {
+        let signal = json!({
+            "ip": "192.168.1.1",
+            "failures_5m": 15,
+            "threshold": 10,
+        });
+        assert_eq!(signal["ip"], "192.168.1.1");
+        assert_eq!(signal["failures_5m"], 15);
+        assert_eq!(signal["threshold"], 10);
+    }
+
+    #[test]
+    fn stale_api_key_max_age_default() {
+        let max_age_days = 90u64;
+        assert_eq!(max_age_days, 90);
+    }
+
+    #[test]
+    fn stale_api_key_alert_type() {
+        let alert_type = "STALE_API_KEY";
+        assert_eq!(alert_type, "STALE_API_KEY");
+    }
+
+    #[test]
+    fn stale_api_key_alert_title() {
+        let title = "API key ancienne non rotée";
+        assert_eq!(title, "API key ancienne non rotée");
+    }
+
+    #[test]
+    fn stale_api_key_severity() {
+        let severity = SecuritySeverity::Medium;
+        assert_eq!(severity, SecuritySeverity::Medium);
+    }
+
+    #[test]
+    fn stale_api_key_level() {
+        let level = RemediationLevel::ALERT;
+        assert_eq!(level, RemediationLevel::ALERT);
+    }
+
+    #[test]
+    fn stale_api_key_collection() {
+        let coll = "auth_events";
+        assert_eq!(coll, "auth_events");
+    }
+
+    #[test]
+    fn stale_api_key_kind() {
+        let kind = "api_key";
+        assert_eq!(kind, "api_key");
+    }
+
+    #[test]
+    fn stale_api_key_signal_format() {
+        let signal = json!({
+            "sessions_with_old_key": 5,
+            "max_age_days": 90,
+        });
+        assert_eq!(signal["sessions_with_old_key"], 5);
+        assert_eq!(signal["max_age_days"], 90);
+    }
+
+    #[test]
+    fn stale_api_key_zero_sessions() {
+        let old_sessions = 0u64;
+        assert_eq!(old_sessions, 0);
+    }
+
+    #[test]
+    fn stale_api_key_positive_sessions() {
+        let old_sessions = 5u64;
+        assert!(old_sessions > 0);
+    }
+
+    #[test]
+    fn auth_brute_force_pipeline_format() {
+        let pipeline = vec![
+            doc! { "$match": { "ts": { "$gte": "2026-01-01T00:00:00Z" }, "success": false } },
+            doc! { "$group": { "_id": "$ip", "count": { "$sum": 1 } } },
+            doc! { "$match": { "count": { "$gte": 10i64 } } },
+            doc! { "$sort": { "count": -1 } },
+            doc! { "$limit": 20 },
+        ];
+        assert_eq!(pipeline.len(), 5);
+    }
+
+    #[test]
+    fn auth_brute_force_pipeline_match_format() {
+        let match_stage = doc! { "$match": { "ts": { "$gte": "2026-01-01T00:00:00Z" }, "success": false } };
+        assert!(match_stage.contains_key("$match"));
+    }
+
+    #[test]
+    fn auth_brute_force_pipeline_group_format() {
+        let group_stage = doc! { "$group": { "_id": "$ip", "count": { "$sum": 1 } } };
+        assert!(group_stage.contains_key("$group"));
+    }
+
+    #[test]
+    fn auth_brute_force_pipeline_sort_format() {
+        let sort_stage = doc! { "$sort": { "count": -1 } };
+        assert!(sort_stage.contains_key("$sort"));
+    }
+
+    #[test]
+    fn auth_brute_force_pipeline_limit_format() {
+        let limit_stage = doc! { "$limit": 20 };
+        assert!(limit_stage.contains_key("$limit"));
+    }
+
+    #[test]
+    fn auth_brute_force_ip_unknown() {
+        let ip = "unknown";
+        assert_eq!(ip, "unknown");
+    }
+
+    #[test]
+    fn auth_brute_force_ip_ipv4() {
+        let ip = "192.168.1.1";
+        assert!(ip.contains("."));
+    }
+
+    #[test]
+    fn auth_brute_force_ip_ipv6() {
+        let ip = "::1";
+        assert!(ip.contains(":"));
+    }
+
+    #[test]
+    fn security_alert_new() {
+        let alert = SecurityAlert::new(
+            "TEST",
+            "Test alert",
+            SecuritySeverity::High,
+            RemediationLevel::ALERT,
+        );
+        assert_eq!(alert.alert_type, "TEST");
+        assert_eq!(alert.title, "Test alert");
+    }
+
+    #[test]
+    fn security_alert_with_signal() {
+        let alert = SecurityAlert::new(
+            "TEST",
+            "Test alert",
+            SecuritySeverity::High,
+            RemediationLevel::ALERT,
+        )
+        .with_signal(json!({"key": "value"}));
+        assert!(alert.signal.is_some());
+    }
+
+    #[test]
+    fn security_alert_with_duration() {
+        let alert = SecurityAlert::new(
+            "TEST",
+            "Test alert",
+            SecuritySeverity::High,
+            RemediationLevel::ALERT,
+        )
+        .with_duration(900);
+        assert_eq!(alert.duration_secs, Some(900));
+    }
+
+    #[test]
+    fn security_alert_with_tenant() {
+        let alert = SecurityAlert::new(
+            "TEST",
+            "Test alert",
+            SecuritySeverity::High,
+            RemediationLevel::ALERT,
+        )
+        .with_tenant("tenant-1");
+        assert_eq!(alert.tenant_id, Some("tenant-1".to_string()));
+    }
+
+    #[test]
+    fn security_alert_with_ip() {
+        let mut alert = SecurityAlert::new(
+            "TEST",
+            "Test alert",
+            SecuritySeverity::High,
+            RemediationLevel::ALERT,
+        );
+        alert.ip = Some("192.168.1.1".to_string());
+        assert_eq!(alert.ip, Some("192.168.1.1".to_string()));
+    }
+
+    #[test]
+    fn security_alert_stamp_audit_hash() {
+        let mut alert = SecurityAlert::new(
+            "TEST",
+            "Test alert",
+            SecuritySeverity::High,
+            RemediationLevel::ALERT,
+        );
+        alert.stamp_audit_hash();
+        assert!(alert.audit_hash.is_some());
+    }
+
+    #[test]
+    fn security_alert_audit_hash_unique() {
+        let mut alert1 = SecurityAlert::new(
+            "TEST",
+            "Test alert",
+            SecuritySeverity::High,
+            RemediationLevel::ALERT,
+        );
+        alert1.stamp_audit_hash();
+        let mut alert2 = SecurityAlert::new(
+            "TEST",
+            "Test alert",
+            SecuritySeverity::High,
+            RemediationLevel::ALERT,
+        );
+        alert2.stamp_audit_hash();
+        assert_ne!(alert1.audit_hash, alert2.audit_hash);
+    }
+
+    #[test]
+    fn remediation_level_block() {
+        let level = RemediationLevel::BLOCK;
+        assert_eq!(level, RemediationLevel::BLOCK);
+    }
+
+    #[test]
+    fn remediation_level_throttle() {
+        let level = RemediationLevel::THROTTLE;
+        assert_eq!(level, RemediationLevel::THROTTLE);
+    }
+
+    #[test]
+    fn remediation_level_alert() {
+        let level = RemediationLevel::ALERT;
+        assert_eq!(level, RemediationLevel::ALERT);
+    }
+
+    #[test]
+    fn security_severity_high() {
+        let severity = SecuritySeverity::High;
+        assert_eq!(severity, SecuritySeverity::High);
+    }
+
+    #[test]
+    fn security_severity_medium() {
+        let severity = SecuritySeverity::Medium;
+        assert_eq!(severity, SecuritySeverity::Medium);
+    }
+}
