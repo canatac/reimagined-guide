@@ -3,8 +3,16 @@ name: CodeQL Security Scan
 on:
   pull_request:
     branches: [master]
-  push:
-    branches: [master]
+  # NOTE: push master INTENTIONALLY DISABLED
+  # This workflow runs on PRs only, never on push to master.
+  # Reason: master may carry pre-existing alerts that would block
+  # the main branch permanently. Only PRs are gated.
+
+# -----------------------------------------------------------------
+# FORK PRs: GITHUB_TOKEN is READ-ONLY on pull requests from forks.
+# This means `gh api` cannot read code-scanning alerts for fork PRs.
+# In that case this step is skipped (see the fork guard below).
+# -----------------------------------------------------------------
 
 permissions:
   contents: read
@@ -17,8 +25,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
@@ -38,28 +44,63 @@ jobs:
           upload: true
 
       - name: Fail only on new alerts (PR)
-        if: github.event_name == 'pull_request' && always()
+        if: github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.number }}
+          REPO: ${{ github.repository }}
+          IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
         run: |
-          set +e
-          
+          set -euo pipefail
+
+          # Fork guard: GITHUB_TOKEN is read-only, cannot query alerts.
+          if [ "${IS_FORK}" = "true" ]; then
+            echo "::warning::Fork PR detected — GITHUB_TOKEN is read-only."
+            echo "::warning::Cannot query code-scanning alerts for fork."
+            echo "::warning::Skipping new-alert check. Manual review required."
+            exit 0
+          fi
+
+          # Fetch alerts from master (baseline)
           echo "=== Fetching CodeQL alerts from master ==="
-          EXISTING=$(gh api "repos/${{ github.repository }}/code-scanning/alerts?state=open&ref=master" \
-            --jq '.[].rule.id' 2>/dev/null | sort -u || echo "")
-          
+          EXISTING_FILE=$(mktemp)
+          if ! gh api "repos/${REPO}/code-scanning/alerts?state=open&ref=master" \
+            --jq '.[].rule.id' > "$EXISTING_FILE" 2>/tmp/gh_err_master; then
+            echo "::error::Failed to fetch master alerts (API unavailable or 403)."
+            echo "::error::First 10 lines of error:"
+            head -10 /tmp/gh_err_master || true
+            echo ""
+            echo "Cannot determine baseline. Failing closed."
+            rm -f "$EXISTING_FILE"
+            exit 1
+          fi
+
+          # Fetch alerts from PR
           echo "=== Fetching CodeQL alerts from PR ==="
           PR_REF="refs/pull/${PR_NUMBER}/merge"
-          CURRENT=$(gh api "repos/${{ github.repository }}/code-scanning/alerts?state=open&ref=${PR_REF}" \
-            --jq '.[].rule.id' 2>/dev/null | sort -u || echo "")
-          
+          CURRENT_FILE=$(mktemp)
+          if ! gh api "repos/${REPO}/code-scanning/alerts?state=open&ref=${PR_REF}" \
+            --jq '.[].rule.id' > "$CURRENT_FILE" 2>/tmp/gh_err_pr; then
+            echo "::error::Failed to fetch PR alerts (API unavailable or 403)."
+            echo "::error::First 10 lines of error:"
+            head -10 /tmp/gh_err_pr || true
+            echo ""
+            echo "Cannot determine PR alert state. Failing closed."
+            rm -f "$EXISTING_FILE" "$CURRENT_FILE"
+            exit 1
+          fi
+
+          # Sort for comm
+          sort -u "$EXISTING_FILE" -o "$EXISTING_FILE"
+          sort -u "$CURRENT_FILE" -o "$CURRENT_FILE"
+
+          # Find new alerts (in PR but not on master)
           echo "=== Comparing alerts ==="
-          echo "Master alerts: $EXISTING"
-          echo "PR alerts: $CURRENT"
-          
-          NEW_ALERTS=$(comm -13 <(echo "$EXISTING") <(echo "$CURRENT") || true)
-          
+          NEW_ALERTS=$(comm -13 "$EXISTING_FILE" "$CURRENT_FILE" || true)
+
+          # Cleanup
+          rm -f "$EXISTING_FILE" "$CURRENT_FILE" /tmp/gh_err_master /tmp/gh_err_pr
+
           if [ -n "$NEW_ALERTS" ]; then
             echo ""
             echo "::error::NEW CodeQL alerts detected in this PR (not on master):"
