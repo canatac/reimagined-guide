@@ -197,6 +197,12 @@ mod folder_ops;
 mod sync_ops;
 mod message_ops;
 mod imap_client_ops;
+pub mod import_wizard;
+pub use import_wizard::{
+    autodiscover, preset_for, validate_credentials, AutodiscoverResult,
+    ImportWizardPreset, ProviderPreset, SmtpPreset, WizardCredentialsInput,
+    WizardValidationResult,
+};
 
 #[cfg(test)]
 mod tests {
