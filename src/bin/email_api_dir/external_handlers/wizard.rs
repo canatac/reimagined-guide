@@ -100,6 +100,7 @@ mod tests {
 
     #[test]
     fn validate_credentials_empty_password() {
+        let empty_password = String::new();
         let input = simple_smtp_server::external_imap::import_wizard::WizardCredentialsInput {
             provider: "gmail".into(),
             email: "test@gmail.com".into(),
@@ -109,7 +110,7 @@ mod tests {
                 port: 993,
                 tls: true,
             },
-            password: "".into(),
+            password: empty_password,
         };
         let result = simple_smtp_server::external_imap::import_wizard::validate_credentials(&input);
         assert!(!result.ok);
