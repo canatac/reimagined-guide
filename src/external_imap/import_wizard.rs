@@ -209,7 +209,7 @@ pub fn validate_credentials(input: &WizardCredentialsInput) -> WizardValidationR
     ) {
         Ok((greeting, capabilities, folders)) => WizardValidationResult {
             ok: true,
-            if folders.is_empty() {
+            message: if folders.is_empty() {
                 "Connected. Login successful (no folders listed).".into()
             } else {
                 format!("Connected. Login successful, {} folder(s).", folders.len())
@@ -311,5 +311,55 @@ mod tests {
         let r = validate_credentials(&input);
         assert!(!r.ok);
         assert!(r.message.contains("Password"));
+    }
+
+    #[test]
+    fn autodiscover_uppercase_email() {
+        let r = autodiscover("Alice@GMAIL.COM");
+        assert!(r.detected);
+        assert_eq!(r.provider, "gmail");
+    }
+
+    #[test]
+    fn autodiscover_with_subdomain() {
+        let r = autodiscover("user@mail.gmail.com");
+        // "mail.gmail.com" is not in the exact-match list → manual
+        assert!(!r.detected);
+        assert_eq!(r.provider, "manual");
+    }
+
+    #[test]
+    fn preset_case_insensitive() {
+        let p = preset_for("GMAIL");
+        assert!(p.is_some());
+        assert_eq!(p.unwrap().provider, "gmail");
+    }
+
+    #[test]
+    fn preset_outlook_alias_office365() {
+        let p = preset_for("office365").expect("office365 preset");
+        assert_eq!(p.imap.host, "outlook.office365.com");
+        assert_eq!(p.smtp.as_ref().unwrap().host, "smtp.office365.com");
+    }
+
+    #[test]
+    fn preset_yahoo_alias_ymail() {
+        let p = preset_for("ymail.com");
+        assert!(p.is_some());
+        assert_eq!(p.unwrap().provider, "yahoo");
+    }
+
+    #[test]
+    fn autodiscover_yahoo_domain() {
+        let r = autodiscover("user@yahoo.fr");
+        assert!(r.detected);
+        assert_eq!(r.provider, "yahoo");
+    }
+
+    #[test]
+    fn autodiscover_msn_domain() {
+        let r = autodiscover("user@msn.com");
+        assert!(r.detected);
+        assert_eq!(r.provider, "outlook");
     }
 }
