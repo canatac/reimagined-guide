@@ -1,0 +1,74 @@
+name: CodeQL Security Scan
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  codeql:
+    name: CodeQL Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: rust
+          queries: security-extended
+
+      - name: Build for CodeQL
+        run: cargo check --lib --bins --verbose
+
+      - name: Upload SARIF results
+        id: analyze
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:rust"
+          output: sarif-results
+          upload: true
+
+      - name: Fail only on new alerts (PR)
+        if: github.event_name == 'pull_request' && always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.number }}
+        run: |
+          set +e
+          
+          echo "=== Fetching CodeQL alerts from master ==="
+          EXISTING=$(gh api "repos/${{ github.repository }}/code-scanning/alerts?state=open&ref=master" \
+            --jq '.[].rule.id' 2>/dev/null | sort -u || echo "")
+          
+          echo "=== Fetching CodeQL alerts from PR ==="
+          PR_REF="refs/pull/${PR_NUMBER}/merge"
+          CURRENT=$(gh api "repos/${{ github.repository }}/code-scanning/alerts?state=open&ref=${PR_REF}" \
+            --jq '.[].rule.id' 2>/dev/null | sort -u || echo "")
+          
+          echo "=== Comparing alerts ==="
+          echo "Master alerts: $EXISTING"
+          echo "PR alerts: $CURRENT"
+          
+          NEW_ALERTS=$(comm -13 <(echo "$EXISTING") <(echo "$CURRENT") || true)
+          
+          if [ -n "$NEW_ALERTS" ]; then
+            echo ""
+            echo "::error::NEW CodeQL alerts detected in this PR (not on master):"
+            echo "$NEW_ALERTS"
+            echo ""
+            echo "These alerts were introduced by this PR and must be fixed."
+            exit 1
+          else
+            echo ""
+            echo "PASS: No new CodeQL alerts. Any failing alerts already exist on master."
+            echo ""
+          fi
