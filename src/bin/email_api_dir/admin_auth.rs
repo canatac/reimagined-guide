@@ -1,18 +1,18 @@
 //! Admin RBAC — PR1 (fondation).
 //!
-//! Ce module fournit une garde RBAC minimaliste, gated par la variable
+//! Ce module fournit une garde RBAC minimaliste, configurable via la variable
 //! d'environnement `ADMIN_RBAC_ENFORCE`. Comportement:
 //!
-//! - `ADMIN_RBAC_ENFORCE` absent ou différent de "1" / "true"  → **désactivé** :
-//!   `require_admin` renvoie toujours `Ok(AuthUser::system())` et n'appelle
-//!   même pas Mongo. C'est le comportement par défaut à la mise en prod pour
-//!   éviter toute régression pendant que le frontend n'a pas encore été mis
-//!   à jour pour transmettre le token.
+//! - **RBAC activé (défaut sécurisé)** : `require_admin` exige un token valide
+//!   (header `Authorization: Bearer *** ou cookie `session_token`), validé contre
+//!   la collection `admin_sessions`, avec rôle "admin" obligatoire.
+//!   C'est le comportement par défaut — aucun env var nécessaire.
 //!
-//! - `ADMIN_RBAC_ENFORCE=1`  → **activé** : la session est extraite depuis le
-//!   header `Authorization: Bearer *** ou depuis le cookie `session_token`,
-//!   validée contre la collection `admin_sessions`, et le rôle est comparé à
-//!   la liste des rôles autorisés.
+//! - `ADMIN_RBAC_ENFORCE=0|false|no|off` → **désactivé** (urgence/debug) :
+//!   `require_admin` renvoie `Ok(AuthUser::system())` sans appeler Mongo.
+//!
+//! Issue #558 : le défaut sécurisé empêche le déploiement accidentel d'endpoints
+//! admin non authentifiés en production.
 //!
 //! Le module est volontairement autonome (pas d'import des types du binaire)
 //! pour rester facile à extraire vers un crate séparé plus tard sans casser
@@ -29,15 +29,21 @@ use serde::{Deserialize, Serialize};
 /// Nom de la collection Mongo où l'on persiste les sessions admin.
 pub const ADMIN_SESSIONS_COLL: &str = "admin_sessions";
 
-/// Retourne `true` si le RBAC est activé (feature flag).
+/// Retourne `true` si le RBAC est activé.
+///
+/// Secure-by-default: RBAC is ON unless explicitly disabled via
+/// `ADMIN_RBAC_ENFORCE=0|false|no|off`. This prevents accidental
+/// deployment of unauthenticated admin endpoints (issue #558).
 pub fn rbac_enabled() -> bool {
-    matches!(
-        env::var("ADMIN_RBAC_ENFORCE")
-            .unwrap_or_default()
-            .to_ascii_lowercase()
-            .as_str(),
-        "1" | "true" | "yes" | "on"
-    )
+    let raw = env::var("ADMIN_RBAC_ENFORCE").unwrap_or_default();
+    if raw.is_empty() {
+        // Default: secure — enforce RBAC
+        return true;
+    }
+    match raw.to_ascii_lowercase().as_str() {
+        "0" | "false" | "no" | "off" | "disable" | "disabled" => false,
+        _ => true,
+    }
 }
 
 /// Nombre de secondes avant expiration d'une session admin (24h par défaut).
@@ -187,8 +193,8 @@ pub async fn revoke_session(mongo: &mongodb::Client, db_name: &str, token: &str)
 /// Garde principale — à appeler en début de chaque handler `/api/admin/*`
 /// qui doit être réservé aux admins.
 ///
-/// - Feature flag OFF → renvoie `Ok(AuthUser::system())`.
-/// - Feature flag ON  → exige un token valide dont le rôle est "admin".
+/// - RBAC désactivé (`ADMIN_RBAC_ENFORCE=0`) → renvoie `Ok(AuthUser::system())`.
+/// - RBAC activé (défaut) → exige un token valide dont le rôle est "admin".
 ///
 /// En cas de refus, renvoie une réponse HTTP prête à être servie par le
 /// handler (401 si non authentifié, 403 si role insuffisant).
@@ -370,9 +376,30 @@ mod tests {
 
     #[test]
     fn rbac_enabled_default() {
-        // Default is false (env var not set)
-        // We can't easily test this without setting env vars, but we can verify the function exists
-        assert!(true);
+        // Default is true (secure by default) when env var is not set
+        std::env::remove_var("ADMIN_RBAC_ENFORCE");
+        assert!(rbac_enabled(), "RBAC should be enabled by default");
+    }
+
+    #[test]
+    fn rbac_disabled_explicitly() {
+        std::env::set_var("ADMIN_RBAC_ENFORCE", "0");
+        assert!(!rbac_enabled(), "RBAC should be disabled when set to 0");
+        std::env::remove_var("ADMIN_RBAC_ENFORCE");
+    }
+
+    #[test]
+    fn rbac_disabled_false() {
+        std::env::set_var("ADMIN_RBAC_ENFORCE", "false");
+        assert!(!rbac_enabled(), "RBAC should be disabled when set to false");
+        std::env::remove_var("ADMIN_RBAC_ENFORCE");
+    }
+
+    #[test]
+    fn rbac_enabled_explicit() {
+        std::env::set_var("ADMIN_RBAC_ENFORCE", "1");
+        assert!(rbac_enabled(), "RBAC should be enabled when set to 1");
+        std::env::remove_var("ADMIN_RBAC_ENFORCE");
     }
 
     #[test]
