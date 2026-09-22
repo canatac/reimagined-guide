@@ -19,6 +19,13 @@ impl ExternalImapService {
             auth_type: input.auth_type,
             secret_ref: input.credentials.as_ref().and_then(|c| c.secret_ref.clone()),
             secret_value: input.credentials.as_ref().and_then(|c| c.secret_value.clone()),
+            oauth_access_token: input.credentials.as_ref().and_then(|c| c.oauth_access_token.clone()),
+            oauth_refresh_token: input.credentials.as_ref().and_then(|c| c.oauth_refresh_token.clone()),
+            oauth_token_expires_at: input.credentials.as_ref()
+                .and_then(|c| c.oauth_token_expires_at.clone())
+                .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
+                .map(|dt| dt.with_timezone(&chrono::Utc)),
+            oauth_scopes: input.credentials.as_ref().and_then(|c| c.oauth_scopes.clone()),
             imap_host: input.imap.host,
             imap_port: input.imap.port,
             imap_tls: input.imap.tls,
@@ -43,7 +50,11 @@ impl ExternalImapService {
             .sort(doc! { "createdAt": -1 })
             .await?;
         let mut out: Vec<ExternalImapAccount> = cursor.try_collect().await?;
-        out.iter_mut().for_each(|a| a.secret_value = None);
+        out.iter_mut().for_each(|a| {
+            a.secret_value = None;
+            a.oauth_access_token = None;
+            a.oauth_refresh_token = None;
+        });
         Ok(out)
     }
 
@@ -100,6 +111,21 @@ impl ExternalImapService {
         if let Some(creds) = input.credentials {
             set_doc.insert("secretRef", creds.secret_ref);
             set_doc.insert("secretValue", creds.secret_value);
+            // OAuth 2.0 token fields (MW-2026-062)
+            if let Some(at) = creds.oauth_access_token {
+                set_doc.insert("oauthAccessToken", at);
+            }
+            if let Some(rt) = creds.oauth_refresh_token {
+                set_doc.insert("oauthRefreshToken", rt);
+            }
+            if let Some(exp) = creds.oauth_token_expires_at {
+                if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(&exp) {
+                    set_doc.insert("oauthTokenExpiresAt", bson::DateTime::from_chrono(dt.with_timezone(&chrono::Utc)));
+                }
+            }
+            if let Some(scopes) = creds.oauth_scopes {
+                set_doc.insert("oauthScopes", scopes);
+            }
         }
 
         self.coll_accounts()
@@ -132,6 +158,41 @@ impl ExternalImapService {
             .await?;
         Ok(deleted.deleted_count > 0)
     }
+
+    /// Update OAuth2 tokens after a successful refresh (MW-2026-062).
+    pub async fn update_oauth_tokens(
+        &self,
+        owner_user_id: &str,
+        account_id: &str,
+        access_token: &str,
+        refresh_token: Option<&str>,
+        expires_in: Option<i64>,
+    ) -> Result<Option<ExternalImapAccount>> {
+        let mut set_doc = doc! {
+            "updatedAt": Utc::now(),
+            "oauthAccessToken": access_token,
+        };
+        if let Some(rt) = refresh_token {
+            set_doc.insert("oauthRefreshToken", rt);
+        }
+        if let Some(secs) = expires_in {
+            let expires_at = Utc::now() + chrono::Duration::seconds(secs);
+            set_doc.insert("oauthTokenExpiresAt", bson::DateTime::from_chrono(expires_at));
+        }
+
+        self.coll_accounts()
+            .update_one(
+                doc! { "ownerUserId": owner_user_id, "id": account_id },
+                doc! { "$set": set_doc },
+            )
+            .await?;
+
+        let found = self
+            .coll_accounts()
+            .find_one(doc! { "ownerUserId": owner_user_id, "id": account_id })
+            .await?;
+        Ok(found.map(redact_account))
+    }
 }
 
 #[cfg(test)]
@@ -146,8 +207,8 @@ mod tests {
 
     #[test]
     fn account_ops_create_account_fields() {
-        let fields = vec!["id", "owner_user_id", "provider", "email", "auth_type", "secret_ref", "secret_value", "imap_host", "imap_port", "imap_tls", "smtp_host", "smtp_port", "smtp_tls", "status", "last_sync_at", "last_error", "created_at", "updated_at"];
-        assert_eq!(fields.len(), 18);
+        let fields = vec!["id", "owner_user_id", "provider", "email", "auth_type", "secret_ref", "secret_value", "oauth_access_token", "oauth_refresh_token", "oauth_token_expires_at", "oauth_scopes", "imap_host", "imap_port", "imap_tls", "smtp_host", "smtp_port", "smtp_tls", "status", "last_sync_at", "last_error", "created_at", "updated_at"];
+        assert_eq!(fields.len(), 22);
     }
 
     #[test]
