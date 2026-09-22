@@ -207,8 +207,8 @@ pub(crate) async fn api_emails_unified(
                     }
                     Err(e) => {
                         eprintln!(
-                            "unified_inbox external account={}: {}",
-                            account.id, e
+                            "unified_inbox external account_id=<redacted>: {}",
+                            e
                         );
                     }
                 }
