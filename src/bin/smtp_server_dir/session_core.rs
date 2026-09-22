@@ -66,6 +66,7 @@ impl SessionState {
                 email: Email::new("", "", "", "", ""),
                 raw_content: String::new(),
                 dkim_signature: None,
+        encrypted_body: None,
             },
             mail_server: Arc::new(MailServer::new("./emails")),
         }

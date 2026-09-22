@@ -163,6 +163,7 @@ mod tests {
             uid: 0,
             internal_date: chrono::Utc::now(),
             dkim_signature: None,
+        encrypted_body: None,
         };
         let ctx = SendContext::from_email(&email);
         assert_eq!(ctx.message_id, "msg-123@example.com");
@@ -184,6 +185,7 @@ mod tests {
             uid: 0,
             internal_date: chrono::Utc::now(),
             dkim_signature: None,
+        encrypted_body: None,
         };
         let ctx = SendContext::from_email(&email);
         assert_eq!(ctx.message_id, "my-id");
@@ -203,6 +205,7 @@ mod tests {
             uid: 0,
             internal_date: chrono::Utc::now(),
             dkim_signature: None,
+        encrypted_body: None,
         };
         let ctx = SendContext::from_email(&email);
         assert!(!ctx.correlation_id.is_empty());
@@ -222,6 +225,7 @@ mod tests {
             uid: 0,
             internal_date: chrono::Utc::now(),
             dkim_signature: None,
+        encrypted_body: None,
         };
         let ctx = SendContext::from_email(&email);
         let ev = ctx.emit(crate::monitoring::SmtpEventType::Delivered);
@@ -243,6 +247,7 @@ mod tests {
             uid: 0,
             internal_date: chrono::Utc::now(),
             dkim_signature: None,
+        encrypted_body: None,
         };
         let mut ctx = SendContext::from_email(&email);
         ctx.mon = false;

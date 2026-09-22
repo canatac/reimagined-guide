@@ -90,6 +90,7 @@ mod tests {
             uid: 0,
             internal_date: chrono::Utc::now(),
             dkim_signature: None,
+        encrypted_body: None,
         };
         let raw = raw_mime_from_email(&email);
         assert!(raw.contains("From: a@b.com"));
@@ -111,6 +112,7 @@ mod tests {
             uid: 0,
             internal_date: chrono::Utc::now(),
             dkim_signature: None,
+        encrypted_body: None,
         };
         assert_eq!(raw_mime_from_email(&email), "Just body");
     }
@@ -226,6 +228,7 @@ mod tests {
             internal_date: chrono::Utc::now(),
             dkim_signature: None,
         }
+        encrypted_body: None,
     }
 
     #[test]

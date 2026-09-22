@@ -23,6 +23,7 @@ mod tests {
             uid: 0,
             internal_date: chrono::Utc::now(),
             dkim_signature: None,
+        encrypted_body: None,
         };
         assert_eq!(email.id, "test");
     }
