@@ -197,7 +197,13 @@ pub(crate) async fn api_personal_analytics(
     query: web::Query<PersonalAnalyticsQuery>,
     req: actix_web::HttpRequest,
     logic: web::Data<Arc<Logic>>,
+    mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
+    if admin_auth::rbac_enabled() {
+        if let Err(resp) = admin_auth::require_auth(&req, mongo.get_ref(), &mongo_db_name()).await {
+            return resp;
+        }
+    }
     let user_id = resolve_user_id(&req);
     let days = query.days.clamp(1, 365);
     let since = Utc::now() - chrono::Duration::days(days as i64);
