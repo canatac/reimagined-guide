@@ -81,7 +81,6 @@ pub(crate) async fn handle_tls_client(
                                 email: Email::new("", "", "", "", ""),
                                 raw_content: String::new(),
                                 dkim_signature: None,
-        encrypted_body: None,
                             };
                         }
                     }
@@ -168,7 +167,6 @@ pub(crate) async fn handle_plain_client(
                                 email: Email::new("", "", "", "", ""),
                                 raw_content: String::new(),
                                 dkim_signature: None,
-        encrypted_body: None,
                             };
                         }
                     }
@@ -253,7 +251,6 @@ mod tests {
             email: Email::new("", "", "", "", ""),
             raw_content: String::new(),
             dkim_signature: None,
-        encrypted_body: None,
         };
         assert_eq!(email.email.from, "");
         assert_eq!(email.email.to, "");

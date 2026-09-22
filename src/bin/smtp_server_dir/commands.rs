@@ -42,7 +42,6 @@ pub(crate) fn handle_rset(email: &mut CustomEmail) -> String {
         email: Email::new("", "", "", "", ""),
         raw_content: String::new(),
         dkim_signature: None,
-        encrypted_body: None,
     };
     "250 OK\r\n".to_string()
 }
@@ -230,7 +229,6 @@ mod tests {
             email: Email::new("old-id", "from@x.com", "to@x.com", "old-subject", "old-body"),
             raw_content: "raw".to_string(),
             dkim_signature: Some("sig".to_string()),
-        encrypted_body: None,
         };
         let resp = handle_rset(&mut email);
         assert_eq!(resp, "250 OK\r\n");
@@ -245,7 +243,6 @@ mod tests {
             email: Email::new("", "", "", "", ""),
             raw_content: String::new(),
             dkim_signature: None,
-        encrypted_body: None,
         };
         assert_eq!(handle_quit(&email), "221 Bye\r\n");
     }

@@ -350,7 +350,6 @@ mod tests {
             email: Email::new("", "", "", "", ""),
             raw_content: String::new(),
             dkim_signature: None,
-        encrypted_body: None,
         };
         let mut in_body = false;
         absorb_data_line(&mut current, &mut in_body, "From: <EMAIL>").unwrap();
@@ -364,7 +363,6 @@ mod tests {
             email: Email::new("", "", "", "", ""),
             raw_content: String::new(),
             dkim_signature: None,
-        encrypted_body: None,
         };
         let mut in_body = false;
         absorb_data_line(&mut current, &mut in_body, "").unwrap();
@@ -377,7 +375,6 @@ mod tests {
             email: Email::new("", "", "", "", ""),
             raw_content: String::new(),
             dkim_signature: None,
-        encrypted_body: None,
         };
         let mut in_body = true;
         absorb_data_line(&mut current, &mut in_body, "Line 1").unwrap();
@@ -391,7 +388,6 @@ mod tests {
             email: Email::new("", "", "", "", ""),
             raw_content: String::new(),
             dkim_signature: None,
-        encrypted_body: None,
         };
         let mut in_body = false;
         absorb_data_line(&mut current, &mut in_body, "   ").unwrap();

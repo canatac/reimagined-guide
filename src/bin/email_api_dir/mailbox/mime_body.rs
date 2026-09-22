@@ -227,8 +227,8 @@ mod tests {
             uid: 0,
             internal_date: chrono::Utc::now(),
             dkim_signature: None,
+            encrypted_body: None,
         }
-        encrypted_body: None,
     }
 
     #[test]

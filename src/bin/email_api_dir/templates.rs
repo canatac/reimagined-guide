@@ -448,7 +448,7 @@ mod tests {
 
     #[test]
     fn substitute_variables_numeric_values() {
-        let template = "Order #{{order_id}}: \${{amount}}".to_string();
+        let template = r"Order #{{order_id}}: ${{amount}}".to_string();
         let vars = serde_json::json!({ "order_id": 42, "amount": "99.99" });
         let result = substitute_variables(template, &vars);
         assert_eq!(result, "Order #42: $99.99");
