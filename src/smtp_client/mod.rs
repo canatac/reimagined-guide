@@ -193,6 +193,7 @@ mod dane;
 mod discovery;
 mod mx;
 pub mod pool;
+mod mta_sts;
 mod relay;
 mod session;
 mod external_smtp;
@@ -203,12 +204,15 @@ use mx::send_via_mx;
 use session::send_email_content;
 pub use session::extract_email_address;
 pub use dane::{lookup_tlsa_records, validate_server_cert_dane, has_tlsa_records, DaneValidationResult};
+pub use mta_sts::{enforce_mta_sts, fetch_sts_policy, generate_tls_rpt_report, MtaStsResult, StsEnforcementLevel};
 pub use external_smtp::send_via_external_smtp;
 
 pub async fn send_outgoing_email(email: &Email) -> std::io::Result<()> {
     if let Ok(relay_host) = env::var("SMTP_RELAY_HOST") {
         // Use connection pooling for relay sends (issue #587).
+        // MTA-STS not applicable — relay is operator-configured.
         return pool::send_via_relay_pooled(email, &relay_host).await;
     }
+    // Direct-to-MX path: MTA-STS + DANE enforcement applied in mx.rs.
     send_via_mx(email).await
 }
