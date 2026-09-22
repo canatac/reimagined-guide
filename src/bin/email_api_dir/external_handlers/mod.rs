@@ -6,6 +6,7 @@ pub(crate) mod sync;
 pub(crate) mod calendar;
 pub(crate) mod holidays;
 pub(crate) mod import_wizard;
+pub(crate) mod wizard;
 
 pub(crate) use openapi::*;
 pub(crate) use accounts::*;
@@ -14,6 +15,7 @@ pub(crate) use sync::*;
 pub(crate) use calendar::*;
 pub(crate) use holidays::*;
 pub(crate) use import_wizard::*;
+pub(crate) use wizard::*;
 
 
 #[cfg(test)]
@@ -22,37 +24,31 @@ mod tests {
 
     #[test]
     fn external_handlers_has_openapi() {
-        // Verify openapi module is included
         assert!(true);
     }
 
     #[test]
     fn external_handlers_has_accounts() {
-        // Verify accounts module is included
         assert!(true);
     }
 
     #[test]
     fn external_handlers_has_folders() {
-        // Verify folders module is included
         assert!(true);
     }
 
     #[test]
     fn external_handlers_has_sync() {
-        // Verify sync module is included
         assert!(true);
     }
 
     #[test]
     fn external_handlers_has_calendar() {
-        // Verify calendar module is included
         assert!(true);
     }
 
     #[test]
     fn external_handlers_has_holidays() {
-        // Verify holidays module is included
         assert!(true);
     }
 
@@ -88,4 +84,3 @@ mod tests {
         assert_eq!(module_names[5], "holidays");
     }
 }
-
