@@ -2,6 +2,9 @@
 //! Implements POST /api/external-accounts/{id}/send (issue #564).
 
 use super::*;
+use crate::smtp_client::discovery::{expect_code_for_phase, ehlo_hostname};
+use crate::smtp_client::session::send_email_content;
+use crate::smtp_client::body_utils::compose_smtp_payload;
 use simple_smtp_domain::ExternalImapAccount;
 
 /// Send an email through an external account's SMTP server.
