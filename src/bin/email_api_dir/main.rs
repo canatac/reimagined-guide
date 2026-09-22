@@ -198,6 +198,18 @@ async fn main() -> std::io::Result<()> {
     });
     security::audit::start_engine(shared_mongo.clone());
 
+    // Init zero-access encryption manager (Issue #575)
+    let zero_access_manager = web::Data::new(std::sync::Arc::new(tokio::sync::Mutex::new(
+        simple_smtp_server::security::zero_access::ZeroAccessManager::new(
+            shared_mongo
+                .database("simple_smtp")
+                .collection::<bson::Document>("users"),
+            shared_mongo
+                .database("simple_smtp")
+                .collection::<bson::Document>("e2e_keys"),
+        ),
+    )));
+
     // Start send queue background worker
     let sq_mongo = shared_mongo.clone();
     tokio::spawn(send_queue_worker(sq_mongo));
@@ -221,6 +233,7 @@ async fn main() -> std::io::Result<()> {
     let http_event_bus = event_bus.clone();
     let http_external_imap = external_imap_service.clone();
     let http_webhook_secrets = webhook_secrets.clone();
+    let http_zero_access = zero_access_manager.clone();
     let http_addr = env::var("API_SERVER_ADDR").unwrap_or_else(|_| "0.0.0.0:8000".to_string());
     let http_server = actix_web::rt::spawn(async move {
         let server = HttpServer::new(move || {
@@ -231,6 +244,7 @@ async fn main() -> std::io::Result<()> {
                 .app_data(http_event_bus.clone())
                 .app_data(http_external_imap.clone())
                 .app_data(http_webhook_secrets.clone())
+                .app_data(http_zero_access.clone())
                 .configure(startup::register_http_routes)
         })
         .bind(http_addr.clone());

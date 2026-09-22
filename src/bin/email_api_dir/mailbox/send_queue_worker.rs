@@ -297,6 +297,7 @@ pub(crate) async fn send_queue_worker(mongo: Arc<mongodb::Client>) {
                     uid: 0,
                     internal_date: Utc::now(),
                     dkim_signature: if dkim_sig.is_empty() {
+                    encrypted_body: None,
                         None
                     } else {
                         Some(dkim_sig)

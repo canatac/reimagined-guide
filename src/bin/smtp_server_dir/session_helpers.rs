@@ -35,6 +35,7 @@ pub(crate) fn email_from_current(current: &CustomEmail) -> Email {
         uid: current.email.uid,
         internal_date: current.email.internal_date,
         dkim_signature: current.dkim_signature.clone(),
+        encrypted_body: current.email.encrypted_body.clone(),
     }
 }
 
@@ -102,6 +103,7 @@ mod tests {
                 uid: 100,
                 internal_date: chrono::Utc::now(),
                 dkim_signature: Some("sig".into()),
+                encrypted_body: None,
             },
             raw_content: "raw".into(),
             dkim_signature: Some("sig".into()),
@@ -272,6 +274,7 @@ mod tests {
                 uid: 42,
                 internal_date: chrono::Utc::now(),
                 dkim_signature: Some("dkim-sig".into()),
+                encrypted_body: None,
             },
             raw_content: "raw".into(),
             dkim_signature: Some("dkim-sig".into()),

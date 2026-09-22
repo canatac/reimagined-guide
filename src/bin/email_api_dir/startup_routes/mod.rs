@@ -13,6 +13,7 @@ mod mailbox;
 mod mta_sts;
 mod prometheus;
 mod webhook;
+mod zero_access;
 
 pub(crate) use admin::register_admin_routes;
 pub(crate) use auth::register_auth_routes;
@@ -25,6 +26,7 @@ pub(crate) use mailbox::register_mailbox_routes;
 pub(crate) use mta_sts::register_mta_sts_routes;
 pub(crate) use prometheus::register_prometheus_routes;
 pub(crate) use webhook::register_webhook_routes;
+pub(crate) use zero_access::register_zero_access_routes;
 
 #[cfg(test)]
 mod tests {

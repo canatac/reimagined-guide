@@ -10,7 +10,7 @@ pub(crate) async fn api_email_by_id(
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
     if admin_auth::rbac_enabled() {
-        if let Err(resp) = admin_auth::require_auth(&req, mongo.get_ref(), &mongo_db_name()).await {
+        if let Err(resp) = admin_auth::require_user_auth(&req, mongo.get_ref(), &mongo_db_name()).await {
             return resp;
         }
     }
@@ -64,7 +64,7 @@ pub(crate) async fn api_email_action(
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
     if admin_auth::rbac_enabled() {
-        if let Err(resp) = admin_auth::require_auth(&req, mongo.get_ref(), &mongo_db_name()).await {
+        if let Err(resp) = admin_auth::require_user_auth(&req, mongo.get_ref(), &mongo_db_name()).await {
             return resp;
         }
     }

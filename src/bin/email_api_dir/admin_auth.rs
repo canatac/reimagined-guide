@@ -484,7 +484,7 @@ mod tests {
 /// Comportement:
 /// - `ADMIN_RBAC_ENFORCE` absent/différent de "1" → renvoie `Ok(AuthUser::system())` (compatibilité).
 /// - `ADMIN_RBAC_ENFORCE=1` → exige un token session valide (cookie `session_token` ou header `Authorization: Bearer`).
-pub async fn require_auth(
+pub async fn require_user_auth(
     req: &HttpRequest,
     mongo: &Arc<mongodb::Client>,
     db_name: &str,

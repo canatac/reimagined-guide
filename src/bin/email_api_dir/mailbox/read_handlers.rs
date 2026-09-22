@@ -9,7 +9,7 @@ pub(crate) async fn api_email_attachment_download(
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
     if admin_auth::rbac_enabled() {
-        if let Err(resp) = admin_auth::require_auth(&req, mongo.get_ref(), &mongo_db_name()).await {
+        if let Err(resp) = admin_auth::require_user_auth(&req, mongo.get_ref(), &mongo_db_name()).await {
             return resp;
         }
     }
@@ -61,7 +61,7 @@ pub(crate) async fn api_emails(
 ) -> impl Responder {
     // Auth guard: require valid session when RBAC is enforced
     if admin_auth::rbac_enabled() {
-        if let Err(resp) = admin_auth::require_auth(&req, mongo.get_ref(), &mongo_db_name()).await {
+        if let Err(resp) = admin_auth::require_user_auth(&req, mongo.get_ref(), &mongo_db_name()).await {
             return resp;
         }
     }

@@ -103,6 +103,10 @@ pub(super) fn deserialize_email_document(doc: bson::Document) -> Option<Email> {
             .get_str("dkim_signature")
             .ok()
             .map(str::to_string),
+        encrypted_body: normalized
+            .get_str("encrypted_body")
+            .ok()
+            .map(str::to_string),
     };
 
     if !email.id.is_empty() && !email.to.is_empty() {
