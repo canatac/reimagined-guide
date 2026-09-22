@@ -64,6 +64,7 @@ mod mailing_list;
 mod dkim_service;
 mod startup;
 mod startup_routes;
+mod templates;
 // Temporarily disabled in strict clippy hard-gate mode; dedicated integration
 // coverage lives in src/bin/email_api_dir/main_tests/** harness files.
 // #[cfg(test)]
@@ -79,6 +80,7 @@ pub use monitoring_handlers::*;
 pub use mailbox::*;
 pub use admin_ops::*;
 pub use external_handlers::*;
+pub use templates::*;
 
 use sha1::Sha1;
 
@@ -273,6 +275,12 @@ async fn main() -> std::io::Result<()> {
                 "/send-to-mailing-list",
                 web::post().to(send_to_mailing_list),
             )
+            .route("/api/templates", web::post().to(create_template))
+            .route("/api/templates", web::get().to(list_templates))
+            .route("/api/templates/preview", web::post().to(preview_template))
+            .route("/api/templates/{id}", web::get().to(get_template))
+            .route("/api/templates/{id}", web::put().to(update_template))
+            .route("/api/templates/{id}", web::delete().to(delete_template))
     })
     .bind_openssl("0.0.0.0:8443", builder)?
     .run()
