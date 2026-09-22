@@ -126,6 +126,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         uid: 0,
         internal_date: Utc::now(),
         dkim_signature: None,
+        encrypted_body: None,
     };
 
     match send_outgoing_email(&email).await {

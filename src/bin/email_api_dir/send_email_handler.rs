@@ -113,6 +113,7 @@ pub async fn send_email_handler(
                         uid: 0,
                         internal_date: Utc::now(),
                         dkim_signature: Some(sig),
+                        encrypted_body: None,
                     };
 
                     match send_outgoing_email(&email).await {

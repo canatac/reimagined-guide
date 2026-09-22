@@ -306,6 +306,7 @@ mod tests {
             uid: 0,
             internal_date: chrono::Utc::now(),
             dkim_signature: None,
+            encrypted_body: None,
         };
         let attachments = extract_attachments_for_ui(&email);
         assert!(attachments.is_empty());
@@ -326,6 +327,7 @@ mod tests {
             uid: 0,
             internal_date: chrono::Utc::now(),
             dkim_signature: None,
+            encrypted_body: None,
         };
         let attachments = extract_attachments_for_ui(&email);
         assert!(!attachments.is_empty());
@@ -347,6 +349,7 @@ mod tests {
             uid: 0,
             internal_date: chrono::Utc::now(),
             dkim_signature: None,
+            encrypted_body: None,
         };
         let attachments = extract_attachments_for_ui(&email);
         assert!(!attachments.is_empty());

@@ -33,6 +33,7 @@ pub(crate) async fn api_password_reset_request(
         headers: vec![("Content-Type".to_string(), "text/html; charset=utf-8".to_string())],
         flags: vec![], sequence_number: 0, uid: 0,
         internal_date: Utc::now(), dkim_signature: None,
+        encrypted_body: None,
     };
     if let Err(e) = logic.deliver_to_inbox(&local, &reset_email).await { eprintln!("password reset email delivery error: {}", e); }
     HttpResponse::Ok().json(serde_json::json!({ "message": "If the address is registered, a reset link has been sent." }))
@@ -147,6 +148,7 @@ mod tests {
             uid: 0,
             internal_date: Utc::now(),
             dkim_signature: None,
+            encrypted_body: None,
         };
         assert_eq!(reset_email.from, "noreply@misfits.ai");
         assert_eq!(reset_email.subject, "Password Reset Request");

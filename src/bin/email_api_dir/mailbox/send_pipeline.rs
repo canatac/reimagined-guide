@@ -291,6 +291,7 @@ pub(crate) fn build_email_and_message_id(
         uid: 0,
         internal_date: Utc::now(),
         dkim_signature: if dkim.dkim_sig.is_empty() {
+        encrypted_body: None,
             None
         } else {
             Some(dkim.dkim_sig.clone())

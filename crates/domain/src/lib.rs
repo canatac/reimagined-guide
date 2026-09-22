@@ -410,6 +410,7 @@ mod tests {
             uid: 42,
             internal_date: Utc::now(),
             dkim_signature: Some("sig123".into()),
+            encrypted_body: None,
         };
         let json = serde_json::to_value(&email).unwrap();
         assert_eq!(json["from"], "a@x.com");
