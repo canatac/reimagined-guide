@@ -38,6 +38,12 @@ pub(crate) struct EmailDto {
     pub labels: Vec<String>,
     pub size: u64,
     pub message_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account_email: Option<String>,
 }
 
 pub(crate) fn parse_address(raw: &str) -> EmailAddressDto {
@@ -148,6 +154,17 @@ mod tests {
 }
 
 pub(crate) fn email_to_dto(email: &Email, folder: &str, include_body: bool) -> EmailDto {
+    email_to_dto_with_account(email, folder, include_body, None, None, None)
+}
+
+pub(crate) fn email_to_dto_with_account(
+    email: &Email,
+    folder: &str,
+    include_body: bool,
+    account_id: Option<String>,
+    account_type: Option<String>,
+    account_email: Option<String>,
+) -> EmailDto {
     let flags_l: Vec<String> = email.flags.iter().map(|f| f.to_ascii_lowercase()).collect();
     let is_read = flags_l.iter().any(|f| f == "seen" || f == "\\seen");
     let is_starred = flags_l
@@ -242,6 +259,9 @@ pub(crate) fn email_to_dto(email: &Email, folder: &str, include_body: bool) -> E
         labels: vec![],
         size: email.body.len() as u64,
         message_id,
+        account_id,
+        account_type,
+        account_email,
     }
 }
 

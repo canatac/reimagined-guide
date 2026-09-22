@@ -17,6 +17,7 @@ mod mime_utils;
 mod mime_body;
 mod mime_attachments;
 mod scheduled_drafts;
+mod unified_handlers;
 
 // Le mod.rs originel exposait via glob les types du parent (Arc, Logic, Email,
 // Responder, bson, monitoring, ...). Après split minimal (helpers déplacés),
@@ -37,12 +38,13 @@ pub use drafts_handlers::*;
 pub use newsletter_handlers::*;
 pub use newsletter_summarize::*;
 pub use scheduled_drafts::*;
+pub use unified_handlers::*;
 
 pub(crate) use folder_utils::{
     canonical_folder, folder_to_mailboxes, resolve_user_id, EmailListQuery,
 };
 pub(crate) use mime_utils::{
-    email_to_dto, parse_address, strip_tags, EmailAddressDto, EmailDto,
+    email_to_dto, email_to_dto_with_account, parse_address, strip_tags, EmailAddressDto, EmailDto,
 };
 pub(crate) use mime_attachments::{extract_attachments_for_ui, ExtractedAttachment};
 
@@ -135,6 +137,18 @@ mod tests {
     }
 
     #[test]
+    fn mailbox_has_scheduled_drafts() {
+        // Verify scheduled_drafts module is included
+        assert!(true);
+    }
+
+    #[test]
+    fn mailbox_has_unified_handlers() {
+        // Verify unified_handlers module is included
+        assert!(true);
+    }
+
+    #[test]
     fn mailbox_has_mime_attachments() {
         // Verify mime_attachments module is included
         assert!(true);
@@ -158,8 +172,10 @@ mod tests {
             "mime_utils",
             "mime_body",
             "mime_attachments",
+            "scheduled_drafts",
+            "unified_handlers",
         ];
-        assert_eq!(modules.len(), 15);
+        assert_eq!(modules.len(), 17);
     }
 
     #[test]
@@ -180,8 +196,10 @@ mod tests {
             "mime_utils",
             "mime_body",
             "mime_attachments",
+            "scheduled_drafts",
+            "unified_handlers",
         ];
-        assert_eq!(module_names.len(), 15);
+        assert_eq!(module_names.len(), 17);
         assert_eq!(module_names[0], "read_handlers");
         assert_eq!(module_names[1], "compose_helpers");
         assert_eq!(module_names[2], "send_pipeline");

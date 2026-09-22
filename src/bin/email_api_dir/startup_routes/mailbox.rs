@@ -5,7 +5,9 @@ use actix_web::web;
 use super::super::*;
 
 pub(crate) fn register_mailbox_routes(cfg: &mut web::ServiceConfig) {
-    cfg.route("/api/emails", web::get().to(api_emails))
+    cfg.route("/api/emails/unified", web::get().to(api_emails_unified))
+        .route("/api/unified/folders", web::get().to(api_unified_folders))
+        .route("/api/emails", web::get().to(api_emails))
         .route("/api/analytics/personal", web::get().to(api_personal_analytics))
         .route("/api/emails/{id}", web::get().to(api_email_by_id))
         .route(

@@ -10,6 +10,8 @@ pub(crate) struct EmailListQuery {
     pub page: u32,
     #[serde(rename = "pageSize", default = "default_page_size")]
     pub page_size: u32,
+    #[serde(default)]
+    pub unified: bool,
 }
 
 fn default_folder() -> String {
