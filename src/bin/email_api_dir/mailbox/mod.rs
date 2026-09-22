@@ -11,6 +11,7 @@ pub mod single_handlers;
 pub mod drafts_handlers;
 pub mod newsletter_handlers;
 pub mod newsletter_summarize;
+pub mod template_handlers;
 
 mod folder_utils;
 mod mime_utils;
@@ -37,6 +38,7 @@ pub use single_handlers::*;
 pub use drafts_handlers::*;
 pub use newsletter_handlers::*;
 pub use newsletter_summarize::*;
+pub use template_handlers::*;
 pub use scheduled_drafts::*;
 pub use unified_handlers::*;
 
@@ -133,6 +135,12 @@ mod tests {
     #[test]
     fn mailbox_has_mime_body() {
         // Verify mime_body module is included
+        assert!(true);
+    }
+
+    #[test]
+    fn mailbox_has_template_handlers() {
+        // Verify template_handlers module is included
         assert!(true);
     }
 

@@ -64,7 +64,11 @@ pub(crate) fn register_mailbox_routes(cfg: &mut web::ServiceConfig) {
             "/api/newsletters/items",
             web::post().to(api_newsletter_items_create),
         )
-        .route("/api/templates", web::get().to(api_templates))
+        .route("/api/templates", web::get().to(api_templates_list))
+        .route("/api/templates", web::post().to(api_templates_create))
+        .route("/api/templates/preview", web::post().to(api_templates_preview))
+        .route("/api/templates/{id}", web::put().to(api_templates_update))
+        .route("/api/templates/{id}", web::delete().to(api_templates_delete))
         .route("/api/settings/ai", web::get().to(api_get_ai_settings))
         .route("/api/settings/ai", web::put().to(api_put_ai_settings))
         .route("/api/hermes/chat", web::post().to(api_hermes_chat))
@@ -320,6 +324,8 @@ mod tests {
             "/api/newsletters/suggestions",
             "/api/newsletters/items",
             "/api/templates",
+            "/api/templates/preview",
+            "/api/templates/{id}",
             "/api/settings/ai",
             "/api/hermes/chat",
             "/api/mail-assistant/suggestions",
@@ -336,7 +342,7 @@ mod tests {
             "/create-mailing-list",
             "/send-to-mailing-list",
         ];
-        assert_eq!(paths.len(), 28);
+        assert_eq!(paths.len(), 30);
     }
 
     #[test]
@@ -377,6 +383,8 @@ mod tests {
             "/api/newsletters/sources",
             "/api/newsletters/sources/{id}/summarize",
             "/api/newsletters/items",
+            "/api/templates",
+            "/api/templates/preview",
             "/api/hermes/chat",
             "/api/hermes/runs",
             "/api/send/undo",
@@ -387,7 +395,7 @@ mod tests {
             "/create-mailing-list",
             "/send-to-mailing-list",
         ];
-        assert_eq!(post_routes.len(), 16);
+        assert_eq!(post_routes.len(), 18);
     }
 
     #[test]
@@ -404,9 +412,10 @@ mod tests {
         let put_routes = vec![
             "/api/notifications/preferences",
             "/api/settings/ai",
+            "/api/templates/{id}",
             "/api/calendar/events/{id}",
         ];
-        assert_eq!(put_routes.len(), 3);
+        assert_eq!(put_routes.len(), 4);
     }
 
     #[test]
@@ -415,10 +424,11 @@ mod tests {
             "/api/tags/{id}",
             "/api/drafts/{id}",
             "/api/newsletters/sources/{id}",
+            "/api/templates/{id}",
             "/api/calendar/events/{id}",
             "/api/calendar/holidays/{id}",
         ];
-        assert_eq!(delete_routes.len(), 5);
+        assert_eq!(delete_routes.len(), 6);
     }
 
     #[test]
@@ -611,8 +621,8 @@ mod tests {
 
     #[test]
     fn mailbox_routes_handler_api_templates() {
-        let handler = "api_templates";
-        assert_eq!(handler, "api_templates");
+        let handler = "api_templates_list";
+        assert_eq!(handler, "api_templates_list");
     }
 
     #[test]
