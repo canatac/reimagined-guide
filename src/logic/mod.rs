@@ -53,6 +53,7 @@ pub(crate) fn user_from_document(doc: &bson::Document, fallback_username: &str) 
         mailbox,
         condition_accepted: false,
         locale: doc.get_str("locale").ok().map(str::to_owned),
+        zero_access_enabled: doc.get_bool("zero_access_enabled").unwrap_or(false),
     }
 }
 
@@ -104,6 +105,7 @@ impl Logic {
             mailbox: mailbox.to_string(),
             condition_accepted: false,
             locale: None,
+            zero_access_enabled: false,
         };
         self.repo.insert_user(new_user).await
     }

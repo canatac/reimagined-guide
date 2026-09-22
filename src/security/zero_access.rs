@@ -7,8 +7,6 @@
 use bson::doc;
 use mongodb::Collection;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use tokio::sync::RwLock;
 
 /// Zero-access mode status for a user.
 #[derive(Debug, Clone, Serialize, Deserialize)]

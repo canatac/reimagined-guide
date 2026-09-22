@@ -76,6 +76,7 @@ impl MongoDatabaseAdapter {
             mailbox: mailbox.to_string(),
             condition_accepted: false,
             locale: None,
+            zero_access_enabled: false,
         })
         .await
     }
@@ -198,6 +199,7 @@ impl MongoDatabaseAdapter {
                 mailbox: crate::logic::default_mailbox(),
                 condition_accepted: false,
                 locale: None,
+                zero_access_enabled: false,
             })
         }
     }
