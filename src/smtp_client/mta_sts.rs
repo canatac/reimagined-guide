@@ -263,7 +263,7 @@ pub fn generate_tls_rpt_report(
     mx_host: &str,
     failure_reason: &str,
 ) -> serde_json::Value {
-    let timestamp = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ");
+    let timestamp = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
     serde_json::json!({
         "organization-name": "misfits.ai",
         "date-range": {
