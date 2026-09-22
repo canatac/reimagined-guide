@@ -14,6 +14,7 @@ pub(crate) fn register_mailbox_routes(cfg: &mut web::ServiceConfig) {
             "/api/emails/{id}/attachments/{attachment_id}",
             web::get().to(api_email_attachment_download),
         )
+        .route("/api/emails/export", web::post().to(api_emails_export))
         .route("/api/emails/{id}/action", web::post().to(api_email_action))
         .route("/api/tags", web::get().to(api_tags))
         .route("/api/tags", web::post().to(api_tags_create))
@@ -310,6 +311,7 @@ mod tests {
             "/api/analytics/personal",
             "/api/emails/{id}",
             "/api/emails/{id}/attachments/{attachment_id}",
+            "/api/emails/export",
             "/api/emails/{id}/action",
             "/api/tags",
             "/api/send",
@@ -336,7 +338,7 @@ mod tests {
             "/create-mailing-list",
             "/send-to-mailing-list",
         ];
-        assert_eq!(paths.len(), 28);
+        assert_eq!(paths.len(), 29);
     }
 
     #[test]
@@ -370,6 +372,7 @@ mod tests {
     #[test]
     fn mailbox_routes_post_routes() {
         let post_routes = vec![
+            "/api/emails/export",
             "/api/emails/{id}/action",
             "/api/tags",
             "/api/send",
@@ -387,7 +390,7 @@ mod tests {
             "/create-mailing-list",
             "/send-to-mailing-list",
         ];
-        assert_eq!(post_routes.len(), 16);
+        assert_eq!(post_routes.len(), 17);
     }
 
     #[test]
@@ -457,6 +460,12 @@ mod tests {
     fn mailbox_routes_handler_api_emails() {
         let handler = "api_emails";
         assert_eq!(handler, "api_emails");
+    }
+
+    #[test]
+    fn mailbox_routes_handler_api_emails_export() {
+        let handler = "api_emails_export";
+        assert_eq!(handler, "api_emails_export");
     }
 
     #[test]
