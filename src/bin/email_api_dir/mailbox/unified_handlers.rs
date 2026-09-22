@@ -7,7 +7,7 @@
 
 #![allow(unused_imports)]
 use super::super::*;
-use simple_smtp_server::external_imap::ExternalImapMessage;
+use simple_smtp_domain::ExternalImapMessage;
 
 /// A unified email entry that can represent either a native or external email.
 #[derive(Serialize)]
