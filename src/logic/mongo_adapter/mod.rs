@@ -27,11 +27,11 @@ impl MongoDatabaseAdapter {
         Self { client }
     }
 
-    pub(crate) fn database_name() -> String {
+    pub fn database_name() -> String {
         std::env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string())
     }
 
-    pub(crate) fn users_collection_name() -> String {
+    pub fn users_collection_name() -> String {
         std::env::var("MONGODB_USERS_COLLECTION").unwrap_or_else(|_| "users".to_string())
     }
 }

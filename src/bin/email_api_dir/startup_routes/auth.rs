@@ -30,7 +30,9 @@ pub(crate) fn register_auth_routes(cfg: &mut web::ServiceConfig) {
         .route(
             "/api/auth/oauth/{provider}/callback",
             web::get().to(auth_oauth_callback),
-        );
+        )
+        // GDPR Article 17 — right to erasure (issue #595)
+        .route("/api/account", web::delete().to(api_gdpr_delete_account));
 }
 
 #[cfg(test)]
