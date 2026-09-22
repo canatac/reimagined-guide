@@ -120,6 +120,16 @@ pub(crate) fn register_mailbox_routes(cfg: &mut web::ServiceConfig) {
         .route(
             "/send-to-mailing-list",
             web::post().to(send_to_mailing_list),
+        )
+        // GDPR data portability + export (issue #552)
+        .route("/api/v1/export/emails", web::post().to(api_export_emails))
+        .route(
+            "/api/v1/export/{job_id}/status",
+            web::get().to(api_export_status),
+        )
+        .route(
+            "/api/v1/export/{job_id}/download",
+            web::get().to(api_export_download),
         );
 }
 
