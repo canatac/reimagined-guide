@@ -2,7 +2,7 @@
 //! Implements POST /api/external-accounts/{id}/send (issue #564).
 
 use super::*;
-use crate::external_imap::ExternalImapAccount;
+use simple_smtp_domain::ExternalImapAccount;
 
 /// Send an email through an external account's SMTP server.
 /// Models the same flow as `send_via_relay` but uses per-account SMTP config + credentials.
