@@ -7,7 +7,7 @@
 
 #![allow(unused_imports)]
 use super::super::*;
-use crate::external_imap::ExternalImapMessage;
+use simple_smtp_server::external_imap::ExternalImapMessage;
 
 /// A unified email entry that can represent either a native or external email.
 #[derive(Serialize)]
@@ -148,12 +148,12 @@ pub(crate) async fn api_emails_unified(
     query: web::Query<EmailListQuery>,
     req: actix_web::HttpRequest,
     logic: web::Data<Arc<Logic>>,
-    external: web::Data<Arc<crate::external_imap::ExternalImapService>>,
+    external: web::Data<Arc<simple_smtp_server::external_imap::ExternalImapService>>,
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
     // Auth guard
     if admin_auth::rbac_enabled() {
-        if let Err(resp) = admin_auth::require_auth(&req, mongo.get_ref(), &mongo_db_name()).await {
+        if let Err(resp) = admin_auth::require_user_auth(&req, mongo.get_ref(), &mongo_db_name()).await {
             return resp;
         }
     }
@@ -194,7 +194,7 @@ pub(crate) async fn api_emails_unified(
                 let folder_filter = if folder == "inbox" {
                     Some("INBOX")
                 } else {
-                    Some(&folder)
+                    Some(folder.as_str())
                 };
                 match external
                     .list_messages(&user_id, &account.id, folder_filter, 1, page_size as u64)
@@ -245,11 +245,11 @@ pub(crate) async fn api_emails_unified(
 /// GET /api/unified/folders — list folders from all accounts (native + external)
 pub(crate) async fn api_unified_folders(
     req: actix_web::HttpRequest,
-    external: web::Data<Arc<crate::external_imap::ExternalImapService>>,
+    external: web::Data<Arc<simple_smtp_server::external_imap::ExternalImapService>>,
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
     if admin_auth::rbac_enabled() {
-        if let Err(resp) = admin_auth::require_auth(&req, mongo.get_ref(), &mongo_db_name()).await {
+        if let Err(resp) = admin_auth::require_user_auth(&req, mongo.get_ref(), &mongo_db_name()).await {
             return resp;
         }
     }
