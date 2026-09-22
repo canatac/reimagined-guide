@@ -10,6 +10,22 @@ pub(crate) struct EmailListQuery {
     pub page: u32,
     #[serde(rename = "pageSize", default = "default_page_size")]
     pub page_size: u32,
+    // Search filters (issue #545)
+    /// Filter by sender (partial match on from address)
+    #[serde(default)]
+    pub sender: Option<String>,
+    /// Filter by date range start (ISO 8601)
+    #[serde(default)]
+    pub date_from: Option<String>,
+    /// Filter by date range end (ISO 8601)
+    #[serde(default)]
+    pub date_to: Option<String>,
+    /// Filter: only emails with attachments
+    #[serde(rename = "hasAttachments", default)]
+    pub has_attachments: Option<bool>,
+    /// Quick date period: "today", "week", "month"
+    #[serde(default)]
+    pub period: Option<String>,
 }
 
 fn default_folder() -> String {
@@ -114,5 +130,48 @@ mod tests {
         assert_eq!(default_folder(), "inbox");
         assert_eq!(default_page(), 1);
         assert_eq!(default_page_size(), 50);
+    }
+
+    #[test]
+    fn email_list_query_filters_deserialize() {
+        // Test with search filters
+        let json = serde_json::json!({
+            "folder": "inbox",
+            "sender": "gmail",
+            "period": "week",
+            "hasAttachments": true,
+            "page": 1,
+            "pageSize": 20
+        });
+        let query: EmailListQuery = serde_json::from_value(json).unwrap();
+        assert_eq!(query.sender.as_deref(), Some("gmail"));
+        assert_eq!(query.period.as_deref(), Some("week"));
+        assert_eq!(query.has_attachments, Some(true));
+        assert_eq!(query.page, 1);
+        assert_eq!(query.page_size, 20);
+    }
+
+    #[test]
+    fn email_list_query_date_range() {
+        let json = serde_json::json!({
+            "dateFrom": "2026-09-01T00:00:00Z",
+            "dateTo": "2026-09-22T23:59:59Z"
+        });
+        let query: EmailListQuery = serde_json::from_value(json).unwrap();
+        assert!(query.date_from.is_some());
+        assert!(query.date_to.is_some());
+    }
+
+    #[test]
+    fn email_list_query_no_filters() {
+        // Backward compatibility: no filter fields = all None
+        let json = serde_json::json!({ "folder": "sent" });
+        let query: EmailListQuery = serde_json::from_value(json).unwrap();
+        assert_eq!(query.folder, "sent");
+        assert!(query.sender.is_none());
+        assert!(query.date_from.is_none());
+        assert!(query.date_to.is_none());
+        assert!(query.has_attachments.is_none());
+        assert!(query.period.is_none());
     }
 }
