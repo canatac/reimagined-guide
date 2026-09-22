@@ -6,7 +6,11 @@ pub(crate) async fn api_email_attachment_download(
     path: web::Path<(String, String)>,
     req: actix_web::HttpRequest,
     logic: web::Data<Arc<Logic>>,
+    mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
+    if let Err(resp) = admin_auth::require_admin(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
     let user_id = resolve_user_id(&req);
     let (email_id, attachment_id) = path.into_inner();
 
@@ -51,7 +55,11 @@ pub(crate) async fn api_emails(
     query: web::Query<EmailListQuery>,
     req: actix_web::HttpRequest,
     logic: web::Data<Arc<Logic>>,
+    mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
+    if let Err(resp) = admin_auth::require_admin(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
     let user_id = resolve_user_id(&req);
     let folder = query.folder.trim().to_ascii_lowercase();
     let page = query.page.max(1);
@@ -184,7 +192,11 @@ pub(crate) async fn api_personal_analytics(
     query: web::Query<PersonalAnalyticsQuery>,
     req: actix_web::HttpRequest,
     logic: web::Data<Arc<Logic>>,
+    mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
+    if let Err(resp) = admin_auth::require_admin(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
     let user_id = resolve_user_id(&req);
     let days = query.days.clamp(1, 365);
     let since = Utc::now() - chrono::Duration::days(days as i64);

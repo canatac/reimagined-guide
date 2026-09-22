@@ -9,6 +9,9 @@ pub(crate) async fn api_email_by_id(
     bus: web::Data<EventBus>,
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
+    if let Err(resp) = admin_auth::require_admin(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
     let user_id = resolve_user_id(&req);
     let email_id = path.into_inner();
     match logic.fetch_email(&user_id, &email_id).await {
@@ -56,7 +59,11 @@ pub(crate) async fn api_email_action(
     body: web::Json<EmailActionRequest>,
     req: actix_web::HttpRequest,
     logic: web::Data<Arc<Logic>>,
+    mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
+    if let Err(resp) = admin_auth::require_admin(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
     let user_id = resolve_user_id(&req);
     let email_id = path.into_inner();
     let action = body.action.trim().to_ascii_lowercase();
