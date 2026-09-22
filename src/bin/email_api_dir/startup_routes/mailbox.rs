@@ -65,6 +65,9 @@ pub(crate) fn register_mailbox_routes(cfg: &mut web::ServiceConfig) {
             web::post().to(api_newsletter_items_create),
         )
         .route("/api/templates", web::get().to(api_templates))
+        .route("/api/threads", web::get().to(api_threads))
+        .route("/api/threads/{thread_id}", web::get().to(api_thread_detail))
+        .route("/api/threads/{thread_id}/action", web::post().to(api_thread_action))
         .route("/api/settings/ai", web::get().to(api_get_ai_settings))
         .route("/api/settings/ai", web::put().to(api_put_ai_settings))
         .route("/api/hermes/chat", web::post().to(api_hermes_chat))
@@ -613,6 +616,12 @@ mod tests {
     fn mailbox_routes_handler_api_templates() {
         let handler = "api_templates";
         assert_eq!(handler, "api_templates");
+    }
+
+    #[test]
+    fn mailbox_routes_handler_api_threads() {
+        let handler = "api_threads";
+        assert_eq!(handler, "api_threads");
     }
 
     #[test]
