@@ -77,6 +77,7 @@ use mailserver_helpers::{env_bool, write_response, MailServer};
 struct Startup {
     tls_addr: String,
     plain_addr: String,
+    submission_addr: String,
     tls_acceptor: Arc<TlsAcceptor>,
     logic: Arc<Logic>,
     session_manager: Arc<SessionManager>,
@@ -89,6 +90,7 @@ async fn main() -> Result<(), MainError> {
     init_logger();
     let tls_addr = env::var("SMTP_TLS_ADDR").unwrap_or_else(|_| "0.0.0.0:8465".to_string());
     let plain_addr = env::var("SMTP_PLAIN_ADDR").unwrap_or_else(|_| "0.0.0.0:8025".to_string());
+    let submission_addr = env::var("SMTP_SUBMISSION_ADDR").unwrap_or_else(|_| "0.0.0.0:587".to_string());
     let cert_path = PathBuf::from(env::var("CERT_PATH").unwrap_or_else(|_| "localhost.crt".to_string()));
     let key_path = PathBuf::from(env::var("KEY_PATH").unwrap_or_else(|_| "localhost.key".to_string()));
     let tls_acceptor = build_tls_acceptor(&cert_path, &key_path)?;
@@ -102,6 +104,7 @@ async fn main() -> Result<(), MainError> {
     let startup = Startup {
         tls_addr,
         plain_addr,
+        submission_addr,
         tls_acceptor,
         logic,
         session_manager,
@@ -273,8 +276,10 @@ fn init_monitoring_if_enabled(client: Arc<mongodb::Client>) {
 async fn run_accept_loop(startup: Startup) -> Result<(), MainError> {
     let tls_listener = TcpListener::bind(startup.tls_addr.clone()).await?;
     let plain_listener = TcpListener::bind(startup.plain_addr.clone()).await?;
+    let submission_listener = TcpListener::bind(startup.submission_addr.clone()).await?;
     info!("TLS Server listening on {}", startup.tls_addr);
     info!("Plain Server listening on {}", startup.plain_addr);
+    info!("Submission Server listening on {}", startup.submission_addr);
     loop {
         tokio::select! {
             result = tls_listener.accept() => {
@@ -286,6 +291,14 @@ async fn run_accept_loop(startup: Startup) -> Result<(), MainError> {
                 );
             }
             result = plain_listener.accept() => {
+                handle_plain_accept(
+                    result,
+                    startup.tls_acceptor.clone(),
+                    startup.logic.clone(),
+                    startup.session_manager.clone(),
+                );
+            }
+            result = submission_listener.accept() => {
                 handle_plain_accept(
                     result,
                     startup.tls_acceptor.clone(),

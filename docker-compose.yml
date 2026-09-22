@@ -26,6 +26,7 @@ services:
     container_name: smtp-server
     ports:
       - "25:25"      # Standard SMTP
+      - "587:587"    # SMTP Submission (STARTTLS)
       - "8025:8025"  # Plain SMTP
       - "8465:8465"  # TLS SMTP
     volumes:
@@ -34,6 +35,7 @@ services:
     environment:
       - SMTP_TLS_ADDR=${SMTP_TLS_ADDR}
       - SMTP_PLAIN_ADDR=${SMTP_PLAIN_ADDR}
+      - SMTP_SUBMISSION_ADDR=${SMTP_SUBMISSION_ADDR:-0.0.0.0:587}
       - CERT_PATH=/app/certs/${CERT_PATH}
       - KEY_PATH=/app/certs/${KEY_PATH}
       - SMTP_USERNAME=${SMTP_USERNAME}
