@@ -104,6 +104,69 @@ pub(crate) async fn api_emails(
         seen.insert(key)
     });
 
+    // --- Search filters (issue #545) ---
+    // Resolve period shortcuts into absolute timestamps
+    let now = chrono::Utc::now();
+    let (filter_from, filter_to) = match query.period.as_deref() {
+        Some("today") => {
+            let start_of_day = now.date_naive().and_hms_opt(0, 0, 0).unwrap();
+            let from = chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(start_of_day, chrono::Utc);
+            (Some(from), Some(now))
+        }
+        Some("week") => (Some(now - chrono::Duration::days(7)), Some(now)),
+        Some("month") => (Some(now - chrono::Duration::days(30)), Some(now)),
+        _ => {
+            let from = query.date_from.as_ref().and_then(|d| {
+                chrono::DateTime::parse_from_rfc3339(d)
+                    .ok()
+                    .map(|dt| dt.with_timezone(&chrono::Utc))
+            });
+            let to = query.date_to.as_ref().and_then(|d| {
+                chrono::DateTime::parse_from_rfc3339(d)
+                    .ok()
+                    .map(|dt| dt.with_timezone(&chrono::Utc))
+            });
+            (from, to)
+        }
+    };
+
+    if filter_from.is_some() || filter_to.is_some() || query.sender.is_some() || query.has_attachments.is_some() {
+        collected.retain(|e| {
+            // Date range filter
+            if let Some(from) = filter_from {
+                if e.internal_date < from {
+                    return false;
+                }
+            }
+            if let Some(to) = filter_to {
+                if e.internal_date > to {
+                    return false;
+                }
+            }
+            // Sender filter (case-insensitive partial match)
+            if let Some(ref sender_filter) = query.sender {
+                if !e.from.to_ascii_lowercase().contains(&sender_filter.to_ascii_lowercase()) {
+                    return false;
+                }
+            }
+            // Attachments filter — check headers for Content-Type: multipart/mixed
+            // or presence of attachment-related headers
+            if let Some(has_att) = query.has_attachments {
+                let has = e.headers.iter().any(|(k, v)| {
+                    k.eq_ignore_ascii_case("content-type")
+                        && (v.contains("multipart/mixed") || v.contains("multipart/related"))
+                }) || e.headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("content-disposition"));
+                if has_att && !has {
+                    return false;
+                }
+                if !has_att && has {
+                    return false;
+                }
+            }
+            true
+        });
+    }
+
     let total = collected.len() as u32;
     let start = ((page - 1) * page_size) as usize;
     let page_items: Vec<EmailDto> = collected
