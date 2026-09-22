@@ -196,7 +196,6 @@ mod relay;
 mod session;
 
 use body_utils::compose_smtp_payload;
-use dane::{lookup_tlsa_records, validate_server_cert_dane, has_tlsa_records, DaneValidationResult};
 use discovery::{find_smtp_port, expect_code_for_phase, ehlo_hostname};
 use relay::send_via_relay;
 use mx::send_via_mx;

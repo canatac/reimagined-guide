@@ -119,7 +119,7 @@ async fn perform_smtp_handshake(
             .with_root_certificates(root_store)
             .with_no_client_auth();
         let connector = TlsConnector::from(Arc::new(config));
-        let server_name = ServerName::try_from(smtp_server)
+        let server_name = ServerName::try_from(smtp_server.clone())
             .map_err(|_| IoError::new(ErrorKind::InvalidInput, "Invalid server name"))?;
         let tls_stream = timeout(
             Duration::from_millis(budget.tls_handshake_ms),

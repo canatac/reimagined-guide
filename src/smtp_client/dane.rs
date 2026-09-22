@@ -77,21 +77,20 @@ pub async fn lookup_tlsa_records(domain: &str) -> std::io::Result<Vec<TlsaRecord
 
     let records: Vec<TlsaRecord> = lookup
         .iter()
-        .filter_map(|rdata| {
-            let tlsa = rdata.as_tlsa()?;
-            let cert_usage = match tlsa.cert_usage() {
+        .filter_map(|tlsa| {
+            let cert_usage = match tlsa.cert_usage() as u8 {
                 0 => TlsaCertUsage::PkixTa,
                 1 => TlsaCertUsage::PkixEe,
                 2 => TlsaCertUsage::DaneTa,
                 3 => TlsaCertUsage::DaneEe,
                 _ => return None,
             };
-            let selector = match tlsa.selector() {
+            let selector = match tlsa.selector() as u8 {
                 0 => TlsaSelector::FullCert,
                 1 => TlsaSelector::Spki,
                 _ => return None,
             };
-            let matching_type = match tlsa.matching_type() {
+            let matching_type = match tlsa.matching_type() as u8 {
                 0 => TlsaMatchingType::Sha256,
                 1 => TlsaMatchingType::Sha384,
                 2 => TlsaMatchingType::FullData,
