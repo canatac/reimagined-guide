@@ -11,7 +11,7 @@ use actix_web::Responder;
 use bson;
 use bson::doc;
 use chrono::Utc;
-use futures::TryStreamExt;
+use futures_util::TryStreamExt;
 use mongodb;
 use serde::Deserialize;
 use serde::Serialize;
