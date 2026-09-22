@@ -2,9 +2,13 @@
 use super::super::super::*;
 
 pub(crate) async fn api_admin_deliverability_procedure_update(
+    req: HttpRequest,
     body: web::Json<DeliverabilityProcedureUpdateRequest>,
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
+    if let Err(resp) = admin_auth::require_admin(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
     let db = env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
     let coll = mongo
         .database(&db)

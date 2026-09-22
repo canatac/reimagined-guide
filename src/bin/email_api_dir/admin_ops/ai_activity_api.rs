@@ -22,9 +22,13 @@ struct ActivityState {
 }
 
 pub(crate) async fn api_admin_ai_activity(
+    req: HttpRequest,
     query: web::Query<AdminAiActivityQuery>,
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
+    if let Err(resp) = admin_auth::require_admin(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
     let limit = query.limit.unwrap_or(100).clamp(10, 500);
     let runs = match load_ai_activity_runs(mongo.get_ref(), limit).await {
         Ok(v) => v,

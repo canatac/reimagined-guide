@@ -1,7 +1,13 @@
 #![allow(unused_imports, dead_code)]
 use super::super::*;
 
-pub(crate) async fn api_admin_change_requests_list(mongo: web::Data<Arc<mongodb::Client>>) -> impl Responder {
+pub(crate) async fn api_admin_change_requests_list(
+    req: HttpRequest,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    if let Err(resp) = admin_auth::require_admin(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
     let coll = mongo
         .database(&mongo_db_name())
         .collection::<ChangeRequestItem>(ADMIN_CHANGE_REQUESTS_COLL);
@@ -32,9 +38,13 @@ pub(crate) async fn api_admin_change_requests_list(mongo: web::Data<Arc<mongodb:
 }
 
 pub(crate) async fn api_admin_change_request_get(
+    req: HttpRequest,
     path: web::Path<String>,
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
+    if let Err(resp) = admin_auth::require_admin(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
     let id = path.into_inner();
     let coll = mongo
         .database(&mongo_db_name())

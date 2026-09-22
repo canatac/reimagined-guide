@@ -18,6 +18,9 @@ pub(crate) async fn api_hermes_chat(
     body: web::Json<HermesChatProxyRequest>,
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
+    if let Err(resp) = admin_auth::require_admin(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
     if body.messages.is_empty() {
         return HttpResponse::BadRequest().json(serde_json::json!({
             "error": "messages is required"
@@ -180,9 +183,13 @@ pub(crate) async fn api_hermes_chat(
 }
 
 pub(crate) async fn api_hermes_runs_list(
+    req: HttpRequest,
     query: web::Query<HermesRunsListQuery>,
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
+    if let Err(resp) = admin_auth::require_admin(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
     let limit = query.limit.unwrap_or(40).clamp(10, 200);
 
     match load_ai_activity_runs(mongo.get_ref(), limit).await {
