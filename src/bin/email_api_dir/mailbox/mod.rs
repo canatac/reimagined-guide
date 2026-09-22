@@ -18,6 +18,7 @@ mod mime_body;
 mod mime_attachments;
 mod scheduled_drafts;
 mod unified_handlers;
+mod thread_handlers;
 
 // Le mod.rs originel exposait via glob les types du parent (Arc, Logic, Email,
 // Responder, bson, monitoring, ...). Après split minimal (helpers déplacés),
@@ -39,6 +40,7 @@ pub use newsletter_handlers::*;
 pub use newsletter_summarize::*;
 pub use scheduled_drafts::*;
 pub use unified_handlers::*;
+pub use thread_handlers::*;
 
 pub(crate) use folder_utils::{
     canonical_folder, folder_to_mailboxes, resolve_user_id, EmailListQuery,
