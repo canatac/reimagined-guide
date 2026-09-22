@@ -4,9 +4,13 @@ use super::observability_alerts::*;
 use super::observability_stats::*;
 
 pub(crate) async fn api_admin_observability_overview(
+    req: HttpRequest,
     query: web::Query<AdminWindowQuery>,
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
+    if let Err(resp) = admin_auth::require_admin(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
     let since = since_str(&query.window);
     let window_minutes = parse_window(&query.window).num_minutes().max(1) as f64;
     let base_filter = doc! { "ts": { "$gte": &since } };

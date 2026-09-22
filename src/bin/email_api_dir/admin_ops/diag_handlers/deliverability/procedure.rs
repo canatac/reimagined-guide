@@ -2,9 +2,13 @@
 use super::super::super::*;
 
 pub(crate) async fn api_admin_deliverability_procedure(
+    req: HttpRequest,
     query: web::Query<AdminWindowQuery>,
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
+    if let Err(resp) = admin_auth::require_admin(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
     let domain = env::var("DOMAIN_NAME")
         .or_else(|_| env::var("MAIL_DOMAIN"))
         .unwrap_or_else(|_| "misfits.ai".to_string())

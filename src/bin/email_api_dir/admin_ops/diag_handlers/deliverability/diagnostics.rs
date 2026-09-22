@@ -2,9 +2,13 @@
 use super::super::super::*;
 
 pub(crate) async fn api_admin_deliverability_diagnostics(
+    req: HttpRequest,
     query: web::Query<DeliverabilityDiagnosticsQuery>,
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
+    if let Err(resp) = admin_auth::require_admin(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
     use simple_smtp_server::security::audit;
 
     let since = since_str(&query.window);

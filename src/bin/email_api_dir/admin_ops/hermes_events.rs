@@ -1,7 +1,14 @@
 #![allow(unused_imports, dead_code)]
 use super::*;
 
-pub(crate) async fn api_hermes_run_events(path: web::Path<HermesRunPath>, req: HttpRequest) -> impl Responder {
+pub(crate) async fn api_hermes_run_events(
+    path: web::Path<HermesRunPath>,
+    req: HttpRequest,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    if let Err(resp) = admin_auth::require_admin(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
     let base = resolve_hermes_base_url();
     let api_key = match env::var("HERMES_API_KEY") {
         Ok(v) if !v.trim().is_empty() => v,

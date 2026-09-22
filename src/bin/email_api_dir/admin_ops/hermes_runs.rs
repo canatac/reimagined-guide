@@ -8,7 +8,11 @@ pub(crate) struct HermesRunPath {
 pub(crate) async fn api_hermes_runs(
     req: HttpRequest,
     body: web::Json<HermesRunsProxyRequest>,
+    mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
+    if let Err(resp) = admin_auth::require_admin(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
     let input = match body.input.clone().filter(|v| !v.is_null()) {
         Some(v) => v,
         None => {
