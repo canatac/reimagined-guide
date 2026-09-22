@@ -5,7 +5,7 @@
 /// against the TLSA record published for `_25._tcp.<domain>`.
 
 use rustls::pki_types::CertificateDer;
-use sha2::{Digest, Sha256, Sha384};
+use sha2::{Digest, Sha256, Sha512};
 use std::io::{Error as IoError, ErrorKind};
 use trust_dns_resolver::config::{ResolverConfig, ResolverOpts};
 use trust_dns_resolver::TokioAsyncResolver;
@@ -35,11 +35,11 @@ pub enum TlsaSelector {
 /// TLSA matching type: how the association data is compared.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TlsaMatchingType {
-    /// Exact match (SHA-256).
+    /// SHA-256 hash match.
     Sha256 = 0,
-    /// SHA-384 match.
-    Sha384 = 1,
-    /// Full certificate data match (not hashed).
+    /// SHA-512 hash match.
+    Sha512 = 1,
+    /// Full certificate data match (not hashed / Raw).
     FullData = 2,
 }
 
@@ -78,23 +78,23 @@ pub async fn lookup_tlsa_records(domain: &str) -> std::io::Result<Vec<TlsaRecord
     let records: Vec<TlsaRecord> = lookup
         .iter()
         .filter_map(|tlsa| {
-            let cert_usage = match tlsa.cert_usage() as u8 {
-                0 => TlsaCertUsage::PkixTa,
-                1 => TlsaCertUsage::PkixEe,
-                2 => TlsaCertUsage::DaneTa,
-                3 => TlsaCertUsage::DaneEe,
+            let cert_usage = match tlsa.cert_usage() {
+                trust_dns_resolver::proto::rr::rdata::tlsa::CertUsage::CA => TlsaCertUsage::PkixTa,
+                trust_dns_resolver::proto::rr::rdata::tlsa::CertUsage::Service => TlsaCertUsage::PkixEe,
+                trust_dns_resolver::proto::rr::rdata::tlsa::CertUsage::TrustAnchor => TlsaCertUsage::DaneTa,
+                trust_dns_resolver::proto::rr::rdata::tlsa::CertUsage::DomainIssued => TlsaCertUsage::DaneEe,
                 _ => return None,
             };
-            let selector = match tlsa.selector() as u8 {
-                0 => TlsaSelector::FullCert,
-                1 => TlsaSelector::Spki,
+            let selector = match tlsa.selector() {
+                trust_dns_resolver::proto::rr::rdata::tlsa::Selector::Full => TlsaSelector::FullCert,
+                trust_dns_resolver::proto::rr::rdata::tlsa::Selector::Spki => TlsaSelector::Spki,
                 _ => return None,
             };
-            let matching_type = match tlsa.matching_type() as u8 {
-                0 => TlsaMatchingType::Sha256,
-                1 => TlsaMatchingType::Sha384,
-                2 => TlsaMatchingType::FullData,
-                _ => return None,
+            let matching_type = match tlsa.matching() {
+                trust_dns_resolver::proto::rr::rdata::tlsa::Matching::Sha256 => TlsaMatchingType::Sha256,
+                trust_dns_resolver::proto::rr::rdata::tlsa::Matching::Sha512 => TlsaMatchingType::Sha512,
+                trust_dns_resolver::proto::rr::rdata::tlsa::Matching::Raw => TlsaMatchingType::FullData,
+                _ => return None, // Unassigned/Private not supported
             };
             Some(TlsaRecord {
                 cert_usage,
@@ -185,8 +185,8 @@ pub fn validate_cert_dane(
                 h.update(&cert_data);
                 h.finalize().to_vec()
             }
-            TlsaMatchingType::Sha384 => {
-                let mut h = Sha384::new();
+            TlsaMatchingType::Sha512 => {
+                let mut h = Sha512::new();
                 h.update(&cert_data);
                 h.finalize().to_vec()
             }
@@ -243,7 +243,7 @@ mod tests {
     #[test]
     fn tlsa_matching_type_values() {
         assert_eq!(TlsaMatchingType::Sha256 as u8, 0);
-        assert_eq!(TlsaMatchingType::Sha384 as u8, 1);
+        assert_eq!(TlsaMatchingType::Sha512 as u8, 1);
         assert_eq!(TlsaMatchingType::FullData as u8, 2);
     }
 
@@ -288,16 +288,16 @@ mod tests {
     }
 
     #[test]
-    fn validate_cert_dane_sha384() {
-        let cert_data = b"test certificate data for sha384";
-        let mut hasher = Sha384::new();
+    fn validate_cert_dane_sha512() {
+        let cert_data = b"test certificate data for sha512";
+        let mut hasher = Sha512::new();
         hasher.update(cert_data);
         let hash = hasher.finalize().to_vec();
-        assert_eq!(hash.len(), 48);
+        assert_eq!(hash.len(), 64);
         let records = vec![TlsaRecord {
             cert_usage: TlsaCertUsage::DaneEe,
             selector: TlsaSelector::FullCert,
-            matching_type: TlsaMatchingType::Sha384,
+            matching_type: TlsaMatchingType::Sha512,
             association_data: hash,
         }];
         let cert = CertificateDer::from(cert_data.to_vec());
