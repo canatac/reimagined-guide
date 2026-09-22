@@ -1,5 +1,6 @@
 // mailbox/mod.rs — re-exports uniquement (split Sprint 15)
 pub mod read_handlers;
+pub mod export_handlers;
 pub mod compose_helpers;
 pub mod send_pipeline;
 pub mod send_finalize;
@@ -27,6 +28,7 @@ mod unified_handlers;
 pub(crate) use super::*;
 
 pub use read_handlers::*;
+pub use export_handlers::*;
 pub use compose_helpers::*;
 pub use send_pipeline::*;
 pub use send_finalize::*;
@@ -160,6 +162,7 @@ mod tests {
     fn mailbox_all_modules() {
         let modules = vec![
             "read_handlers",
+            "export_handlers",
             "compose_helpers",
             "send_pipeline",
             "send_finalize",
@@ -177,13 +180,14 @@ mod tests {
             "scheduled_drafts",
             "unified_handlers",
         ];
-        assert_eq!(modules.len(), 17);
+        assert_eq!(modules.len(), 18);
     }
 
     #[test]
     fn mailbox_module_names() {
         let module_names = vec![
             "read_handlers",
+            "export_handlers",
             "compose_helpers",
             "send_pipeline",
             "send_finalize",
@@ -201,9 +205,9 @@ mod tests {
             "scheduled_drafts",
             "unified_handlers",
         ];
-        assert_eq!(module_names.len(), 17);
+        assert_eq!(module_names.len(), 18);
         assert_eq!(module_names[0], "read_handlers");
-        assert_eq!(module_names[1], "compose_helpers");
+        assert_eq!(module_names[1], "export_handlers");
         assert_eq!(module_names[2], "send_pipeline");
         assert_eq!(module_names[3], "send_finalize");
         assert_eq!(module_names[4], "send_endpoints");
