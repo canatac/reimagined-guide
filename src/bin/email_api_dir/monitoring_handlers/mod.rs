@@ -10,6 +10,7 @@ mod shared;
 pub(crate) mod webhook;
 pub(crate) mod webhook_incoming;
 pub(crate) mod mongo_health;
+pub(crate) mod zero_access;
 
 pub(crate) use monitoring::*;
 pub(crate) use mta_sts::*;
@@ -19,6 +20,7 @@ pub(crate) use security::*;
 pub(crate) use webhook::*;
 pub(crate) use webhook_incoming::*;
 pub(crate) use mongo_health::*;
+pub(crate) use zero_access::*;
 #[allow(unused_imports)]
 pub(crate) use shared::*;
 

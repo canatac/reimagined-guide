@@ -154,6 +154,10 @@ pub struct Email {
     pub internal_date: DateTime<Utc>,
     #[serde(default)]
     pub dkim_signature: Option<String>,
+    /// Encrypted body blob (base64). When Some, the server cannot read the body.
+    /// Used in zero-access encryption mode (Issue #575).
+    #[serde(default)]
+    pub encrypted_body: Option<String>,
 }
 
 impl Email {
@@ -170,6 +174,7 @@ impl Email {
             uid: 0,
             internal_date: chrono::Utc::now(),
             dkim_signature: None,
+            encrypted_body: None,
         }
     }
 }

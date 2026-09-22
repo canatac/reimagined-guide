@@ -21,6 +21,9 @@ pub struct User {
     pub condition_accepted: bool,
     #[serde(default)]
     pub locale: Option<String>,
+    /// Zero-access encryption mode (Issue #575). When true, server stores only encrypted blobs.
+    #[serde(default)]
+    pub zero_access_enabled: bool,
 }
 
 pub(crate) fn default_mailbox() -> String {
