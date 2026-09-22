@@ -159,7 +159,7 @@ pub async fn api_e2e_disable(
     // In production: call E2EKeyManager.set_opt_out(&user_id, true)
     Ok(HttpResponse::Ok().json(serde_json::json!({
         "status": "disabled",
-        "user_id,
+        "user_id": user_id,
         "e2e_enabled": false,
     })))
 }
