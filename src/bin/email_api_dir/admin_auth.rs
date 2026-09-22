@@ -431,3 +431,46 @@ mod tests {
         assert!(true);
     }
 }
+
+/// Garde d'authentification légère pour les endpoints utilisateur (/api/emails, etc).
+/// Contrairement à `require_admin`, ne vérifie PAS de rôle — juste qu'une session valide existe.
+///
+/// Comportement:
+/// - `ADMIN_RBAC_ENFORCE` absent/différent de "1" → renvoie `Ok(AuthUser::system())` (compatibilité).
+/// - `ADMIN_RBAC_ENFORCE=1` → exige un token session valide (cookie `session_token` ou header `Authorization: Bearer`).
+pub async fn require_auth(
+    req: &HttpRequest,
+    mongo: &Arc<mongodb::Client>,
+    db_name: &str,
+) -> Result<AuthUser, HttpResponse> {
+    if !rbac_enabled() {
+        return Ok(AuthUser::system());
+    }
+    let token = match extract_token(req) {
+        Some(t) => t,
+        None => {
+            return Err(HttpResponse::build(StatusCode::UNAUTHORIZED).json(
+                serde_json::json!({
+                    "code": "AUTH_REQUIRED",
+                    "message": "Missing session token"
+                }),
+            ))
+        }
+    };
+    let session = match lookup_session(mongo.as_ref(), db_name, &token).await {
+        Some(s) => s,
+        None => {
+            return Err(HttpResponse::build(StatusCode::UNAUTHORIZED).json(
+                serde_json::json!({
+                    "code": "AUTH_INVALID",
+                    "message": "Session token unknown or expired"
+                }),
+            ))
+        }
+    };
+    Ok(AuthUser {
+        user_id: session.user_id,
+        email: session.email,
+        role: session.role,
+    })
+}

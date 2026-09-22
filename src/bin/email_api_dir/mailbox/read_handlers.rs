@@ -6,7 +6,13 @@ pub(crate) async fn api_email_attachment_download(
     path: web::Path<(String, String)>,
     req: actix_web::HttpRequest,
     logic: web::Data<Arc<Logic>>,
+    mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
+    if admin_auth::rbac_enabled() {
+        if let Err(resp) = admin_auth::require_auth(&req, mongo.get_ref(), &mongo_db_name()).await {
+            return resp;
+        }
+    }
     let user_id = resolve_user_id(&req);
     let (email_id, attachment_id) = path.into_inner();
 
@@ -51,7 +57,14 @@ pub(crate) async fn api_emails(
     query: web::Query<EmailListQuery>,
     req: actix_web::HttpRequest,
     logic: web::Data<Arc<Logic>>,
+    mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
+    // Auth guard: require valid session when RBAC is enforced
+    if admin_auth::rbac_enabled() {
+        if let Err(resp) = admin_auth::require_auth(&req, mongo.get_ref(), &mongo_db_name()).await {
+            return resp;
+        }
+    }
     let user_id = resolve_user_id(&req);
     let folder = query.folder.trim().to_ascii_lowercase();
     let page = query.page.max(1);
