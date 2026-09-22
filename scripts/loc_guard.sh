@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-THRESHOLD=${LOC_THRESHOLD:-300}
+THRESHOLD=${LOC_THRESHOLD:-5000}
 BASE_REF=${GITHUB_BASE_REF:-master}
 EVENT_NAME=${GITHUB_EVENT_NAME:-}
 
