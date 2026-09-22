@@ -117,7 +117,7 @@ pub(crate) async fn api_emails_export(
         match logic.fetch_email(&user_id, email_id).await {
             Ok(Some(email)) => emails.push(email),
             Ok(None) => {
-                eprintln!("export: email {} not found for user {}", email_id, user_id);
+                eprintln!("export: email {} not found", email_id);
             }
             Err(e) => {
                 eprintln!("export: fetch_email error for {}: {}", email_id, e);
