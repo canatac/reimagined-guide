@@ -64,7 +64,11 @@ pub(crate) fn register_mailbox_routes(cfg: &mut web::ServiceConfig) {
             "/api/newsletters/items",
             web::post().to(api_newsletter_items_create),
         )
-        .route("/api/templates", web::get().to(api_templates))
+        .route("/api/templates", web::get().to(api_templates_list))
+        .route("/api/templates", web::post().to(api_templates_create))
+        .route("/api/templates/{id}", web::put().to(api_templates_update))
+        .route("/api/templates/{id}", web::delete().to(api_templates_delete))
+        .route("/api/templates/{id}/preview", web::post().to(api_templates_preview))
         .route("/api/settings/ai", web::get().to(api_get_ai_settings))
         .route("/api/settings/ai", web::put().to(api_put_ai_settings))
         .route("/api/hermes/chat", web::post().to(api_hermes_chat))
@@ -610,9 +614,33 @@ mod tests {
     }
 
     #[test]
-    fn mailbox_routes_handler_api_templates() {
-        let handler = "api_templates";
-        assert_eq!(handler, "api_templates");
+    fn mailbox_routes_handler_api_templates_list() {
+        let handler = "api_templates_list";
+        assert_eq!(handler, "api_templates_list");
+    }
+
+    #[test]
+    fn mailbox_routes_handler_api_templates_create() {
+        let handler = "api_templates_create";
+        assert_eq!(handler, "api_templates_create");
+    }
+
+    #[test]
+    fn mailbox_routes_handler_api_templates_update() {
+        let handler = "api_templates_update";
+        assert_eq!(handler, "api_templates_update");
+    }
+
+    #[test]
+    fn mailbox_routes_handler_api_templates_delete() {
+        let handler = "api_templates_delete";
+        assert_eq!(handler, "api_templates_delete");
+    }
+
+    #[test]
+    fn mailbox_routes_handler_api_templates_preview() {
+        let handler = "api_templates_preview";
+        assert_eq!(handler, "api_templates_preview");
     }
 
     #[test]
