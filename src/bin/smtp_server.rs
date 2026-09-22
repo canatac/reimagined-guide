@@ -342,5 +342,4 @@ struct CustomEmail {
     email: Email,
     raw_content: String,
     dkim_signature: Option<String>,
-        encrypted_body: None,
 }
