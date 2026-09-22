@@ -38,6 +38,10 @@ pub(crate) fn register_external_routes(cfg: &mut web::ServiceConfig) {
         web::post().to(api_external_account_test),
     )
     .route(
+        "/api/external-accounts/{id}/send",
+        web::post().to(api_external_account_send),
+    )
+    .route(
         "/api/external-accounts/{id}/folders",
         web::get().to(api_external_folders_list),
     )
@@ -126,6 +130,12 @@ mod tests {
     }
 
     #[test]
+    fn external_routes_account_send() {
+        let route = "/api/external-accounts/{id}/send";
+        assert_eq!(route, "/api/external-accounts/{id}/send");
+    }
+
+    #[test]
     fn external_routes_folders_list() {
         let route = "/api/external-accounts/{id}/folders";
         assert_eq!(route, "/api/external-accounts/{id}/folders");
@@ -192,6 +202,7 @@ mod tests {
             "/api/external-accounts/probe-stream",
             "/api/external-accounts/{id}",
             "/api/external-accounts/{id}/test",
+            "/api/external-accounts/{id}/send",
             "/api/external-accounts/{id}/folders",
             "/api/external-accounts/{id}/folders/discover",
             "/api/external-accounts/{id}/folders/{folder_id}/mapping",
@@ -203,7 +214,7 @@ mod tests {
             "/api/external-messages",
             "/api/external-messages/{id}/action",
         ];
-        assert_eq!(paths.len(), 14);
+        assert_eq!(paths.len(), 15);
     }
 
     #[test]
@@ -225,13 +236,14 @@ mod tests {
             "/api/external-accounts/probe-stream",
             "/api/external-accounts",
             "/api/external-accounts/{id}/test",
+            "/api/external-accounts/{id}/send",
             "/api/external-accounts/{id}/folders/discover",
             "/api/external-accounts/{id}/sync",
             "/api/external-accounts/{id}/sync/pause",
             "/api/external-accounts/{id}/sync/resume",
             "/api/external-messages/{id}/action",
         ];
-        assert_eq!(post_routes.len(), 8);
+        assert_eq!(post_routes.len(), 9);
     }
 
     #[test]
@@ -378,5 +390,11 @@ mod tests {
     fn external_routes_handler_api_external_message_action() {
         let handler = "api_external_message_action";
         assert_eq!(handler, "api_external_message_action");
+    }
+
+    #[test]
+    fn external_routes_handler_api_external_account_send() {
+        let handler = "api_external_account_send";
+        assert_eq!(handler, "api_external_account_send");
     }
 }
