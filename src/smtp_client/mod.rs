@@ -192,22 +192,20 @@ mod body_utils;
 mod dane;
 mod discovery;
 mod mx;
+pub(crate) mod pool;
 mod relay;
 mod session;
 mod external_smtp;
 
-use body_utils::compose_smtp_payload;
-use discovery::{find_smtp_port, expect_code_for_phase, ehlo_hostname};
-use relay::send_via_relay;
 use mx::send_via_mx;
-use session::send_email_content;
 pub use session::extract_email_address;
 pub use dane::{lookup_tlsa_records, validate_server_cert_dane, has_tlsa_records, DaneValidationResult};
 pub use external_smtp::send_via_external_smtp;
 
 pub async fn send_outgoing_email(email: &Email) -> std::io::Result<()> {
     if let Ok(relay_host) = env::var("SMTP_RELAY_HOST") {
-        return send_via_relay(email, &relay_host).await;
+        // Use connection pooling for relay sends (issue #587).
+        return pool::send_via_relay_pooled(email, &relay_host).await;
     }
     send_via_mx(email).await
 }

@@ -52,6 +52,10 @@ pub(crate) fn register_diag_routes(cfg: &mut web::ServiceConfig) {
         .route(
             "/api/security/remediation/{alert_id}/rollback",
             web::post().to(api_security_rollback),
+        )
+        .route(
+            "/api/monitoring/smtp-pool/stats",
+            web::get().to(api_smtp_pool_stats),
         );
 }
 
