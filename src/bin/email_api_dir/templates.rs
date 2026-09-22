@@ -79,11 +79,12 @@ pub struct ErrorResponse {
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
-fn templates_collection() -> Collection<Document> {
+async fn templates_collection() -> Collection<Document> {
     let db_name = std::env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
     let mongo_url = std::env::var("MONGODB_URI")
         .unwrap_or_else(|_| "mongodb://localhost:27017".to_string());
     let client = mongodb::Client::with_uri_str(&mongo_url)
+        .await
         .expect("Failed to connect to MongoDB");
     client.database(&db_name).collection("email_templates")
 }
@@ -173,7 +174,7 @@ fn extract_variables(subject: &str, body: &str) -> Vec<String> {
 pub(crate) async fn create_template(
     req: web::Json<CreateTemplateRequest>,
 ) -> impl Responder {
-    let coll = templates_collection();
+    let coll = templates_collection().await;
     let now = Utc::now().to_rfc3339();
     let variables = if req.variables.is_empty() {
         extract_variables(&req.subject, &req.body)
@@ -218,7 +219,7 @@ pub(crate) async fn create_template(
 
 /// GET /api/templates — List all templates
 pub(crate) async fn list_templates() -> impl Responder {
-    let coll = templates_collection();
+    let coll = templates_collection().await;
     match coll.find(doc! {}).await {
         Ok(mut cursor) => {
             let mut templates = Vec::new();
@@ -243,7 +244,7 @@ pub(crate) async fn list_templates() -> impl Responder {
 /// GET /api/templates/:id — Get a single template
 pub(crate) async fn get_template(path: web::Path<String>) -> impl Responder {
     let id = path.into_inner();
-    let coll = templates_collection();
+    let coll = templates_collection().await;
     let obj_id = match ObjectId::parse_str(&id) {
         Ok(oid) => oid,
         Err(_) => {
@@ -280,7 +281,7 @@ pub(crate) async fn update_template(
     req: web::Json<UpdateTemplateRequest>,
 ) -> impl Responder {
     let id = path.into_inner();
-    let coll = templates_collection();
+    let coll = templates_collection().await;
     let obj_id = match ObjectId::parse_str(&id) {
         Ok(oid) => oid,
         Err(_) => {
@@ -323,7 +324,7 @@ pub(crate) async fn update_template(
 /// DELETE /api/templates/:id — Delete a template
 pub(crate) async fn delete_template(path: web::Path<String>) -> impl Responder {
     let id = path.into_inner();
-    let coll = templates_collection();
+    let coll = templates_collection().await;
     let obj_id = match ObjectId::parse_str(&id) {
         Ok(oid) => oid,
         Err(_) => {

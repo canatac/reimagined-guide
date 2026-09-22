@@ -295,6 +295,7 @@ pub(crate) fn build_email_and_message_id(
         } else {
             Some(dkim.dkim_sig.clone())
         },
+        encrypted_body: None,
     };
     (email, id, message_id)
 }

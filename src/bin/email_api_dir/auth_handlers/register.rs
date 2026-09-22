@@ -67,6 +67,7 @@ pub(crate) async fn auth_register(
         uid: 1,
         internal_date: Utc::now(),
         dkim_signature: None,
+        encrypted_body: None,
     };
     if let Err(e) = logic.deliver_to_inbox(&local_part, &welcome).await {
         eprintln!("Welcome email delivery error ({}): {}", primary_email, e);
@@ -253,6 +254,7 @@ mod tests {
             uid: 1,
             internal_date: Utc::now(),
             dkim_signature: None,
+            encrypted_body: None,
         };
         assert_eq!(welcome.from, "noreply@misfits.ai");
         assert_eq!(welcome.sequence_number, 1);

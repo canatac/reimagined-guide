@@ -301,6 +301,7 @@ pub(crate) async fn send_queue_worker(mongo: Arc<mongodb::Client>) {
                     } else {
                         Some(dkim_sig)
                     },
+                    encrypted_body: None,
                 };
 
                 let mut final_status = "failed";
