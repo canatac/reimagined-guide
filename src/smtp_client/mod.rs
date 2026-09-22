@@ -199,8 +199,11 @@ mod external_smtp;
 
 use mx::send_via_mx;
 pub use session::extract_email_address;
+pub use session::send_email_content;
 pub use dane::{lookup_tlsa_records, validate_server_cert_dane, has_tlsa_records, DaneValidationResult};
 pub use external_smtp::send_via_external_smtp;
+pub use discovery::{expect_code_for_phase, ehlo_hostname, find_smtp_port};
+pub use body_utils::compose_smtp_payload;
 
 pub async fn send_outgoing_email(email: &Email) -> std::io::Result<()> {
     if let Ok(relay_host) = env::var("SMTP_RELAY_HOST") {
