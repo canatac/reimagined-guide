@@ -11,6 +11,7 @@ pub mod single_handlers;
 pub mod drafts_handlers;
 pub mod newsletter_handlers;
 pub mod newsletter_summarize;
+pub mod gdpr_export;
 
 mod folder_utils;
 mod mime_utils;
@@ -36,6 +37,7 @@ pub use single_handlers::*;
 pub use drafts_handlers::*;
 pub use newsletter_handlers::*;
 pub use newsletter_summarize::*;
+pub use gdpr_export::*;
 pub use scheduled_drafts::*;
 
 pub(crate) use folder_utils::{
