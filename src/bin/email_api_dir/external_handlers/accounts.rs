@@ -164,7 +164,7 @@ pub(crate) async fn api_external_account_send(
         );
     }
 
-    let email = crate::entities::Email {
+    let email = simple_smtp_server::entities::Email {
         id: uuid::Uuid::new_v4().to_string(),
         from,
         to,
@@ -178,7 +178,7 @@ pub(crate) async fn api_external_account_send(
         dkim_signature: None,
     };
 
-    match crate::smtp_client::send_via_external_smtp(&email, &account).await {
+    match simple_smtp_server::smtp_client::send_via_external_smtp(&email, &account).await {
         Ok(_) => HttpResponse::Ok().json(serde_json::json!({
             "status": "success",
             "message": "Email sent via external SMTP",
