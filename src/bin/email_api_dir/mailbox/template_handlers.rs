@@ -9,7 +9,9 @@ use actix_web::web;
 use actix_web::HttpRequest;
 use actix_web::Responder;
 use bson;
+use bson::doc;
 use chrono::Utc;
+use futures::TryStreamExt;
 use mongodb;
 use serde::Deserialize;
 use serde::Serialize;
@@ -275,12 +277,6 @@ pub(crate) async fn api_templates_update(
         return actix_web::HttpResponse::BadRequest().json(serde_json::json!({
             "message": "No fields to update"
         }));
-    }
-
-    // Auto-recompute variables if subject or body changed but variables not explicitly set
-    if !body.variables.is_none() == false {
-        // We need to fetch current doc to rebuild variables
-        // For simplicity, client should send variables explicitly on subject/body change
     }
 
     set_doc.insert("updated_at", bson::DateTime::from_millis(Utc::now().timestamp_millis()));
