@@ -238,6 +238,52 @@ pub async fn require_admin(
     })
 }
 
+/// Garde d'authentification légère — session valide requise, sans vérif de rôle.
+///
+/// Utilisée pour les endpoints `/api/external-accounts/*` et autres endpoints
+/// utilisateur qui nécessitent une session valide mais pas de rôle admin.
+///
+/// - Feature flag OFF → renvoie `Ok(AuthUser::system())`.
+/// - Feature flag ON  → exige un token valide (rôle quelconque).
+///
+/// Issue #558: Auth bypass on /api/external-accounts.
+pub async fn require_auth(
+    req: &HttpRequest,
+    mongo: &Arc<mongodb::Client>,
+    db_name: &str,
+) -> Result<AuthUser, HttpResponse> {
+    if !rbac_enabled() {
+        return Ok(AuthUser::system());
+    }
+    let token = match extract_token(req) {
+        Some(t) => t,
+        None => {
+            return Err(HttpResponse::build(StatusCode::UNAUTHORIZED).json(
+                serde_json::json!({
+                    "code": "AUTH_REQUIRED",
+                    "message": "Missing session token"
+                }),
+            ))
+        }
+    };
+    let session = match lookup_session(mongo.as_ref(), db_name, &token).await {
+        Some(s) => s,
+        None => {
+            return Err(HttpResponse::build(StatusCode::UNAUTHORIZED).json(
+                serde_json::json!({
+                    "code": "AUTH_INVALID",
+                    "message": "Session token unknown or expired"
+                }),
+            ))
+        }
+    };
+    Ok(AuthUser {
+        user_id: session.user_id,
+        email: session.email,
+        role: session.role,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

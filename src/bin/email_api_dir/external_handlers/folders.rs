@@ -5,7 +5,11 @@ pub(crate) async fn api_external_folders_list(
     req: HttpRequest,
     path: web::Path<String>,
     svc: web::Data<Arc<ExternalImapService>>,
+    mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
+    if let Err(resp) = admin_auth::require_auth(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
     let user_id = resolve_user_id(&req);
     let account_id = path.into_inner();
     match svc.list_folders(&user_id, &account_id).await {
@@ -19,7 +23,11 @@ pub(crate) async fn api_external_folders_discover(
     req: HttpRequest,
     path: web::Path<String>,
     svc: web::Data<Arc<ExternalImapService>>,
+    mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
+    if let Err(resp) = admin_auth::require_auth(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
     let user_id = resolve_user_id(&req);
     let account_id = path.into_inner();
     let account = match svc.get_account_raw(&user_id, &account_id).await {
@@ -40,7 +48,11 @@ pub(crate) async fn api_external_folder_mapping_put(
     path: web::Path<(String, String)>,
     payload: web::Json<ExternalFolderMappingInput>,
     svc: web::Data<Arc<ExternalImapService>>,
+    mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
+    if let Err(resp) = admin_auth::require_auth(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
     let user_id = resolve_user_id(&req);
     let (account_id, folder_id) = path.into_inner();
     match svc

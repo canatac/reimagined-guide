@@ -49,7 +49,11 @@ pub(crate) async fn api_external_sync_start(
     path: web::Path<String>,
     payload: web::Json<StartSyncInput>,
     svc: web::Data<Arc<ExternalImapService>>,
+    mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
+    if let Err(resp) = admin_auth::require_auth(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
     let user_id = resolve_user_id(&req);
     let account_id = path.into_inner();
 
@@ -98,7 +102,11 @@ pub(crate) async fn api_external_sync_run_get(
     req: HttpRequest,
     path: web::Path<String>,
     svc: web::Data<Arc<ExternalImapService>>,
+    mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
+    if let Err(resp) = admin_auth::require_auth(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
     let user_id = resolve_user_id(&req);
     let run_id = path.into_inner();
     match svc.get_sync_run(&user_id, &run_id).await {
@@ -113,7 +121,11 @@ pub(crate) async fn api_external_sync_status(
     req: HttpRequest,
     path: web::Path<String>,
     svc: web::Data<Arc<ExternalImapService>>,
+    mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
+    if let Err(resp) = admin_auth::require_auth(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
     let user_id = resolve_user_id(&req);
     let account_id = path.into_inner();
     match svc.get_sync_status(&user_id, &account_id).await {
@@ -128,7 +140,11 @@ pub(crate) async fn api_external_sync_pause(
     req: HttpRequest,
     path: web::Path<String>,
     svc: web::Data<Arc<ExternalImapService>>,
+    mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
+    if let Err(resp) = admin_auth::require_auth(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
     let user_id = resolve_user_id(&req);
     let account_id = path.into_inner();
     match svc.set_account_status(&user_id, &account_id, "paused").await {
@@ -142,7 +158,11 @@ pub(crate) async fn api_external_sync_resume(
     req: HttpRequest,
     path: web::Path<String>,
     svc: web::Data<Arc<ExternalImapService>>,
+    mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
+    if let Err(resp) = admin_auth::require_auth(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
     let user_id = resolve_user_id(&req);
     let account_id = path.into_inner();
     match svc.set_account_status(&user_id, &account_id, "active").await {
@@ -156,7 +176,11 @@ pub(crate) async fn api_external_messages_list(
     req: HttpRequest,
     query: web::Query<ExternalMessagesQuery>,
     svc: web::Data<Arc<ExternalImapService>>,
+    mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
+    if let Err(resp) = admin_auth::require_auth(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
     let user_id = resolve_user_id(&req);
     let page = query.page.unwrap_or(1);
     let page_size = query.page_size.unwrap_or(50).min(200);
@@ -180,7 +204,11 @@ pub(crate) async fn api_external_message_action(
     path: web::Path<String>,
     payload: web::Json<ExternalMessageActionInput>,
     svc: web::Data<Arc<ExternalImapService>>,
+    mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
+    if let Err(resp) = admin_auth::require_auth(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
     let user_id = resolve_user_id(&req);
     let message_id = path.into_inner();
     match svc

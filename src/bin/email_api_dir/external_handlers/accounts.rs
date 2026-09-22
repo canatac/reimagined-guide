@@ -4,7 +4,11 @@ use super::super::*;
 pub(crate) async fn api_external_accounts_list(
     req: HttpRequest,
     svc: web::Data<Arc<ExternalImapService>>,
+    mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
+    if let Err(resp) = admin_auth::require_auth(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
     let user_id = resolve_user_id(&req);
     match svc.list_accounts(&user_id).await {
         Ok(accounts) => HttpResponse::Ok().json(serde_json::json!({ "accounts": accounts })),
@@ -17,7 +21,11 @@ pub(crate) async fn api_external_accounts_create(
     req: HttpRequest,
     payload: web::Json<CreateExternalAccountInput>,
     svc: web::Data<Arc<ExternalImapService>>,
+    mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
+    if let Err(resp) = admin_auth::require_auth(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
     let user_id = resolve_user_id(&req);
     match svc.create_account(&user_id, payload.into_inner()).await {
         Ok(account) => HttpResponse::Ok().json(account),
@@ -30,7 +38,11 @@ pub(crate) async fn api_external_account_get(
     req: HttpRequest,
     path: web::Path<String>,
     svc: web::Data<Arc<ExternalImapService>>,
+    mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
+    if let Err(resp) = admin_auth::require_auth(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
     let user_id = resolve_user_id(&req);
     let account_id = path.into_inner();
     match svc.get_account(&user_id, &account_id).await {
@@ -46,7 +58,11 @@ pub(crate) async fn api_external_account_patch(
     path: web::Path<String>,
     payload: web::Json<UpdateExternalAccountInput>,
     svc: web::Data<Arc<ExternalImapService>>,
+    mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
+    if let Err(resp) = admin_auth::require_auth(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
     let user_id = resolve_user_id(&req);
     let account_id = path.into_inner();
     match svc
@@ -64,7 +80,11 @@ pub(crate) async fn api_external_account_delete(
     req: HttpRequest,
     path: web::Path<String>,
     svc: web::Data<Arc<ExternalImapService>>,
+    mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
+    if let Err(resp) = admin_auth::require_auth(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
     let user_id = resolve_user_id(&req);
     let account_id = path.into_inner();
     match svc.delete_account(&user_id, &account_id).await {
@@ -79,7 +99,11 @@ pub(crate) async fn api_external_account_test(
     req: HttpRequest,
     path: web::Path<String>,
     svc: web::Data<Arc<ExternalImapService>>,
+    mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
+    if let Err(resp) = admin_auth::require_auth(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
     let user_id = resolve_user_id(&req);
     let account_id = path.into_inner();
     let account = match svc.get_account_raw(&user_id, &account_id).await {
