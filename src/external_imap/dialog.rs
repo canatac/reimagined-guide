@@ -1,6 +1,7 @@
 //! Dialogues IMAP hand-rollés (extrait de mod.rs).
 
 use base64;
+use base64::Engine;
 use chrono::Utc;
 use openssl::ssl::{SslConnector, SslMethod, SslStream};
 use std::net::{TcpStream, ToSocketAddrs};
@@ -135,6 +136,84 @@ pub(crate) fn imap_fetch_headers_since_xoauth2(
     } else {
         imap_fetch_dialog_xoauth2(tcp, email, access_token, folder, since_imap)
     }
+}
+
+fn imap_fetch_dialog_xoauth2<S: std::io::Read + std::io::Write>(
+    mut stream: S,
+    email: &str,
+    access_token: &str,
+    folder: &str,
+    since_imap: &str,
+) -> std::result::Result<Vec<ImapFetchedHeader>, String> {
+    let _greeting = read_line_from_stream(&mut stream)?;
+
+    write_command(&mut stream, "a1 CAPABILITY\r\n", "CAPABILITY")?;
+    let cap_lines = read_until_tag_from_stream(&mut stream, "a1")?;
+    let capabilities = parse_capabilities(&cap_lines);
+
+    let has_xoauth2 = capabilities
+        .iter()
+        .any(|c| c.contains("XOAUTH2") || c.contains("AUTH=XOAUTH2"));
+    if !has_xoauth2 {
+        logout_best_effort(&mut stream);
+        return Err("Server does not advertise XOAUTH2 capability".to_string());
+    }
+
+    let xoauth2_raw = build_xoauth2_string(email, access_token);
+    let xoauth2_b64 = base64::engine::general_purpose::STANDARD.encode(&xoauth2_raw);
+    let auth_cmd = format!("a2 AUTHENTICATE XOAUTH2 {}\r\n", xoauth2_b64);
+    write_command(&mut stream, &auth_cmd, "AUTHENTICATE XOAUTH2")?;
+    let auth_lines = read_until_tag_from_stream(&mut stream, "a2")?;
+    ensure_ok(&auth_lines, "a2", "IMAP XOAUTH2 authentication failed")?;
+
+    let select = format!("a3 SELECT \"{}\"\r\n", escape_imap(folder));
+    send_and_expect_ok(
+        &mut stream,
+        &select,
+        "SELECT",
+        "a3",
+        &format!("IMAP select {} failed", folder),
+    )?;
+
+    let search = format!("a4 UID SEARCH SINCE {}\r\n", since_imap);
+    let search_lines = send_and_expect_ok_collect(
+        &mut stream,
+        &search,
+        "SEARCH",
+        "a4",
+        "IMAP UID SEARCH failed",
+    )?;
+
+    let uids = parse_uid_search(&search_lines);
+    if uids.is_empty() {
+        logout_best_effort(&mut stream);
+        return Ok(vec![]);
+    }
+
+    let mut result: Vec<ImapFetchedHeader> = Vec::new();
+    for chunk in uids.chunks(200) {
+        let set = chunk
+            .iter()
+            .map(|u| u.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        let fetch_cmd = format!(
+            "a5 UID FETCH {} (UID INTERNALDATE FLAGS BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)])\r\n",
+            set
+        );
+        let fetch_lines = send_and_expect_ok_collect(
+            &mut stream,
+            &fetch_cmd,
+            "FETCH",
+            "a5",
+            "IMAP UID FETCH failed",
+        )?;
+        let mut parsed = parse_fetch_headers(&fetch_lines);
+        result.append(&mut parsed);
+    }
+
+    logout_best_effort(&mut stream);
+    Ok(result)
 }
 
 fn ensure_password(password: &str) -> std::result::Result<(), String> {
