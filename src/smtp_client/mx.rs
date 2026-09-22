@@ -119,7 +119,7 @@ async fn perform_smtp_handshake(
             .with_root_certificates(root_store)
             .with_no_client_auth();
         let connector = TlsConnector::from(Arc::new(config));
-        let server_name = ServerName::try_from(smtp_server)
+        let server_name = ServerName::try_from(smtp_server.clone())
             .map_err(|_| IoError::new(ErrorKind::InvalidInput, "Invalid server name"))?;
         let tls_stream = timeout(
             Duration::from_millis(budget.tls_handshake_ms),
@@ -135,6 +135,30 @@ async fn perform_smtp_handshake(
                 ),
             )
         })??;
+
+        // DANE validation: check TLSA records if present (opportunistic per RFC 7672)
+        use crate::smtp_client::dane::{validate_server_cert_dane, has_tlsa_records};
+        if let Some(peer_certs) = tls_stream.get_ref().1.peer_certificates() {
+            if let Some(first_cert) = peer_certs.first() {
+                let domain = smtp_server.trim_end_matches('.').to_string();
+                // Only enforce DANE if TLSA records exist (opportunistic mode)
+                if has_tlsa_records(&domain).await {
+                    match validate_server_cert_dane(&domain, first_cert).await {
+                        crate::smtp_client::dane::DaneValidationResult::Valid => {
+                            println!("DANE: TLSA validation passed for {}", domain);
+                        }
+                        crate::smtp_client::dane::DaneValidationResult::ValidationFailed(reason) => {
+                            return Err(IoError::new(
+                                ErrorKind::PermissionDenied,
+                                format!("DANE validation failed for {}: {}", domain, reason),
+                            ));
+                        }
+                        crate::smtp_client::dane::DaneValidationResult::NoRecords => {}
+                    }
+                }
+            }
+        }
+
         let mut s = tls_stream;
         s.write_all(format!("EHLO {}\r\n", ehlo_hostname).as_bytes()).await?;
         expect_code_for_phase(&mut s, "250", "tls_ehlo", budget.ehlo_ms).await?;
