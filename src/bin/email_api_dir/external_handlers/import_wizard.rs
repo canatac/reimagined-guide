@@ -60,7 +60,11 @@ pub(crate) async fn api_import_configure(
     req: HttpRequest,
     payload: web::Json<ImportConfigureInput>,
     svc: web::Data<Arc<ExternalImapService>>,
+    mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
+    if let Err(resp) = admin_auth::require_auth(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
     let user_id = resolve_user_id(&req);
     let input = payload.into_inner();
 
