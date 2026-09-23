@@ -11,6 +11,7 @@ use mongodb::Collection;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use base64::engine::Engine;
 
 /// User's E2E key metadata (zero-knowledge: no plaintext secrets stored).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -266,7 +267,7 @@ pub fn generate_recovery_phrase() -> String {
 
 /// Validate that an encrypted blob looks like valid base64 ciphertext.
 pub fn validate_encrypted_blob(blob: &str) -> bool {
-    base64::decode(blob).is_ok()
+    base64::engine::general_purpose::STANDARD.decode(blob).is_ok()
 }
 
 /// Check if a user has E2E enabled.
@@ -291,7 +292,7 @@ mod tests {
 
     #[test]
     fn validate_encrypted_blob_accepts_base64() {
-        let valid = base64::encode("hello world");
+        let valid = base64::engine::general_purpose::STANDARD.encode("hello world");
         assert!(validate_encrypted_blob(&valid));
     }
 

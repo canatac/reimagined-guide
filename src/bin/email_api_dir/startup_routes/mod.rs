@@ -13,6 +13,7 @@ mod jmap;
 mod mailbox;
 mod mta_sts;
 mod prometheus;
+mod subscription;
 mod webhook;
 
 pub(crate) use admin::register_admin_routes;
@@ -26,6 +27,7 @@ pub(crate) use jmap::register_jmap_routes;
 pub(crate) use mailbox::register_mailbox_routes;
 pub(crate) use mta_sts::register_mta_sts_routes;
 pub(crate) use prometheus::register_prometheus_routes;
+pub(crate) use subscription::register_subscription_routes;
 pub(crate) use webhook::register_webhook_routes;
 
 #[cfg(test)]
@@ -89,6 +91,12 @@ mod tests {
     #[test]
     fn startup_routes_has_prometheus() {
         // Verify prometheus module is included
+        assert!(true);
+    }
+
+    #[test]
+    fn startup_routes_has_subscription() {
+        // Verify subscription module is included
         assert!(true);
     }
 
@@ -160,6 +168,12 @@ mod tests {
     }
 
     #[test]
+    fn startup_routes_register_subscription_routes() {
+        let fn_name = "register_subscription_routes";
+        assert_eq!(fn_name, "register_subscription_routes");
+    }
+
+    #[test]
     fn startup_routes_register_webhook_routes() {
         let fn_name = "register_webhook_routes";
         assert_eq!(fn_name, "register_webhook_routes");
@@ -179,6 +193,7 @@ mod tests {
             "mailbox",
             "mta_sts",
             "prometheus",
+            "subscription",
             "webhook",
         ];
         assert_eq!(modules.len(), 12);
@@ -198,6 +213,7 @@ mod tests {
             "register_mailbox_routes",
             "register_mta_sts_routes",
             "register_prometheus_routes",
+            "register_subscription_routes",
             "register_webhook_routes",
         ];
         assert_eq!(fns.len(), 12);

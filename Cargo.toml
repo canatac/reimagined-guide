@@ -40,7 +40,7 @@ tokio-rustls = "0.26.0"
 webpki-roots = "1.0.9"
 trust-dns-resolver = "0.23.2"
 clap = "4.6.4"
-reqwest = { version = "0.13.4", features = ["json", "stream"] }
+reqwest = { version = "0.13.4", features = ["json", "stream", "form"] }
 actix-cors = "0.7.0"
 bcrypt = "0.15"
 
@@ -82,7 +82,6 @@ quick-xml = { version = "0.31", features = ["serde", "serialize"] }
 rand = "0.8"
 uuid = { version = "1.11.0", features = ["v4"] }
 urlencoding = "2"
-serde_urlencoded = "0.7"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
