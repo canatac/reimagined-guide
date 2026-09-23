@@ -11,6 +11,7 @@ use mongodb::Collection;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use base64::engine::Engine;
 
 /// User's E2E key metadata (zero-knowledge: no plaintext secrets stored).
 #[derive(Debug, Clone, Serialize, Deserialize)]
