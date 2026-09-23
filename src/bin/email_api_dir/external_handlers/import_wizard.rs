@@ -179,6 +179,10 @@ fn build_create_account_input(
     let credentials = Some(ExternalAccountCredentials {
         secret_value: input.password.clone(),
         secret_ref: input.access_token.clone(),
+        oauth_access_token: None,
+        oauth_refresh_token: None,
+        oauth_token_expires_at: None,
+        oauth_scopes: None,
     });
 
     CreateExternalAccountInput {
