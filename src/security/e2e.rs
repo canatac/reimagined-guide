@@ -266,7 +266,8 @@ pub fn generate_recovery_phrase() -> String {
 
 /// Validate that an encrypted blob looks like valid base64 ciphertext.
 pub fn validate_encrypted_blob(blob: &str) -> bool {
-    base64::decode(blob).is_ok()
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD.decode(blob).is_ok()
 }
 
 /// Check if a user has E2E enabled.
