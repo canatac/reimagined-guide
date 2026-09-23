@@ -185,7 +185,7 @@ async fn exchange_authorization_code(
     code: &str,
     redirect_uri: &str,
 ) -> Result<OAuth2TokenResult, String> {
-    use simple_smtp_server::external_imap::provider_config;
+    // provider_config already imported at top of file (line 7)
 
     let config = provider_config(&account.provider)
         .ok_or_else(|| format!("Unsupported OAuth2 provider: {}", account.provider))?;
