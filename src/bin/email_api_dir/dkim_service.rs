@@ -23,6 +23,7 @@ impl DkimService for RealDkimService {
                 "subject": email.subject,
                 "text": email.body,
                 "html": email.body,
+                "algorithm": email.algorithm,
                 "attachments": email.attachments.iter().map(|att| serde_json::json!({
                     "filename": att.filename,
                     "contentType": att.content_type,
@@ -198,6 +199,72 @@ mod tests {
     fn dkim_service_json_value_type() {
         let json_type = "serde_json::Value";
         assert_eq!(json_type, "serde_json::Value");
+    }
+
+    #[test]
+    fn dkim2_algorithm_field_serialization() {
+        let email = EmailRequest {
+            from: "<EMAIL>".to_string(),
+            to: "<EMAIL>".to_string(),
+            subject: "Test".to_string(),
+            body: "Body".to_string(),
+            attachments: vec![],
+            algorithm: Some("ed25519-sha512".to_string()),
+        };
+        let payload = serde_json::json!({
+            "from": email.from,
+            "to": email.to,
+            "subject": email.subject,
+            "text": email.body,
+            "html": email.body,
+            "algorithm": email.algorithm,
+            "attachments": email.attachments,
+        });
+        assert_eq!(payload["algorithm"], "ed25519-sha512");
+    }
+
+    #[test]
+    fn dkim1_algorithm_field_serialization() {
+        let email = EmailRequest {
+            from: "<EMAIL>".to_string(),
+            to: "<EMAIL>".to_string(),
+            subject: "Test".to_string(),
+            body: "Body".to_string(),
+            attachments: vec![],
+            algorithm: Some("rsa-sha256".to_string()),
+        };
+        let payload = serde_json::json!({
+            "from": email.from,
+            "to": email.to,
+            "subject": email.subject,
+            "text": email.body,
+            "html": email.body,
+            "algorithm": email.algorithm,
+            "attachments": email.attachments,
+        });
+        assert_eq!(payload["algorithm"], "rsa-sha256");
+    }
+
+    #[test]
+    fn dkim_algorithm_field_none_serialization() {
+        let email = EmailRequest {
+            from: "<EMAIL>".to_string(),
+            to: "<EMAIL>".to_string(),
+            subject: "Test".to_string(),
+            body: "Body".to_string(),
+            attachments: vec![],
+            algorithm: None::<String>,
+        };
+        let payload = serde_json::json!({
+            "from": email.from,
+            "to": email.to,
+            "subject": email.subject,
+            "text": email.body,
+            "html": email.body,
+            "algorithm": email.algorithm,
+            "attachments": email.attachments,
+        });
+        assert!(payload["algorithm"].is_null());
     }
 
     #[test]
