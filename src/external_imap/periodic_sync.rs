@@ -94,9 +94,10 @@ async fn run_once(svc: &ExternalImapService) -> Result<()> {
                 }
             },
             Err(e) => {
+                let account_redacted = format!("{}***", &account.id[..account.id.len().min(4)]);
                 eprintln!(
                     "periodic_sync: start_sync_run failed for account {}: {e}",
-                    account.id
+                    account_redacted
                 );
                 failed += 1;
             }

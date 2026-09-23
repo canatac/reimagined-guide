@@ -153,7 +153,7 @@ pub(crate) async fn auth_anonymous_register(
     let cookie = actix_web::cookie::Cookie::build("session_token", &session.session.access_token)
         .path("/")
         .http_only(true)
-        .secure(false) // Tor hidden services use HTTP within the Tor network
+        .secure(true)
         .same_site(actix_web::cookie::SameSite::Lax)
         .max_age(actix_web::cookie::time::Duration::hours(24))
         .finish();

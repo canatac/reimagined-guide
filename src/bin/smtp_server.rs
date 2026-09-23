@@ -173,7 +173,7 @@ mod tests {
     use super::*;
 
     fn test_password() -> String {
-        std::env::var("TEST_MONGODB_PASSWORD").unwrap_or_else(|_| "test_password".to_string())
+        std::env::var("TEST_MONGODB_PASSWORD").expect("TEST_MONGODB_PASSWORD env var required for tests")
     }
 
     #[test]
