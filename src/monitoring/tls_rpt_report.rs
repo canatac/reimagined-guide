@@ -7,7 +7,7 @@ use chrono::{DateTime, Datelike, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::monitoring::tls_rpt::TlsRptReport;
+use crate::monitoring::tls_rpt::{TlsRptDateRange, TlsRptReport};
 use crate::monitoring::tls_rpt_log::{TlsConnectionRecord, TlsConnectionResult, TlsDomainStats};
 
 /// Generate a TLS-RPT report for a specific domain and time range
@@ -84,10 +84,10 @@ pub fn generate_report(
 
     TlsRptReport {
         organization_name: organization_name.to_string(),
-        date_range: serde_json::json!({
-            "start_datetime": start.to_rfc3339(),
-            "end_datetime": end.to_rfc3339(),
-        }),
+        date_range: TlsRptDateRange {
+            start_datetime: start.to_rfc3339(),
+            end_datetime: end.to_rfc3339(),
+        },
         contact_info: None,
         report_id: format!("{}-{}-{}-{}", domain, start.year(), start.month(), Uuid::new_v4()),
         policies: serde_json::from_value(serde_json::Value::Array(policies)).unwrap_or_default(),
@@ -151,7 +151,7 @@ pub fn build_dashboard_summary(
     let mut all_reasons: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
     for stat in stats {
         for (reason, count) in &stat.failure_reasons {
-            *all_reasons.entry(reason.clone()).or_insert(0) += *count;
+            *all_reasons.entry(reason.clone()).or_insert(0) += *count as i64;
         }
     }
 
@@ -180,7 +180,7 @@ pub fn check_tls_alerts(
     let mut alerts = Vec::new();
 
     for stat in stats {
-        if stat.total_failure >= min_failures
+        if stat.total_failure as i64 >= min_failures
             && stat.failure_rate() >= failure_rate_threshold
         {
             alerts.push(TlsAlertEvent {
@@ -200,7 +200,7 @@ pub fn check_tls_alerts(
                     stat.total_attempts
                 ),
                 failure_rate: stat.failure_rate(),
-                total_failures: stat.total_failure,
+                total_failures: stat.total_failure as i64,
             });
         }
     }
