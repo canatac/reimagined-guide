@@ -52,6 +52,7 @@ use serde::{Deserialize, Serialize};
 #[path = "admin_auth.rs"]
 mod admin_auth;
 mod auth_handlers;
+mod crypto_handlers;
 mod monitoring_handlers;
 mod mailbox;
 mod admin_ops;
@@ -76,6 +77,7 @@ pub use dkim_service::*;
 use helpers::{normalize_segment, build_misfits_local, normalize_oauth_provider, req_ip_str, get_accept_language, welcome_email_html};
 
 pub use auth_handlers::*;
+pub use crypto_handlers::*;
 pub use monitoring_handlers::*;
 pub use mailbox::*;
 pub use admin_ops::*;
@@ -261,6 +263,7 @@ async fn main() -> std::io::Result<()> {
             .wrap(actix_web::middleware::Logger::default())
             .app_data(web::Data::new(RealDkimService))
             .route("/send-email", web::post().to(send_email_handler))
+            .route("/sign-pq", web::post().to(sign_post_quantum))
             .route("/create-mailing-list", web::post().to(create_mailing_list))
             .route(
                 "/send-to-mailing-list",
