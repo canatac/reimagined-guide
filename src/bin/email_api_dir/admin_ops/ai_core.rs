@@ -195,9 +195,7 @@ pub(crate) async fn api_put_ai_settings(
     }
 }
 
-pub(crate) async fn api_templates() -> impl Responder {
-    HttpResponse::Ok().json(serde_json::json!({"templates": []}))
-}
+// api_templates() moved to templates.rs module (full CRUD implementation)
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
