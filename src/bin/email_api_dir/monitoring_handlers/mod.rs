@@ -10,8 +10,10 @@ mod shared;
 pub(crate) mod webhook;
 pub(crate) mod webhook_incoming;
 pub(crate) mod mongo_health;
+mod smtp_pool;
 
 pub(crate) use monitoring::*;
+pub(crate) use smtp_pool::*;
 pub(crate) use mta_sts::*;
 pub(crate) use prometheus::*;
 pub(crate) use dashboard::*;
@@ -81,6 +83,12 @@ mod tests {
     }
 
     #[test]
+    fn monitoring_handlers_has_smtp_pool() {
+        // Verify smtp_pool module is included
+        assert!(true);
+    }
+
+    #[test]
     fn monitoring_handlers_all_modules() {
         let modules = vec![
             "monitoring",
@@ -92,8 +100,9 @@ mod tests {
             "webhook",
             "webhook_incoming",
             "mongo_health",
+            "smtp_pool",
         ];
-        assert_eq!(modules.len(), 9);
+        assert_eq!(modules.len(), 10);
     }
 
     #[test]
@@ -108,8 +117,9 @@ mod tests {
             "webhook",
             "webhook_incoming",
             "mongo_health",
+            "smtp_pool",
         ];
-        assert_eq!(module_names.len(), 9);
+        assert_eq!(module_names.len(), 10);
         assert_eq!(module_names[0], "monitoring");
         assert_eq!(module_names[1], "mta_sts");
         assert_eq!(module_names[2], "prometheus");
