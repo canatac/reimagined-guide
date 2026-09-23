@@ -4,8 +4,8 @@
 //! after the user completes the OAuth2 consent flow.
 
 use super::super::*;
-use crate::external_imap::oauth2::{is_token_expired, provider_config, refresh_oauth2_token};
-use crate::external_imap::{build_xoauth2_auth_string, ExternalImapAccount, OAuth2TokenResult};
+use simple_smtp_server::external_imap::oauth2::{is_token_expired, provider_config, refresh_oauth2_token};
+use simple_smtp_server::external_imap::{build_xoauth2_auth_string, ExternalImapAccount, OAuth2TokenResult};
 
 /// Input for OAuth2 authorization code exchange.
 #[derive(Debug, serde::Deserialize)]
@@ -185,7 +185,7 @@ async fn exchange_authorization_code(
     code: &str,
     redirect_uri: &str,
 ) -> Result<OAuth2TokenResult, String> {
-    use super::provider_config;
+    use simple_smtp_server::external_imap::provider_config;
 
     let config = provider_config(&account.provider)
         .ok_or_else(|| format!("Unsupported OAuth2 provider: {}", account.provider))?;
@@ -198,15 +198,17 @@ async fn exchange_authorization_code(
     }
 
     let client = reqwest::Client::new();
+    let form_body = format!(
+        "grant_type=authorization_code&client_id={}&client_secret={}&code={}&redirect_uri={}",
+        urlencoding::encode(&config.client_id),
+        urlencoding::encode(&config.client_secret),
+        urlencoding::encode(code),
+        urlencoding::encode(redirect_uri),
+    );
     let response = client
         .post(&config.token_endpoint)
-        .form(&[
-            ("grant_type", "authorization_code"),
-            ("client_id", &config.client_id),
-            ("client_secret", &config.client_secret),
-            ("code", code),
-            ("redirect_uri", redirect_uri),
-        ])
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .body(form_body)
         .send()
         .await
         .map_err(|e| format!("OAuth2 code exchange request failed: {e}"))?;
