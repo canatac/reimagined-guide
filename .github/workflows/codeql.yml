@@ -30,7 +30,6 @@ jobs:
         uses: github/codeql-action/init@v3
         with:
           languages: rust
-          queries: security-extended
 
       - name: Build for CodeQL
         run: cargo check --lib --bins --verbose
