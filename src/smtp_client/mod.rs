@@ -192,7 +192,7 @@ mod body_utils;
 mod dane;
 mod discovery;
 mod mx;
-pub(crate) mod pool;
+pub mod pool;
 mod relay;
 mod session;
 mod external_smtp;
