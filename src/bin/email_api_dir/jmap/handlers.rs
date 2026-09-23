@@ -48,7 +48,7 @@ pub async fn jmap_well_known_handler() -> HttpResponse {
 ///
 /// Requires authentication (session token or Authorization header).
 /// Returns the complete session document with capabilities, accounts, and URLs.
-pub(crate) async fn jmap_session_handler(
+pub async fn jmap_session_handler(
     req: HttpRequest,
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
@@ -173,7 +173,7 @@ async fn validate_jmap_session(
 ///
 /// Accepts a JMAP request containing one or more method calls.
 /// Returns a JMAP response with results for each call in order.
-pub(crate) async fn jmap_api_handler(
+pub async fn jmap_api_handler(
     req: HttpRequest,
     body: web::Json<JmapRequest>,
     mongo: web::Data<Arc<mongodb::Client>>,
@@ -352,7 +352,7 @@ async fn handle_email_get(
 
     if let Some(ids) = &parsed.ids {
         for id in ids {
-            match logic.find_email(username, id).await {
+            match logic.fetch_email(username, id).await {
                 Ok(Some(email)) => {
                     emails.push(JmapEmail::from_internal_email(&email));
                 }
@@ -366,7 +366,7 @@ async fn handle_email_get(
         // No ids specified — return all emails (with limit)
         // Fetch from default mailboxes
         for mailbox in &["inbox", "sent", "drafts"] {
-            match logic.find_emails(username, mailbox).await {
+            match logic.get_emails(username, mailbox).await {
                 Ok(batch) => {
                     for email in batch {
                         emails.push(JmapEmail::from_internal_email(&email));
@@ -416,7 +416,7 @@ async fn handle_email_query(
     // Collect all emails from user's mailboxes
     let mut all_emails: Vec<simple_smtp_server::entities::Email> = Vec::new();
     for mailbox in &["inbox", "sent", "drafts"] {
-        match logic.find_emails(username, mailbox).await {
+        match logic.get_emails(username, mailbox).await {
             Ok(batch) => all_emails.extend(batch),
             Err(e) => {
                 eprintln!("Email/query: find_emails {} failed: {}", mailbox, e);
@@ -541,7 +541,7 @@ async fn handle_email_set(
     // Handle destroy
     if let Some(destroy_ids) = &parsed.destroy {
         for id in destroy_ids {
-            match logic.delete_email(id).await {
+            match logic.delete_email(username, id).await {
                 Ok(()) => {
                     destroyed.push(id.clone());
                 }
@@ -559,7 +559,7 @@ async fn handle_email_set(
     // Handle update
     if let Some(updates) = &parsed.update {
         for (id, patch) in updates {
-            match logic.find_email(username, id).await {
+            match logic.fetch_email(username, id).await {
                 Ok(Some(mut email)) => {
                     // Apply patch fields
                     if let Some(keywords) = patch.get("keywords").and_then(|v| v.as_object()) {
