@@ -1,1 +1,1 @@
-reqwest = { version = "0.13.4", features = ["json", "stream", "serde"] }
+reqwest = { version = "0.13.4", features = ["json", "stream", "form"] }
