@@ -5,6 +5,9 @@ pub mod mta_sts;
 pub mod parse;
 pub mod storage;
 pub mod tls_rpt;
+pub mod tls_rpt_dns;
+pub mod tls_rpt_log;
+pub mod tls_rpt_report;
 
 pub use alerts::{ActiveAlert, AlertConfig};
 pub use enrichment::GeoInfo;
