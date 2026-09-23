@@ -35,13 +35,11 @@ jobs:
       - name: Build for CodeQL
         run: cargo check --lib --bins --verbose
 
-      - name: Upload SARIF results
+      - name: Perform CodeQL Analysis
         id: analyze
         uses: github/codeql-action/analyze@v3
         with:
           category: "/language:rust"
-          output: sarif-results
-          upload: true
 
       - name: Fail only on new alerts (PR)
         if: github.event_name == 'pull_request'
