@@ -213,6 +213,7 @@ mod imap_client_ops;
 pub mod oauth2;
 
 // Re-exports
+pub use crate::entities::{ExternalImapAccount, ExternalImapFolder, ExternalImapMessage, ExternalSyncRun};
 pub use oauth2::{build_xoauth2_auth_string, is_token_expired, provider_config, refresh_oauth2_token, OAuth2ProviderConfig, OAuth2TokenResult};
 
 #[cfg(test)]
