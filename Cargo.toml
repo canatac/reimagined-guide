@@ -40,7 +40,7 @@ tokio-rustls = "0.26.0"
 webpki-roots = "1.0.9"
 trust-dns-resolver = "0.23.2"
 clap = "4.6.4"
-reqwest = { version = "0.13.4", features = ["json", "stream", "form"] }
+reqwest = { version = "0.13.4", features = ["json", "stream", "serde"] }
 actix-cors = "0.7.0"
 bcrypt = "0.15"
 
