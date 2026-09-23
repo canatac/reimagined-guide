@@ -99,6 +99,68 @@ pub fn execute_step(step: &str, ctx: &mut Context) {
                 "DKIM test no longer asserts success status"
             );
         }
+        // MW-2026-022: IMAP external account sync feeds unified inbox
+        "I inspect the unified inbox contract" => {}
+        "unified inbox must merge native and external account emails" => {
+            let unified = ctx
+                .values
+                .get("src/bin/email_api_dir/mailbox/unified_handlers.rs")
+                .expect("unified_handlers should be loaded");
+            assert!(
+                unified.contains("native_to_unified"),
+                "missing native_to_unified converter"
+            );
+            assert!(
+                unified.contains("external_to_unified"),
+                "missing external_to_unified converter"
+            );
+            assert!(
+                unified.contains("sort_unified_by_date"),
+                "missing unified sort"
+            );
+        }
+        "periodic sync worker must be present for external accounts" => {
+            let sync = ctx
+                .values
+                .get("src/external_imap/periodic_sync.rs")
+                .expect("periodic_sync should be loaded");
+            assert!(
+                sync.contains("start_periodic_sync"),
+                "missing start_periodic_sync function"
+            );
+            assert!(
+                sync.contains("run_sync_now"),
+                "missing run_sync_now call in periodic worker"
+            );
+        }
+        "unified inbox route must expose external account messages" => {
+            let routes = ctx
+                .values
+                .get("src/bin/email_api_dir/startup_routes/mailbox.rs")
+                .expect("routes should be loaded");
+            assert!(
+                routes.contains("/api/emails/unified"),
+                "missing /api/emails/unified route"
+            );
+        }
+        "external messages must carry account_type and account_email metadata" => {
+            let unified = ctx
+                .values
+                .get("src/bin/email_api_dir/mailbox/unified_handlers.rs")
+                .expect("unified_handlers should be loaded");
+            assert!(
+                unified.contains("account_type"),
+                "missing account_type field in unified DTO"
+            );
+            assert!(
+                unified.contains("account_email"),
+                "missing account_email field in unified DTO"
+            );
+            assert!(
+                unified.contains("\"external\""),
+                "missing external account type tag"
+            );
+        }
         _ => panic!("No step definition for: {step}"),
     }
 }
