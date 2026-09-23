@@ -145,7 +145,8 @@ services:
     restart: always
     ports:
       # Accessible uniquement en local — email-api passe par le réseau Docker interne
-      - "127.0.0.1:3000:3000"
+      # Host port 3002 (not 3000) to avoid conflict with Grafana on host (:3000)
+      - "127.0.0.1:3002:3000"
     volumes:
       - ./dkim:/app/dkim
     environment:
