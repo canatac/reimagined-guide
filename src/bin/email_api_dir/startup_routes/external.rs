@@ -83,6 +83,10 @@ pub(crate) fn register_external_routes(cfg: &mut web::ServiceConfig) {
     )
     // OAuth 2.0 routes (MW-2026-062)
     .route(
+        "/api/external-accounts/{id}/oauth2/start",
+        web::get().to(api_oauth2_start),
+    )
+    .route(
         "/api/external-accounts/{id}/oauth2/callback",
         web::post().to(api_oauth2_callback),
     )
@@ -226,8 +230,12 @@ mod tests {
             "/api/external-sync-runs/{run_id}",
             "/api/external-messages",
             "/api/external-messages/{id}/action",
+            "/api/external-accounts/{id}/oauth2/start",
+            "/api/external-accounts/{id}/oauth2/callback",
+            "/api/external-accounts/{id}/oauth2/tokens",
+            "/api/external-accounts/{id}/oauth2/refresh",
         ];
-        assert_eq!(paths.len(), 15);
+        assert_eq!(paths.len(), 19);
     }
 
     #[test]
@@ -237,10 +245,11 @@ mod tests {
             "/api/external-accounts/{id}",
             "/api/external-accounts/{id}/folders",
             "/api/external-accounts/{id}/sync/status",
+            "/api/external-accounts/{id}/oauth2/start",
             "/api/external-sync-runs/{run_id}",
             "/api/external-messages",
         ];
-        assert_eq!(get_routes.len(), 6);
+        assert_eq!(get_routes.len(), 7);
     }
 
     #[test]
