@@ -7,7 +7,8 @@ use actix_web::{HttpRequest, HttpResponse, Responder, web};
 use mongodb::bson::doc;
 use std::sync::Arc;
 
-use crate::admin_ops::diag_handlers::{parse_window, since_str, AdminWindowQuery, mongo_db_name};
+use crate::admin_ops::mongo_db_name;
+use crate::monitoring_handlers::shared::{parse_window, since_str, AdminWindowQuery};
 use simple_smtp_server::monitoring::tls_rpt_log::{
     self, TlsConnectionRecord, TlsConnectionResult, TlsDomainStats,
 };
