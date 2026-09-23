@@ -531,12 +531,12 @@ async fn handle_email_set(
 
     validate_account(&parsed.account_id, account_id)?;
 
-    let mut created = HashMap::new();
-    let mut updated = HashMap::new();
-    let mut destroyed = Vec::new();
-    let mut not_created = HashMap::new();
-    let mut not_updated = HashMap::new();
-    let mut not_destroyed = HashMap::new();
+    let mut created: HashMap<String, Value> = HashMap::new();
+    let mut updated: HashMap<String, Value> = HashMap::new();
+    let mut destroyed: Vec<String> = Vec::new();
+    let mut not_created: HashMap<String, Value> = HashMap::new();
+    let mut not_updated: HashMap<String, Value> = HashMap::new();
+    let mut not_destroyed: HashMap<String, Value> = HashMap::new();
 
     // Handle destroy
     if let Some(destroy_ids) = &parsed.destroy {
@@ -776,12 +776,12 @@ async fn handle_mailbox_set(
 
     validate_account(&parsed.account_id, account_id)?;
 
-    let mut created = HashMap::new();
-    let mut updated = HashMap::new();
-    let mut destroyed = Vec::new();
-    let mut not_created = HashMap::new();
-    let mut not_updated = HashMap::new();
-    let mut not_destroyed = HashMap::new();
+    let mut created: HashMap<String, Value> = HashMap::new();
+    let mut updated: HashMap<String, Value> = HashMap::new();
+    let mut destroyed: Vec<String> = Vec::new();
+    let mut not_created: HashMap<String, Value> = HashMap::new();
+    let mut not_updated: HashMap<String, Value> = HashMap::new();
+    let mut not_destroyed: HashMap<String, Value> = HashMap::new();
 
     // Handle create
     if let Some(creates) = &parsed.create {
