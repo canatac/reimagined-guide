@@ -1,4 +1,4 @@
-use crate::entities::{
+pub use crate::entities::{
     ExternalImapAccount, ExternalImapFolder, ExternalImapMessage, ExternalSyncRun,
 };
 
