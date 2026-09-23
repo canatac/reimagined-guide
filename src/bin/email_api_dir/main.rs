@@ -204,7 +204,7 @@ async fn main() -> std::io::Result<()> {
 
     // Start periodic external account sync (every 5 min) for unified inbox (#598)
     simple_smtp_server::external_imap::periodic_sync::start_periodic_sync(
-        external_imap_service.clone(),
+        external_imap_service.get_ref().clone(),
     );
 
     let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls())

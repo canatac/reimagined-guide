@@ -162,6 +162,7 @@ pub(crate) async fn apply_dkim_signature(
                 data_base64: att.data_base64.clone(),
             })
             .collect(),
+        algorithm: None,
     };
     let dkim_service: Box<dyn DkimService> = Box::new(RealDkimService);
     match dkim_service.sign_email(&email_req).await {
