@@ -198,15 +198,17 @@ async fn exchange_authorization_code(
     }
 
     let client = reqwest::Client::new();
+    let form_body = serde_urlencoded::to_string(&[
+        ("grant_type", "authorization_code"),
+        ("client_id", &config.client_id),
+        ("client_secret", &config.client_secret),
+        ("code", code),
+        ("redirect_uri", redirect_uri),
+    ]).map_err(|e| format!("OAuth2 form encoding failed: {e}"))?;
     let response = client
         .post(&config.token_endpoint)
-        .form(&[
-            ("grant_type", "authorization_code"),
-            ("client_id", &config.client_id),
-            ("client_secret", &config.client_secret),
-            ("code", code),
-            ("redirect_uri", redirect_uri),
-        ])
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .body(form_body)
         .send()
         .await
         .map_err(|e| format!("OAuth2 code exchange request failed: {e}"))?;
