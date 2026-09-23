@@ -217,6 +217,7 @@ services:
 
 networks:
   mailnet:
+    name: mailnet
     driver: bridge
 
 volumes:
