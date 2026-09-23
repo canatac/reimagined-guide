@@ -185,7 +185,7 @@ async fn exchange_authorization_code(
     code: &str,
     redirect_uri: &str,
 ) -> Result<OAuth2TokenResult, String> {
-    use super::provider_config;
+    use crate::external_imap::oauth2::provider_config;
 
     let config = provider_config(&account.provider)
         .ok_or_else(|| format!("Unsupported OAuth2 provider: {}", account.provider))?;
