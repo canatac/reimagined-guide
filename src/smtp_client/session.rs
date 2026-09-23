@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) async fn send_email_content(
+pub(crate) async fn send_email_content(
     stream: &mut StreamType,
     email_content: &str,
     budget: &SmtpTimeoutBudget,

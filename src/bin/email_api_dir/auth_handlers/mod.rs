@@ -9,6 +9,7 @@ pub(crate) mod password_reset;
 pub(crate) mod oauth;
 pub(crate) mod totp;
 pub(crate) mod gdpr;
+pub(crate) mod anonymous_register;
 
 pub(crate) use session::*;
 pub(crate) use login::*;
@@ -17,6 +18,7 @@ pub(crate) use password_reset::*;
 pub(crate) use oauth::*;
 pub(crate) use totp::*;
 pub(crate) use gdpr::*;
+pub(crate) use anonymous_register::*;
 
 #[cfg(test)]
 mod tests {

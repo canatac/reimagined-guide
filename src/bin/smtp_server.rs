@@ -77,6 +77,7 @@ use mailserver_helpers::{env_bool, write_response, MailServer};
 struct Startup {
     tls_addr: String,
     plain_addr: String,
+    submission_addr: String,
     tls_acceptor: Arc<TlsAcceptor>,
     logic: Arc<Logic>,
     session_manager: Arc<SessionManager>,
@@ -89,6 +90,7 @@ async fn main() -> Result<(), MainError> {
     init_logger();
     let tls_addr = env::var("SMTP_TLS_ADDR").unwrap_or_else(|_| "0.0.0.0:8465".to_string());
     let plain_addr = env::var("SMTP_PLAIN_ADDR").unwrap_or_else(|_| "0.0.0.0:8025".to_string());
+    let submission_addr = env::var("SMTP_SUBMISSION_ADDR").unwrap_or_else(|_| "0.0.0.0:587".to_string());
     let cert_path = PathBuf::from(env::var("CERT_PATH").unwrap_or_else(|_| "localhost.crt".to_string()));
     let key_path = PathBuf::from(env::var("KEY_PATH").unwrap_or_else(|_| "localhost.key".to_string()));
     let tls_acceptor = build_tls_acceptor(&cert_path, &key_path)?;
@@ -102,6 +104,7 @@ async fn main() -> Result<(), MainError> {
     let startup = Startup {
         tls_addr,
         plain_addr,
+        submission_addr,
         tls_acceptor,
         logic,
         session_manager,
@@ -169,60 +172,68 @@ fn format_cluster_uri(cluster_url: &str, username: &str, password: &str, app_nam
 mod tests {
     use super::*;
 
-    // Test-only credential values — not production secrets.
-    // Build strings at runtime to avoid CodeQL hard-coded credential rule.
     fn test_password() -> String {
-        ['t', 'e', 's', 't', 'p', 'a', 's', 's'].iter().collect()
+        std::env::var("TEST_MONGODB_PASSWORD").unwrap_or_else(|_| "test_password".to_string())
+    }
+
+    #[test]
+    fn format_cluster_uri_standard_mongodb() {
+        let password = test_password();
+        let result = format_cluster_uri(
+            "mongodb://localhost:27017",
+            "user",
+            &password,
+            "myapp",
+        );
+        assert_eq!(result, "mongodb://localhost:27017?appName=myapp&serverSelectionTimeoutMS=5000");
     }
 
     #[test]
     fn format_cluster_uri_mongodb_srv() {
+        let password = test_password();
         let result = format_cluster_uri(
-            "mongodb+srv://cluster.example.net",
+            "mongodb+srv://cluster0.mongodb.net",
             "user",
-            &test_password(),
-            "myapp"
+            &password,
+            "myapp",
         );
-        assert!(result.contains("mongodb+srv://user:***@cluster.example.net"));
-        assert!(result.contains("appName=myapp"));
-        assert!(result.contains("retryWrites=true"));
+        assert_eq!(
+            result,
+            format!(
+                "mongodb+srv://user:{}@cluster0.mongodb.net/?retryWrites=true&w=majority&appName=myapp&serverSelectionTimeoutMS=5000",
+                password
+            )
+        );
     }
 
     #[test]
-    fn format_cluster_uri_standard() {
+    fn format_cluster_uri_with_existing_query() {
+        let password = test_password();
         let result = format_cluster_uri(
-            "mongodb://host.example.com:27017",
+            "mongodb://localhost:27017?retryWrites=true",
             "user",
-            &test_password(),
-            "myapp"
+            &password,
+            "myapp",
         );
-        assert!(result.contains("mongodb://user:***@host.example.com:27017"));
-        assert!(result.contains("authSource=admin"));
-        assert!(result.contains("appName=myapp"));
+        assert_eq!(result, "mongodb://localhost:27017?retryWrites=true&appName=myapp&serverSelectionTimeoutMS=5000");
     }
 
     #[test]
-    fn format_cluster_uri_with_existing_params() {
+    fn format_cluster_uri_plain_host() {
+        let password = test_password();
         let result = format_cluster_uri(
-            "mongodb://host.example.com:27017?replicaSet=rs0",
-            "user",
-            &test_password(),
-            "myapp"
-        );
-        assert!(result.contains("appName=myapp"));
-        assert!(result.contains("replicaSet=rs0"));
-    }
-
-    #[test]
-    fn format_cluster_uri_atlas_style() {
-        let result = format_cluster_uri(
-            "cluster0.abc123.mongodb.net",
+            "localhost:27017",
             "admin",
-            &test_password(),
-            "testapp"
+            &password,
+            "smtp-server",
         );
-        assert!(result.contains("mongodb+srv://admin:***@cluster0.abc123.mongodb.net"));
-        assert!(result.contains("appName=testapp"));
+        assert_eq!(
+            result,
+            format!(
+                "mongodb://admin:{}@localhost:27017/?authSource=admin&appName=smtp-server&serverSelectionTimeoutMS=5000",
+                password
+            )
+        );
     }
 }
 async fn init_mongo_client(client_uri: &str) -> Result<Arc<mongodb::Client>, MainError> {
@@ -273,8 +284,10 @@ fn init_monitoring_if_enabled(client: Arc<mongodb::Client>) {
 async fn run_accept_loop(startup: Startup) -> Result<(), MainError> {
     let tls_listener = TcpListener::bind(startup.tls_addr.clone()).await?;
     let plain_listener = TcpListener::bind(startup.plain_addr.clone()).await?;
+    let submission_listener = TcpListener::bind(startup.submission_addr.clone()).await?;
     info!("TLS Server listening on {}", startup.tls_addr);
     info!("Plain Server listening on {}", startup.plain_addr);
+    info!("Submission Server listening on {}", startup.submission_addr);
     loop {
         tokio::select! {
             result = tls_listener.accept() => {
@@ -286,6 +299,14 @@ async fn run_accept_loop(startup: Startup) -> Result<(), MainError> {
                 );
             }
             result = plain_listener.accept() => {
+                handle_plain_accept(
+                    result,
+                    startup.tls_acceptor.clone(),
+                    startup.logic.clone(),
+                    startup.session_manager.clone(),
+                );
+            }
+            result = submission_listener.accept() => {
                 handle_plain_accept(
                     result,
                     startup.tls_acceptor.clone(),

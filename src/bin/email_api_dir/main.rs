@@ -52,6 +52,7 @@ use serde::{Deserialize, Serialize};
 #[path = "admin_auth.rs"]
 mod admin_auth;
 mod auth_handlers;
+mod crypto_handlers;
 mod monitoring_handlers;
 mod mailbox;
 mod admin_ops;
@@ -64,6 +65,7 @@ mod mailing_list;
 mod dkim_service;
 mod startup;
 mod startup_routes;
+mod jmap;
 // Temporarily disabled in strict clippy hard-gate mode; dedicated integration
 // coverage lives in src/bin/email_api_dir/main_tests/** harness files.
 // #[cfg(test)]
@@ -75,10 +77,12 @@ pub use dkim_service::*;
 use helpers::{normalize_segment, build_misfits_local, normalize_oauth_provider, req_ip_str, get_accept_language, welcome_email_html};
 
 pub use auth_handlers::*;
+pub use crypto_handlers::*;
 pub use monitoring_handlers::*;
 pub use mailbox::*;
 pub use admin_ops::*;
 pub use external_handlers::*;
+pub use jmap::*;
 
 use sha1::Sha1;
 
@@ -202,6 +206,11 @@ async fn main() -> std::io::Result<()> {
     let sq_mongo = shared_mongo.clone();
     tokio::spawn(send_queue_worker(sq_mongo));
 
+    // Start periodic external account sync (every 5 min) for unified inbox (#598)
+    simple_smtp_server::external_imap::periodic_sync::start_periodic_sync(
+        external_imap_service.get_ref().clone(),
+    );
+
     let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls())
         .map_err(|e| IoError::other(format!("openssl acceptor init failed: {e}")))?;
     let privkey_path = env::var("PRIVKEY_PATH")
@@ -254,6 +263,7 @@ async fn main() -> std::io::Result<()> {
             .wrap(actix_web::middleware::Logger::default())
             .app_data(web::Data::new(RealDkimService))
             .route("/send-email", web::post().to(send_email_handler))
+            .route("/sign-pq", web::post().to(sign_post_quantum))
             .route("/create-mailing-list", web::post().to(create_mailing_list))
             .route(
                 "/send-to-mailing-list",

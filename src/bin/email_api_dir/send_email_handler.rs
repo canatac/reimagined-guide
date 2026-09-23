@@ -48,6 +48,7 @@ mod tests {
         assert_eq!(req.subject, "Hello");
         assert_eq!(req.body, "World");
         assert_eq!(req.attachments.len(), 0);
+        assert!(req.algorithm.is_none(), "algorithm defaults to None");
     }
 
     #[test]
@@ -64,6 +65,32 @@ mod tests {
         let req: EmailRequest = serde_json::from_value(json).unwrap();
         assert_eq!(req.attachments.len(), 1);
     }
+
+    #[test]
+    fn email_request_with_dkim2_algorithm() {
+        let json = serde_json::json!({
+            "from": "<EMAIL>",
+            "to": "<EMAIL>",
+            "subject": "Hello",
+            "body": "World",
+            "algorithm": "ed25519-sha512"
+        });
+        let req: EmailRequest = serde_json::from_value(json).unwrap();
+        assert_eq!(req.algorithm.as_deref(), Some("ed25519-sha512"));
+    }
+
+    #[test]
+    fn email_request_with_dkim1_algorithm() {
+        let json = serde_json::json!({
+            "from": "<EMAIL>",
+            "to": "<EMAIL>",
+            "subject": "Hello",
+            "body": "World",
+            "algorithm": "rsa-sha256"
+        });
+        let req: EmailRequest = serde_json::from_value(json).unwrap();
+        assert_eq!(req.algorithm.as_deref(), Some("rsa-sha256"));
+    }
 }
 
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
@@ -74,6 +101,10 @@ pub struct EmailRequest {
     pub body: String,
     #[serde(default)]
     pub attachments: Vec<EmailAttachment>,
+    /// DKIM algorithm preference: "rsa-sha256" (DKIM1) or "ed25519-sha512" (DKIM2).
+    /// Defaults to DKIM2 with DKIM1 fallback on the service side.
+    #[serde(default)]
+    pub algorithm: Option<String>,
 }
 
 pub async fn send_email_handler(

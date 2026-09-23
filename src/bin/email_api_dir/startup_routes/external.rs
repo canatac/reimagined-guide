@@ -80,6 +80,19 @@ pub(crate) fn register_external_routes(cfg: &mut web::ServiceConfig) {
     .route(
         "/api/external-messages/{id}/action",
         web::post().to(api_external_message_action),
+    )
+    // OAuth 2.0 routes (MW-2026-062)
+    .route(
+        "/api/external-accounts/{id}/oauth2/callback",
+        web::post().to(api_oauth2_callback),
+    )
+    .route(
+        "/api/external-accounts/{id}/oauth2/tokens",
+        web::post().to(api_oauth2_update_tokens),
+    )
+    .route(
+        "/api/external-accounts/{id}/oauth2/refresh",
+        web::post().to(api_oauth2_refresh),
     );
 }
 

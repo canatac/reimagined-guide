@@ -24,10 +24,13 @@ impl MongoDatabaseAdapter {
         start_before: Option<bson::DateTime>,
     ) -> Result<Vec<CalendarEvent>> {
         let db_name = Self::database_name();
+        // Use Document-typed collection so that corrupt/malformed documents
+        // fail individual deserialization instead of failing the entire query
+        // (issue #262: admin@misfits.ai had legacy docs that broke try_collect).
         let collection = self
             .client
             .database(&db_name)
-            .collection::<CalendarEvent>("calendar_events");
+            .collection::<bson::Document>("calendar_events");
         let mut filter = doc! { "user_id": username };
         if let Some(after) = start_after {
             filter.insert("start", doc! { "$gte": after });
@@ -42,7 +45,26 @@ impl MongoDatabaseAdapter {
             }
         }
         let cursor = collection.find(filter).await?;
-        cursor.try_collect().await
+        let docs: Vec<bson::Document> = cursor.try_collect().await?;
+        // Filter-map: skip documents that fail to deserialize (legacy schema,
+        // partial writes, type mismatches). Log count for observability.
+        let mut events = Vec::with_capacity(docs.len());
+        let mut skipped = 0usize;
+        for doc in &docs {
+            match bson::from_document::<CalendarEvent>(doc.clone()) {
+                Ok(ev) => events.push(ev),
+                Err(_) => skipped += 1,
+            }
+        }
+        if skipped > 0 {
+            eprintln!(
+                "calendar: skipped {} corrupt document(s) for user {} ({} valid)",
+                skipped,
+                username,
+                events.len()
+            );
+        }
+        Ok(events)
     }
 
     pub async fn get_calendar_event_impl(
@@ -197,6 +219,44 @@ mod tests {
     fn calendar_crud_operations() {
         let operations = vec!["create", "get", "get_by_id", "update", "delete"];
         assert_eq!(operations.len(), 5);
+    }
+
+    #[test]
+    fn calendar_deserialization_skip_corrupt() {
+        // Simulate the resilient deserialization logic:
+        // given a mix of valid and corrupt documents, only valid ones are kept.
+        let valid_doc = doc! {
+            "id": "evt-1",
+            "user_id": "user1",
+            "title": "Meeting",
+            "start": bson::DateTime::from_millis(1700000000000i64),
+            "end": bson::DateTime::from_millis(1700003600000i64),
+            "description": "Team sync",
+            "event_type": "meeting",
+            "color": "#3788d8",
+            "location": "",
+            "created_at": bson::DateTime::from_millis(1700000000000i64),
+            "updated_at": bson::DateTime::from_millis(1700000000000i64),
+        };
+        // Corrupt: missing required "title" field
+        let corrupt_doc = doc! {
+            "id": "evt-2",
+            "user_id": "user1",
+            "start": bson::DateTime::from_millis(1700000000000i64),
+            "end": bson::DateTime::from_millis(1700003600000i64),
+        };
+        let docs = vec![valid_doc, corrupt_doc];
+        let mut events = Vec::new();
+        let mut skipped = 0usize;
+        for doc in &docs {
+            match bson::from_document::<CalendarEvent>(doc.clone()) {
+                Ok(ev) => events.push(ev),
+                Err(_) => skipped += 1,
+            }
+        }
+        assert_eq!(events.len(), 1);
+        assert_eq!(skipped, 1);
+        assert_eq!(events[0].id, "evt-1");
     }
 
     #[test]

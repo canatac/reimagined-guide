@@ -15,7 +15,7 @@ services:
     user: "0"
     ports:
       - "25:8025"
-      - "587:8025"
+      - "587:587"
       - "8025:8025"
       - "8465:8465"
     volumes:
@@ -25,6 +25,7 @@ services:
     environment:
       - SMTP_TLS_ADDR=${SMTP_TLS_ADDR}
       - SMTP_PLAIN_ADDR=${SMTP_PLAIN_ADDR}
+      - SMTP_SUBMISSION_ADDR=${SMTP_SUBMISSION_ADDR:-0.0.0.0:587}
       - SMTP_REQUIRE_STARTTLS=${SMTP_REQUIRE_STARTTLS:-true}
       - SMTP_HOSTNAME=${SMTP_HOSTNAME:-mail.misfits.ai}
       - CERT_PATH=/caddy-certs/live/${DOMAIN_NAME}.crt
@@ -216,6 +217,7 @@ services:
 
 networks:
   mailnet:
+    name: mailnet
     driver: bridge
 
 volumes:

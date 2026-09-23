@@ -7,6 +7,7 @@ pub(super) enum MailEventKind {
     Sent,
     Received,
     Read,
+    Deleted,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
