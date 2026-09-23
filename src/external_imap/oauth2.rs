@@ -104,6 +104,7 @@ pub async fn refresh_oauth2_token(
         urlencoding::encode(&config.client_secret),
         urlencoding::encode(refresh_token),
     );
+
     let response = client
         .post(&config.token_endpoint)
         .header("Content-Type", "application/x-www-form-urlencoded")

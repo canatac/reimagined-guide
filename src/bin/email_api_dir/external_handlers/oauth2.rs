@@ -205,6 +205,7 @@ async fn exchange_authorization_code(
         urlencoding::encode(code),
         urlencoding::encode(redirect_uri),
     );
+
     let response = client
         .post(&config.token_endpoint)
         .header("Content-Type", "application/x-www-form-urlencoded")
