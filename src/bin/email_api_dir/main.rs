@@ -64,6 +64,7 @@ mod mailing_list;
 mod dkim_service;
 mod startup;
 mod startup_routes;
+mod jmap;
 // Temporarily disabled in strict clippy hard-gate mode; dedicated integration
 // coverage lives in src/bin/email_api_dir/main_tests/** harness files.
 // #[cfg(test)]
@@ -79,6 +80,7 @@ pub use monitoring_handlers::*;
 pub use mailbox::*;
 pub use admin_ops::*;
 pub use external_handlers::*;
+pub use jmap::*;
 
 use sha1::Sha1;
 

@@ -9,6 +9,7 @@ mod dmarc;
 mod diag;
 mod docs;
 mod external;
+mod jmap;
 mod mailbox;
 mod mta_sts;
 mod prometheus;
@@ -21,6 +22,7 @@ pub(crate) use dmarc::register_dmarc_routes;
 pub(crate) use diag::register_diag_routes;
 pub(crate) use docs::register_docs_routes;
 pub(crate) use external::register_external_routes;
+pub(crate) use jmap::register_jmap_routes;
 pub(crate) use mailbox::register_mailbox_routes;
 pub(crate) use mta_sts::register_mta_sts_routes;
 pub(crate) use prometheus::register_prometheus_routes;
@@ -173,12 +175,13 @@ mod tests {
             "diag",
             "docs",
             "external",
+            "jmap",
             "mailbox",
             "mta_sts",
             "prometheus",
             "webhook",
         ];
-        assert_eq!(modules.len(), 11);
+        assert_eq!(modules.len(), 12);
     }
 
     #[test]
@@ -191,12 +194,13 @@ mod tests {
             "register_diag_routes",
             "register_docs_routes",
             "register_external_routes",
+            "register_jmap_routes",
             "register_mailbox_routes",
             "register_mta_sts_routes",
             "register_prometheus_routes",
             "register_webhook_routes",
         ];
-        assert_eq!(fns.len(), 11);
+        assert_eq!(fns.len(), 12);
     }
 
     #[test]
