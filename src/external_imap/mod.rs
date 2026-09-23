@@ -1,6 +1,7 @@
 use crate::entities::{
     ExternalImapAccount, ExternalImapFolder, ExternalImapMessage, ExternalSyncRun,
 };
+pub use crate::entities::ExternalImapAccount;
 
 pub mod live_probe;
 mod live_probe_helpers;
@@ -29,6 +30,15 @@ pub(crate) use parser::{format_imap_date, ImapFetchedHeader};
 pub struct ExternalAccountCredentials {
     pub secret_value: Option<String>,
     pub secret_ref: Option<String>,
+    // OAuth 2.0 token fields (MW-2026-062)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oauth_access_token: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oauth_refresh_token: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oauth_token_expires_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oauth_scopes: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -166,6 +176,8 @@ impl ExternalImapService {
 
 pub(crate) fn redact_account(mut a: ExternalImapAccount) -> ExternalImapAccount {
     a.secret_value = None;
+    a.oauth_access_token = None;
+    a.oauth_refresh_token = None;
     a
 }
 
@@ -199,6 +211,10 @@ mod folder_ops;
 mod sync_ops;
 mod message_ops;
 mod imap_client_ops;
+pub mod oauth2;
+
+// Re-exports
+pub use oauth2::{build_xoauth2_auth_string, is_token_expired, provider_config, refresh_oauth2_token, OAuth2ProviderConfig, OAuth2TokenResult};
 
 #[cfg(test)]
 mod tests {
@@ -214,6 +230,10 @@ mod tests {
             auth_type: "oauth2".into(),
             secret_ref: Some("ref-1".into()),
             secret_value: Some("super-secret".into()),
+            oauth_access_token: Some("token".into()),
+            oauth_refresh_token: Some("refresh".into()),
+            oauth_token_expires_at: Some(chrono::Utc::now()),
+            oauth_scopes: Some(vec!["https://mail.google.com/".into()]),
             imap_host: "imap.gmail.com".into(),
             imap_port: 993,
             imap_tls: true,
@@ -230,6 +250,8 @@ mod tests {
         assert_eq!(redacted.secret_value, None);
         assert_eq!(redacted.secret_ref, Some("ref-1".into()));
         assert_eq!(redacted.email, "a@gmail.com");
+        assert_eq!(redacted.oauth_access_token, None);
+        assert_eq!(redacted.oauth_refresh_token, None);
     }
 
     #[test]

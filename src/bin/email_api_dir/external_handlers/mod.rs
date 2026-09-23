@@ -6,6 +6,7 @@ pub(crate) mod sync;
 pub(crate) mod calendar;
 pub(crate) mod holidays;
 pub(crate) mod import_wizard;
+pub(crate) mod oauth2;
 
 pub(crate) use openapi::*;
 pub(crate) use accounts::*;
@@ -14,6 +15,7 @@ pub(crate) use sync::*;
 pub(crate) use calendar::*;
 pub(crate) use holidays::*;
 pub(crate) use import_wizard::*;
+pub(crate) use oauth2::*;
 
 
 #[cfg(test)]

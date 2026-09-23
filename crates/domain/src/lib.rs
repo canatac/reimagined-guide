@@ -17,6 +17,15 @@ pub struct ExternalImapAccount {
     pub secret_ref: Option<String>,
     #[serde(default)]
     pub secret_value: Option<String>,
+    // OAuth 2.0 fields (MW-2026-062)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oauth_access_token: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oauth_refresh_token: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oauth_token_expires_at: Option<DateTime<Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oauth_scopes: Option<Vec<String>>,
     pub imap_host: String,
     pub imap_port: u16,
     pub imap_tls: bool,
@@ -370,6 +379,10 @@ mod tests {
             auth_type: "oauth2".into(),
             secret_ref: Some("ref-1".into()),
             secret_value: None,
+            oauth_access_token: Some("ya29.token".into()),
+            oauth_refresh_token: Some("1//refresh".into()),
+            oauth_token_expires_at: Some(Utc::now()),
+            oauth_scopes: Some(vec!["https://mail.google.com/".into()]),
             imap_host: "imap.gmail.com".into(),
             imap_port: 993,
             imap_tls: true,

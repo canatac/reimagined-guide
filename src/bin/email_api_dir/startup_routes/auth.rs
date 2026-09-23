@@ -31,8 +31,18 @@ pub(crate) fn register_auth_routes(cfg: &mut web::ServiceConfig) {
             "/api/auth/oauth/{provider}/callback",
             web::get().to(auth_oauth_callback),
         )
+        // Post-quantum email signing (issue #620)
+        .route(
+            "/api/crypto/sign-pq",
+            web::post().to(sign_post_quantum),
+        )
         // GDPR Article 17 — right to erasure (issue #595)
-        .route("/api/account", web::delete().to(api_gdpr_delete_account));
+        .route("/api/account", web::delete().to(api_gdpr_delete_account))
+        // Anonymous Tor signup (issue #621) — no email verification required
+        .route(
+            "/api/auth/anonymous-register",
+            web::post().to(auth_anonymous_register),
+        );
 }
 
 #[cfg(test)]
@@ -306,5 +316,13 @@ mod tests {
         assert_ne!(route1, route2);
         assert!(route1.starts_with("/api/auth/oauth/"));
         assert!(route2.starts_with("/api/auth/oauth/"));
+    }
+
+    #[test]
+    fn auth_routes_anonymous_register() {
+        let route = "/api/auth/anonymous-register";
+        assert_eq!(route, "/api/auth/anonymous-register");
+        assert!(route.starts_with("/api/auth/"));
+        assert!(route.contains("anonymous"));
     }
 }

@@ -27,6 +27,7 @@ pub(crate) struct UnifiedEmailDto {
     pub account_id: String,
     pub account_type: String, // "native" | "external"
     pub account_email: String,
+    pub source: String, // "native" | "external:<provider>" — explicit source tag for unified inbox
 }
 
 /// Convert a native Email to a UnifiedEmailDto.
@@ -70,6 +71,7 @@ pub(crate) fn native_to_unified(email: &Email, folder: &str) -> UnifiedEmailDto 
         account_id: "native".to_string(),
         account_type: "native".to_string(),
         account_email: String::new(),
+        source: "native".to_string(),
     }
 }
 
@@ -119,6 +121,7 @@ pub(crate) fn external_to_unified(msg: &ExternalImapMessage, account_email: &str
         account_id: msg.account_id.clone(),
         account_type: "external".to_string(),
         account_email: account_email.to_string(),
+        source: format!("external:{}", account_email),
     }
 }
 
@@ -332,6 +335,7 @@ mod tests {
                 account_id: "native".to_string(),
                 account_type: "native".to_string(),
                 account_email: String::new(),
+                source: "native".to_string(),
             },
             UnifiedEmailDto {
                 id: "2".to_string(),
@@ -348,6 +352,7 @@ mod tests {
                 account_id: "native".to_string(),
                 account_type: "native".to_string(),
                 account_email: String::new(),
+                source: "native".to_string(),
             },
         ];
         sort_unified_by_date(&mut emails);
@@ -372,10 +377,62 @@ mod tests {
             account_id: "acc-123".to_string(),
             account_type: "external".to_string(),
             account_email: "ext@gmail.com".to_string(),
+            source: "external:ext@gmail.com".to_string(),
         };
         let json = serde_json::to_value(&dto).unwrap();
         assert_eq!(json["id"], "test-1");
         assert_eq!(json["accountType"], "external");
         assert_eq!(json["accountEmail"], "ext@gmail.com");
+        assert_eq!(json["source"], "external:ext@gmail.com");
+    }
+
+    #[test]
+    fn native_email_source_tag_is_native() {
+        let email = Email {
+            id: "native-1".to_string(),
+            from: "sender@test.com".to_string(),
+            to: "recv@test.com".to_string(),
+            subject: "Native".to_string(),
+            body: "body".to_string(),
+            headers: vec![],
+            flags: vec![],
+            sequence_number: 1,
+            uid: 1,
+            internal_date: chrono::Utc::now(),
+            dkim_signature: None,
+        };
+        let dto = native_to_unified(&email, "inbox");
+        assert_eq!(dto.source, "native");
+        assert_eq!(dto.account_type, "native");
+    }
+
+    #[test]
+    fn external_email_source_tag_includes_account_email() {
+        let msg = ExternalImapMessage {
+            id: "ext-1".to_string(),
+            account_id: "acc-456".to_string(),
+            folder_id: Some("folder-1".to_string()),
+            owner_user_id: "user-1".to_string(),
+            remote_uid: Some(42),
+            message_id_header: Some("<msg-42@external.com>".to_string()),
+            thread_key: None,
+            from: Some("<<EMAIL>>".to_string()),
+            to: Some("<<EMAIL>>".to_string()),
+            subject: Some("External".to_string()),
+            sent_at: None,
+            flags: vec!["\\Seen".to_string()],
+            internal_date: None,
+            body_preview: Some("preview".to_string()),
+            raw_ref: None,
+            dedup_hash: Some("uid:acc-456:42".to_string()),
+            deleted: false,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        let dto = external_to_unified(&msg, "<EMAIL>");
+        assert_eq!(dto.source, "external:<EMAIL>");
+        assert_eq!(dto.account_type, "external");
+        assert_eq!(dto.account_email, "<EMAIL>");
+        assert!(dto.is_read);
     }
 }
