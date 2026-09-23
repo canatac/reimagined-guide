@@ -177,6 +177,10 @@ services:
     restart: always
     ports:
       - "3001:3000"
+    # Map email-api to host gateway so Next.js can reach the backend
+    # even if the mailnet bridge DNS is unavailable (fixes issue #866).
+    extra_hosts:
+      - "email-api:host-gateway"
     # NOTE: Next rewrites bake BACKEND_URL at *image build* time.
     # Runtime BACKEND_URL alone is not enough for old images that baked
     # imap-server:8080. Deploy workflow sed-patches the bake after start
