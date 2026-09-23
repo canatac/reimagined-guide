@@ -202,6 +202,11 @@ async fn main() -> std::io::Result<()> {
     let sq_mongo = shared_mongo.clone();
     tokio::spawn(send_queue_worker(sq_mongo));
 
+    // Start periodic external account sync (every 5 min) for unified inbox (#598)
+    simple_smtp_server::external_imap::periodic_sync::start_periodic_sync(
+        external_imap_service.get_ref().clone(),
+    );
+
     let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls())
         .map_err(|e| IoError::other(format!("openssl acceptor init failed: {e}")))?;
     let privkey_path = env::var("PRIVKEY_PATH")

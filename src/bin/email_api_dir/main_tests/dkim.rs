@@ -27,11 +27,12 @@ async fn test_send_email() {
     mock_dkim_service
         .expect_sign_email()
         .with(eq(EmailRequest {
-            from: "sender@example.com".to_string(),
-            to: "recipient@example.com".to_string(),
+            from: "<EMAIL>".to_string(),
+            to: "<EMAIL>".to_string(),
             subject: "Test Email".to_string(),
             body: "This is a test email.".to_string(),
             attachments: vec![],
+            algorithm: None,
         }))
         .times(1)
         .returning(|_| Ok(serde_json::json!({"status": "success", "messageId": "12345"})));
@@ -46,11 +47,12 @@ async fn test_send_email() {
     .await;
 
     let email_request = EmailRequest {
-        from: "sender@example.com".to_string(),
-        to: "recipient@example.com".to_string(),
+        from: "<EMAIL>".to_string(),
+        to: "<EMAIL>".to_string(),
         subject: "Test Email".to_string(),
         body: "This is a test email.".to_string(),
         attachments: vec![],
+        algorithm: None,
     };
 
     let req = test::TestRequest::post()
