@@ -52,6 +52,7 @@ use serde::{Deserialize, Serialize};
 #[path = "admin_auth.rs"]
 mod admin_auth;
 mod auth_handlers;
+mod crypto_handlers;
 mod monitoring_handlers;
 mod mailbox;
 mod admin_ops;
@@ -75,6 +76,7 @@ pub use dkim_service::*;
 use helpers::{normalize_segment, build_misfits_local, normalize_oauth_provider, req_ip_str, get_accept_language, welcome_email_html};
 
 pub use auth_handlers::*;
+pub use crypto_handlers::*;
 pub use monitoring_handlers::*;
 pub use mailbox::*;
 pub use admin_ops::*;
