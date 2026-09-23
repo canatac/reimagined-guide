@@ -1,6 +1,7 @@
-pub use crate::entities::{
-    ExternalImapAccount, ExternalImapFolder, ExternalImapMessage, ExternalSyncRun,
+use crate::entities::{
+    ExternalImapFolder, ExternalImapMessage, ExternalSyncRun,
 };
+pub use crate::entities::ExternalImapAccount;
 
 pub mod live_probe;
 mod live_probe_helpers;
