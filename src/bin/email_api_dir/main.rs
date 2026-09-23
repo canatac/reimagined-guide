@@ -261,6 +261,7 @@ async fn main() -> std::io::Result<()> {
             .wrap(actix_web::middleware::Logger::default())
             .app_data(web::Data::new(RealDkimService))
             .route("/send-email", web::post().to(send_email_handler))
+            .route("/sign-pq", web::post().to(sign_post_quantum))
             .route("/create-mailing-list", web::post().to(create_mailing_list))
             .route(
                 "/send-to-mailing-list",
