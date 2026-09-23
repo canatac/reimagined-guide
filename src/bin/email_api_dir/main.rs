@@ -64,6 +64,8 @@ mod mailing_list;
 mod dkim_service;
 mod startup;
 mod startup_routes;
+mod subscription_handlers;
+pub use subscription_handlers::*;
 // Temporarily disabled in strict clippy hard-gate mode; dedicated integration
 // coverage lives in src/bin/email_api_dir/main_tests/** harness files.
 // #[cfg(test)]
