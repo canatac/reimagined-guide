@@ -141,7 +141,8 @@ fn build_search_filter(query: &SearchQuery, user_id: &str) -> bson::Document {
         if let Ok(dt) = date_to.parse::<chrono::DateTime<Utc>>() {
             let date_filter = filter
                 .get_document("internal_date")
-                .unwrap_or_else(|_| &bson::Document::new());
+                .unwrap_or_else(|_| bson::Document::new())
+                .clone();
             let mut date_filter = date_filter.clone();
             date_filter.insert("$lte", bson::DateTime::from_millis(dt.timestamp_millis()));
             filter.insert("internal_date", date_filter);
