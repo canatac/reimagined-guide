@@ -303,7 +303,7 @@ jobs:
             done
 
             # Kill any remaining process still listening on the ports we need.
-            PORTS="80 443 25 587 8025 8465 143 993 8000 8443 3000 3001 8080"
+            PORTS="80 443 25 587 8025 8465 143 993 8000 8443 3000 3001 3002 8080"
             if command -v fuser &>/dev/null; then
               for port in $PORTS; do
                 sudo fuser -k "${port}/tcp" 2>/dev/null || true
@@ -348,7 +348,17 @@ jobs:
             fi
             sudo nft list ruleset | sudo tee /etc/nftables.conf > /dev/null
 
-            # Générer la clé privée DKIM si elle n'existe pas encore
+            # Ensure MongoDB listens on Docker bridge interfaces (permanent fix for #670)
+            if [ -f /etc/mongod.conf ]; then
+              if ! grep -q '172.16.0.0/12\|172.19.0.0/16\|bindIpAll' /etc/mongod.conf; then
+                sudo sed -i 's/bindIp: 127.0.0.1/bindIp: 127.0.0.1,172.16.12.2,172.19.0.1/' /etc/mongod.conf
+                sudo systemctl restart mongod || sudo service mongod restart || true
+                echo "mongod.conf: added Docker bridge IPs to bindIp"
+              else
+                echo "mongod.conf: already configured for Docker bridge access"
+              fi
+            fi
+
             mkdir -p /home/debian/dkim
             if [ ! -f /home/debian/dkim/dkim-private.pem ]; then
               openssl genrsa -out /home/debian/dkim/dkim-private.pem 2048
@@ -520,7 +530,7 @@ jobs:
           ssh -o StrictHostKeyChecking=no debian@${{ secrets.VM_IP }} \
             "for i in \$(seq 1 12); do if nc -z -w 3 127.0.0.1 587 2>/dev/null; then echo 'SMTP port 587 open' && exit 0; fi; echo \"retry \$i...\"; sleep 5; done; echo 'SMTP port 587 not reachable'; exit 1"
 
-      - name: Smoke test - DKIM service port 3000
+      - name: Smoke test - DKIM service port 3002
         run: |
           ssh -o StrictHostKeyChecking=no debian@${{ secrets.VM_IP }} \
-            "for i in \$(seq 1 12); do if nc -z -w3 127.0.0.1 3000 2>/dev/null; then echo 'DKIM port 3000 open' && exit 0; fi; echo \"retry \$i...\"; sleep 5; done; echo 'DKIM service not reachable on :3000'; exit 1"
+            "for i in \$(seq 1 12); do if nc -z -w3 127.0.0.1 3002 2>/dev/null; then echo 'DKIM port 3002 open' && exit 0; fi; echo \"retry \$i...\"; sleep 5; done; echo 'DKIM service not reachable on :3002'; exit 1"
