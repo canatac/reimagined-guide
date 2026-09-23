@@ -11,6 +11,9 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+// Re-export Logic from the domain layer (accessible via simple_smtp_server crate)
+use simple_smtp_server::logic::Logic;
+
 // ===========================================================================
 // GET /.well-known/jmap — Session Discovery
 // ===========================================================================
@@ -19,7 +22,7 @@ use std::sync::Arc;
 ///
 /// Returns a minimal JSON document pointing clients to the JMAP API endpoint.
 /// This is unauthenticated — any client can discover the JMAP capabilities.
-pub(crate) async fn jmap_well_known_handler() -> impl HttpResponse {
+pub async fn jmap_well_known_handler() -> HttpResponse {
     let base_url = std::env::var("JMAP_BASE_URL")
         .unwrap_or_else(|_| "https://mail.misfits.ai".to_string());
 
@@ -174,7 +177,7 @@ pub(crate) async fn jmap_api_handler(
     req: HttpRequest,
     body: web::Json<JmapRequest>,
     mongo: web::Data<Arc<mongodb::Client>>,
-    logic: web::Data<Arc<crate::logic::Logic>>,
+    logic: web::Data<Arc<Logic>>,
 ) -> impl Responder {
     // Authenticate
     let auth_header = req
@@ -256,7 +259,7 @@ async fn dispatch_jmap_method(
     username: &str,
     account_id: &str,
     mongo: &mongodb::Client,
-    logic: &Arc<crate::logic::Logic>,
+    logic: &Arc<Logic>,
 ) -> Result<Value, JmapError> {
     match method_name {
         // === Core methods ===
@@ -337,7 +340,7 @@ async fn handle_email_get(
     _call_id: &str,
     username: &str,
     account_id: &str,
-    logic: &Arc<crate::logic::Logic>,
+    logic: &Arc<Logic>,
 ) -> Result<Value, JmapError> {
     let parsed: JmapEmailGetArgs = serde_json::from_value(args.clone())
         .map_err(|e| JmapError::invalid_arguments(&format!("Invalid Email/get args: {e}")))?;
@@ -403,7 +406,7 @@ async fn handle_email_query(
     _call_id: &str,
     username: &str,
     account_id: &str,
-    logic: &Arc<crate::logic::Logic>,
+    logic: &Arc<Logic>,
 ) -> Result<Value, JmapError> {
     let parsed: JmapEmailQueryArgs = serde_json::from_value(args.clone())
         .map_err(|e| JmapError::invalid_arguments(&format!("Invalid Email/query args: {e}")))?;
@@ -521,7 +524,7 @@ async fn handle_email_set(
     _call_id: &str,
     username: &str,
     account_id: &str,
-    logic: &Arc<crate::logic::Logic>,
+    logic: &Arc<Logic>,
 ) -> Result<Value, JmapError> {
     let parsed: JmapEmailSetArgs = serde_json::from_value(args.clone())
         .map_err(|e| JmapError::invalid_arguments(&format!("Invalid Email/set args: {e}")))?;
@@ -1032,7 +1035,7 @@ async fn handle_email_submission_set(
     _call_id: &str,
     _username: &str,
     account_id: &str,
-    _logic: &Arc<crate::logic::Logic>,
+    _logic: &Arc<Logic>,
 ) -> Result<Value, JmapError> {
     Ok(json!({
         "accountId": account_id,
@@ -1104,7 +1107,7 @@ async fn handle_search_snippet_get(
     _call_id: &str,
     _username: &str,
     account_id: &str,
-    _logic: &Arc<crate::logic::Logic>,
+    _logic: &Arc<Logic>,
 ) -> Result<Value, JmapError> {
     Ok(json!({
         "accountId": account_id,

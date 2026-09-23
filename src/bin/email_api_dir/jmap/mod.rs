@@ -17,7 +17,7 @@ pub use types::*;
 use actix_web::web;
 
 /// Register all JMAP routes on the given `ServiceConfig`.
-pub(crate) fn register_jmap_routes(cfg: &mut web::ServiceConfig) {
+pub fn register_jmap_routes(cfg: &mut web::ServiceConfig) {
     cfg.route("/.well-known/jmap", web::get().to(jmap_well_known_handler))
         .route("/jmap/session", web::get().to(jmap_session_handler))
         .route("/jmap", web::post().to(jmap_api_handler));
