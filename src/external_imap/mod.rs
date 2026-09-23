@@ -8,6 +8,7 @@ mod live_probe_helpers;
 mod dialog;
 mod dialog_helpers;
 mod parser;
+pub mod periodic_sync;
 
 use futures_util::TryStreamExt;
 use mongodb::bson;
@@ -69,6 +70,7 @@ pub struct UpdateExternalAccountInput {
     pub smtp: Option<ExternalSmtpServerConfig>,
     pub credentials: Option<ExternalAccountCredentials>,
     pub last_error: Option<String>,
+    pub last_sync_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

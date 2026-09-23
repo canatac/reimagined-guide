@@ -102,6 +102,10 @@ impl ExternalImapService {
             set_doc.insert("secretValue", creds.secret_value);
         }
 
+        if let Some(ts) = input.last_sync_at {
+            set_doc.insert("lastSyncAt", bson::DateTime::from_millis(ts.timestamp_millis()));
+        }
+
         self.coll_accounts()
             .update_one(
                 doc! { "ownerUserId": owner_user_id, "id": account_id },
@@ -114,6 +118,17 @@ impl ExternalImapService {
             .find_one(doc! { "ownerUserId": owner_user_id, "id": account_id })
             .await?;
         Ok(found.map(redact_account))
+    }
+
+    /// List ALL accounts across all users (for periodic background sync).
+    /// Returns (owner_user_id, account) pairs.
+    pub async fn list_all_accounts(&self) -> Result<Vec<(String, ExternalImapAccount)>> {
+        let cursor = self.coll_accounts().find(doc! {}).await?;
+        let accounts: Vec<ExternalImapAccount> = cursor.try_collect().await?;
+        Ok(accounts
+            .into_iter()
+            .map(|a| (a.owner_user_id.clone(), a))
+            .collect())
     }
 
     pub async fn delete_account(&self, owner_user_id: &str, account_id: &str) -> Result<bool> {
