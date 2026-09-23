@@ -98,16 +98,16 @@ pub async fn refresh_oauth2_token(
     }
 
     let client = reqwest::Client::new();
-    let form_body = urlencoding::encode(&format!(
+    let form_body = format!(
         "grant_type=refresh_token&client_id={}&client_secret={}&refresh_token={}",
         urlencoding::encode(&config.client_id),
         urlencoding::encode(&config.client_secret),
         urlencoding::encode(refresh_token),
-    ));
+    );
     let response = client
         .post(&config.token_endpoint)
         .header("Content-Type", "application/x-www-form-urlencoded")
-        .body(form_body.into_owned())
+        .body(form_body)
         .send()
         .await
         .map_err(|e| format!("OAuth2 token refresh request failed: {e}"))?;
