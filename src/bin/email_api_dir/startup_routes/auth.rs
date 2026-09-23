@@ -31,6 +31,11 @@ pub(crate) fn register_auth_routes(cfg: &mut web::ServiceConfig) {
             "/api/auth/oauth/{provider}/callback",
             web::get().to(auth_oauth_callback),
         )
+        // Post-quantum email signing (issue #620)
+        .route(
+            "/api/crypto/sign-pq",
+            web::post().to(sign_post_quantum),
+        )
         // GDPR Article 17 — right to erasure (issue #595)
         .route("/api/account", web::delete().to(api_gdpr_delete_account));
 }
