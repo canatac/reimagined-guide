@@ -1,5 +1,5 @@
 use crate::entities::{
-    ExternalImapAccount, ExternalImapFolder, ExternalImapMessage, ExternalSyncRun,
+    ExternalImapFolder, ExternalImapMessage, ExternalSyncRun,
 };
 pub use crate::entities::ExternalImapAccount;
 
