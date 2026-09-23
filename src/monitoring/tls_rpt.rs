@@ -4,7 +4,7 @@
 //! Receives, parses, and aggregates TLS-RPT reports for monitoring
 //! TLS connection failures with destination domains.
 
-use chrono::{DateTime, Utc};
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
