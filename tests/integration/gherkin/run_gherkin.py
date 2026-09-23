@@ -83,6 +83,35 @@ def execute(step: str, ctx: dict):
         assert "assert!(resp.status().is_success())" in dkim, "missing success assertion"
         return
 
+    # MW-2026-022: IMAP external account sync feeds unified inbox
+    if step == "I inspect the unified inbox contract":
+        return
+
+    if step == "unified inbox must merge native and external account emails":
+        unified = ctx["src/bin/email_api_dir/mailbox/unified_handlers.rs"]
+        assert "native_to_unified" in unified, "missing native_to_unified converter"
+        assert "external_to_unified" in unified, "missing external_to_unified converter"
+        assert "sort_unified_by_date" in unified, "missing unified sort"
+        return
+
+    if step == "periodic sync worker must be present for external accounts":
+        sync = ctx["src/external_imap/periodic_sync.rs"]
+        assert "start_periodic_sync" in sync, "missing start_periodic_sync function"
+        assert "run_sync_now" in sync, "missing run_sync_now call in periodic worker"
+        return
+
+    if step == "unified inbox route must expose external account messages":
+        routes = ctx["src/bin/email_api_dir/startup_routes/mailbox.rs"]
+        assert "/api/emails/unified" in routes, "missing /api/emails/unified route"
+        return
+
+    if step == "external messages must carry account_type and account_email metadata":
+        unified = ctx["src/bin/email_api_dir/mailbox/unified_handlers.rs"]
+        assert "account_type" in unified, "missing account_type field in unified DTO"
+        assert "account_email" in unified, "missing account_email field in unified DTO"
+        assert "\"external\"" in unified, "missing external account type tag"
+        return
+
     raise AssertionError(f"no step definition for: {step}")
 
 

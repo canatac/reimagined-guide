@@ -24,3 +24,13 @@ Feature: reimagined-guide API/UI contract integrity
     Given the source file "src/bin/email_api_dir/main_tests/dkim.rs" is loaded
     When I inspect the send email assertions
     Then the test should assert successful response status
+
+  Scenario: IMAP external account sync feeds unified inbox (MW-2026-022)
+    Given the source file "src/bin/email_api_dir/mailbox/unified_handlers.rs" is loaded
+    And the source file "src/external_imap/periodic_sync.rs" is loaded
+    And the source file "src/bin/email_api_dir/startup_routes/mailbox.rs" is loaded
+    When I inspect the unified inbox contract
+    Then unified inbox must merge native and external account emails
+    And periodic sync worker must be present for external accounts
+    And unified inbox route must expose external account messages
+    And external messages must carry account_type and account_email metadata

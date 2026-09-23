@@ -8,9 +8,12 @@ async fn main() -> std::io::Result<()> {
     dotenv::dotenv().ok();
     env_logger::init();
 
-    let cluster_url = env::var("MONGODB_CLUSTER_URL").expect("MONGODB_CLUSTER_URL must be set");
-    let mongodb_username = env::var("MONGODB_USERNAME").expect("MONGODB_USERNAME must be set");
-    let mongodb_password = env::var("MONGODB_PASSWORD").expect("MONGODB_PASSWORD must be set");
+    let cluster_url = env::var("MONGODB_CLUSTER_URL")
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::NotFound, format!("MONGODB_CLUSTER_URL must be set: {e}")))?;
+    let mongodb_username = env::var("MONGODB_USERNAME")
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::NotFound, format!("MONGODB_USERNAME must be set: {e}")))?;
+    let mongodb_password = env::var("MONGODB_PASSWORD")
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::NotFound, format!("MONGODB_PASSWORD must be set: {e}")))?;
     let mongodb_app_name =
         env::var("MONGODB_APP_NAME").unwrap_or_else(|_| "mailserver".to_string());
 
@@ -45,10 +48,12 @@ async fn main() -> std::io::Result<()> {
                 opts.heartbeat_freq = Some(std::time::Duration::from_secs(10));
                 match mongodb::Client::with_options(opts) {
                     Ok(c) => c,
-                    Err(_) => mongodb::Client::with_uri_str(&client_uri).await.unwrap(),
+                    Err(_) => mongodb::Client::with_uri_str(&client_uri).await
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("mongodb client failed: {e}")))?,
                 }
             }
-            Err(_) => mongodb::Client::with_uri_str(&client_uri).await.unwrap(),
+            Err(_) => mongodb::Client::with_uri_str(&client_uri).await
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("mongodb client failed: {e}")))?,
         },
     );
 
@@ -66,8 +71,10 @@ async fn main() -> std::io::Result<()> {
 
     let logic = Arc::new(Logic::new(client));
     let mut server = ImapServer::new(logic);
-    let imap_server_address = env::var("IMAP_SERVER").expect("IMAP_SERVER must be set");
-    server.run(&imap_server_address).await.unwrap();
+    let imap_server_address = env::var("IMAP_SERVER")
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::NotFound, format!("IMAP_SERVER must be set: {e}")))?;
+    server.run(&imap_server_address).await
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("imap server run failed: {e}")))?;
 
     Ok(())
 }
