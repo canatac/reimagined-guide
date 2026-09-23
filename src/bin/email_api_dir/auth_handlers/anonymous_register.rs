@@ -3,7 +3,6 @@
 #![allow(unused_imports, dead_code)]
 use super::super::*;
 use super::login::make_session;
-use crate::entities::Email;
 use actix_web::{HttpRequest, HttpResponse, Responder};
 use chrono::Utc;
 use std::sync::Arc;
@@ -76,7 +75,7 @@ fn generate_anonymous_local() -> String {
 /// Anonymous registration handler — creates account without email verification.
 /// Only accessible via Tor (.onion). No welcome email sent.
 pub(crate) async fn auth_anonymous_register(
-    req: actix_web::Json<AnonymousRegisterRequest>,
+    req: actix_web::web::Json<AnonymousRegisterRequest>,
     req_http: HttpRequest,
     logic: actix_web::web::Data<Arc<Logic>>,
 ) -> impl Responder {
