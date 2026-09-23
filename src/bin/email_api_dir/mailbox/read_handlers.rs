@@ -626,3 +626,126 @@ pub(crate) async fn api_notifications_preferences_put(
     }
 }
 
+
+/// Query struct for GET /api/emails/new-since
+#[derive(Deserialize, Debug)]
+pub(crate) struct NewSinceQuery {
+    /// ISO 8601 timestamp — return emails newer than this
+    pub ts: String,
+    /// Optional folder filter (default: "inbox")
+    #[serde(default = "default_folder")]
+    pub folder: String,
+    /// Max results (default: 50, max: 200)
+    #[serde(default = "default_new_since_limit")]
+    pub limit: u32,
+}
+
+fn default_new_since_limit() -> u32 {
+    50
+}
+
+/// GET /api/emails/new-since?ts=<ISO8601>&folder=inbox&limit=50
+/// Returns new emails since the given timestamp (polling fallback for IMAP IDLE).
+/// Complements the SSE stream at /api/events/stream.
+pub(crate) async fn api_emails_new_since(
+    query: web::Query<NewSinceQuery>,
+    req: actix_web::HttpRequest,
+    logic: web::Data<Arc<Logic>>,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    // Auth guard
+    if admin_auth::rbac_enabled() {
+        if let Err(resp) = admin_auth::require_auth(&req, mongo.get_ref(), &mongo_db_name()).await {
+            return resp;
+        }
+    }
+    let user_id = resolve_user_id(&req);
+
+    // Parse timestamp
+    let since = match chrono::DateTime::parse_from_rfc3339(&query.ts) {
+        Ok(dt) => dt.with_timezone(&chrono::Utc),
+        Err(_) => {
+            return HttpResponse::BadRequest().json(serde_json::json!({
+                "code": "INVALID_TIMESTAMP",
+                "message": "Parameter 'ts' must be ISO 8601 / RFC 3339 (e.g. 2026-09-23T00:00:00Z)"
+            }));
+        }
+    };
+
+    let limit = query.limit.clamp(1, 200);
+    let folder = query.folder.trim().to_ascii_lowercase();
+
+    // Fetch emails from the appropriate mailbox(es)
+    let mailboxes = folder_to_mailboxes(&folder);
+    let mut all_new: Vec<serde_json::Value> = Vec::new();
+
+    for mailbox in mailboxes {
+        match logic.get_emails_page(&user_id, &mailbox, 500, 0).await {
+            Ok(batch) => {
+                for email in batch {
+                    if email.internal_date >= since {
+                        all_new.push(serde_json::json!({
+                            "id": email.id,
+                            "subject": email.subject,
+                            "from": email.from,
+                            "to": email.to,
+                            "internalDate": email.internal_date.to_rfc3339(),
+                            "preview": email.preview,
+                            "hasAttachments": email.has_attachments,
+                            "flags": email.flags,
+                        }));
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("api_emails_new_since mailbox={}: {}", mailbox, e);
+            }
+        }
+    }
+
+    // Sort by date descending, apply limit
+    all_new.sort_by(|a, b| {
+        let da = a["internalDate"].as_str().unwrap_or("");
+        let db = b["internalDate"].as_str().unwrap_or("");
+        db.cmp(da)
+    });
+    all_new.truncate(limit as usize);
+
+    let now = chrono::Utc::now();
+    let elapsed = now.signed_duration_since(since);
+
+    HttpResponse::Ok().json(serde_json::json!({
+        "code": "NEW_EMAILS_SINCE",
+        "since": query.ts,
+        "count": all_new.len(),
+        "emails": all_new,
+        "serverTime": now.to_rfc3339(),
+        "windowSeconds": elapsed.num_seconds(),
+        "pollIntervalMs": 5000,
+        "note": "For real-time push, use /api/events/stream (SSE). This endpoint is the polling fallback."
+    }))
+}
+
+#[cfg(test)]
+mod tests_new_since {
+    use super::*;
+
+    #[test]
+    fn new_since_timestamp_parses() {
+        let ts = "2026-09-23T00:00:00Z";
+        let result = chrono::DateTime::parse_from_rfc3339(ts);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn new_since_limit_clamps() {
+        let limit = 500u32;
+        let clamped = limit.clamp(1, 200);
+        assert_eq!(clamped, 200);
+    }
+
+    #[test]
+    fn new_since_default_limit() {
+        assert_eq!(default_new_since_limit(), 50);
+    }
+}

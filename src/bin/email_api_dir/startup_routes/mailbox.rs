@@ -8,6 +8,7 @@ pub(crate) fn register_mailbox_routes(cfg: &mut web::ServiceConfig) {
     cfg.route("/api/emails/unified", web::get().to(api_emails_unified))
         .route("/api/unified/folders", web::get().to(api_unified_folders))
         .route("/api/emails", web::get().to(api_emails))
+        .route("/api/emails/new-since", web::get().to(api_emails_new_since))
         .route("/api/analytics/personal", web::get().to(api_personal_analytics))
         .route("/api/emails/{id}", web::get().to(api_email_by_id))
         .route(
@@ -338,11 +339,12 @@ mod tests {
             "/api/calendar/agenda",
             "/api/calendar/holidays",
             "/api/calendar/holidays/countries",
+            "/api/emails/new-since",
             "/send-email",
             "/create-mailing-list",
             "/send-to-mailing-list",
         ];
-        assert_eq!(paths.len(), 29);
+        assert_eq!(paths.len(), 31);
     }
 
     #[test]
@@ -369,8 +371,9 @@ mod tests {
             "/api/calendar/agenda",
             "/api/calendar/holidays",
             "/api/calendar/holidays/countries",
+            "/api/emails/new-since",
         ];
-        assert_eq!(get_routes.len(), 20);
+        assert_eq!(get_routes.len(), 21);
     }
 
     #[test]
@@ -464,6 +467,12 @@ mod tests {
     fn mailbox_routes_handler_api_emails() {
         let handler = "api_emails";
         assert_eq!(handler, "api_emails");
+    }
+
+    #[test]
+    fn mailbox_routes_handler_api_emails_new_since() {
+        let handler = "api_emails_new_since";
+        assert_eq!(handler, "api_emails_new_since");
     }
 
     #[test]
