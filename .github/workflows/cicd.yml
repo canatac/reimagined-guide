@@ -348,7 +348,17 @@ jobs:
             fi
             sudo nft list ruleset | sudo tee /etc/nftables.conf > /dev/null
 
-            # Générer la clé privée DKIM si elle n'existe pas encore
+            # Ensure MongoDB listens on Docker bridge interfaces (permanent fix for #670)
+            if [ -f /etc/mongod.conf ]; then
+              if ! grep -q '172.16.0.0/12\|172.19.0.0/16\|bindIpAll' /etc/mongod.conf; then
+                sudo sed -i 's/bindIp: 127.0.0.1/bindIp: 127.0.0.1,172.16.12.2,172.19.0.1/' /etc/mongod.conf
+                sudo systemctl restart mongod || sudo service mongod restart || true
+                echo "mongod.conf: added Docker bridge IPs to bindIp"
+              else
+                echo "mongod.conf: already configured for Docker bridge access"
+              fi
+            fi
+
             mkdir -p /home/debian/dkim
             if [ ! -f /home/debian/dkim/dkim-private.pem ]; then
               openssl genrsa -out /home/debian/dkim/dkim-private.pem 2048
