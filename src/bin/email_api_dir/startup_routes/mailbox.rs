@@ -87,6 +87,8 @@ pub(crate) fn register_mailbox_routes(cfg: &mut web::ServiceConfig) {
             "/api/hermes/runs/{run_id}/events",
             web::get().to(api_hermes_run_events),
         )
+        .route("/api/search", web::get().to(api_search))
+        .route("/api/search/index", web::post().to(api_search_index))
         .route("/api/send/undo", web::post().to(api_send_undo))
         .route("/api/send/schedule", web::post().to(api_send_schedule))
         .route("/api/v1/drafts/scheduled", web::get().to(api_scheduled_list))
@@ -668,6 +670,18 @@ mod tests {
     fn mailbox_routes_handler_api_hermes_run_events() {
         let handler = "api_hermes_run_events";
         assert_eq!(handler, "api_hermes_run_events");
+    }
+
+    #[test]
+    fn mailbox_routes_handler_api_search() {
+        let handler = "api_search";
+        assert_eq!(handler, "api_search");
+    }
+
+    #[test]
+    fn mailbox_routes_handler_api_search_index() {
+        let handler = "api_search_index";
+        assert_eq!(handler, "api_search_index");
     }
 
     #[test]

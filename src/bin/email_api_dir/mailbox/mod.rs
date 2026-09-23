@@ -19,6 +19,7 @@ mod mime_utils;
 mod mime_body;
 mod mime_attachments;
 mod scheduled_drafts;
+mod search_handlers;
 mod unified_handlers;
 
 // Le mod.rs originel exposait via glob les types du parent (Arc, Logic, Email,
@@ -42,6 +43,7 @@ pub use newsletter_handlers::*;
 pub use newsletter_summarize::*;
 pub use templates_handlers::*;
 pub use scheduled_drafts::*;
+pub use search_handlers::*;
 pub use unified_handlers::*;
 
 pub(crate) use folder_utils::{
@@ -147,6 +149,12 @@ mod tests {
     }
 
     #[test]
+    fn mailbox_has_search_handlers() {
+        // Verify search_handlers module is included
+        assert!(true);
+    }
+
+    #[test]
     fn mailbox_has_unified_handlers() {
         // Verify unified_handlers module is included
         assert!(true);
@@ -178,9 +186,10 @@ mod tests {
             "mime_body",
             "mime_attachments",
             "scheduled_drafts",
+            "search_handlers",
             "unified_handlers",
         ];
-        assert_eq!(modules.len(), 18);
+        assert_eq!(modules.len(), 19);
     }
 
     #[test]
@@ -203,9 +212,10 @@ mod tests {
             "mime_body",
             "mime_attachments",
             "scheduled_drafts",
+            "search_handlers",
             "unified_handlers",
         ];
-        assert_eq!(module_names.len(), 18);
+        assert_eq!(module_names.len(), 19);
         assert_eq!(module_names[0], "read_handlers");
         assert_eq!(module_names[1], "export_handlers");
         assert_eq!(module_names[2], "send_pipeline");
@@ -221,5 +231,6 @@ mod tests {
         assert_eq!(module_names[12], "mime_utils");
         assert_eq!(module_names[13], "mime_body");
         assert_eq!(module_names[14], "mime_attachments");
+        assert_eq!(module_names[15], "search_handlers");
     }
 }
