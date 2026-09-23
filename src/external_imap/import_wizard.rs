@@ -306,7 +306,7 @@ mod tests {
                 port: 993,
                 tls: true,
             },
-            password: "".into(),
+            password: String::new(),
         };
         let r = validate_credentials(&input);
         assert!(!r.ok);
