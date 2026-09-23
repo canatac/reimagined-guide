@@ -47,3 +47,17 @@ fn gherkin_api_contract_campaign() {
         assert!(!name.is_empty(), "scenario name should not be empty");
     }
 }
+
+#[test]
+fn gherkin_jmap_campaign() {
+    let scenarios = parse_feature("tests/integration/gherkin/features/jmap.feature");
+    assert!(!scenarios.is_empty(), "jmap feature must contain scenarios");
+
+    for (name, steps) in scenarios {
+        let mut ctx = step_impl::Context::new();
+        for step in steps {
+            step_impl::execute_step(&step, &mut ctx);
+        }
+        assert!(!name.is_empty(), "scenario name should not be empty");
+    }
+}
