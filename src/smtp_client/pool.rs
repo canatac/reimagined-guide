@@ -11,10 +11,10 @@ use std::time::{Duration, Instant};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
 
-use super::{smtp_timeout_budget, StreamType};
-use crate::smtp_client::session::send_email_content;
-use crate::smtp_client::discovery::{expect_code_for_phase, ehlo_hostname};
-use crate::smtp_client::body_utils::compose_smtp_payload;
+use super::{
+    expect_code_for_phase, smtp_timeout_budget, ehlo_hostname, StreamType,
+    send_email_content, compose_smtp_payload,
+};
 use crate::entities::Email;
 
 /// Maximum number of idle connections kept per relay host.

@@ -197,7 +197,10 @@ mod relay;
 mod session;
 mod external_smtp;
 
+use body_utils::compose_smtp_payload;
+use discovery::{find_smtp_port, expect_code_for_phase, ehlo_hostname};
 use mx::send_via_mx;
+use session::send_email_content;
 pub use session::extract_email_address;
 pub use dane::{lookup_tlsa_records, validate_server_cert_dane, has_tlsa_records, DaneValidationResult};
 pub use external_smtp::send_via_external_smtp;
