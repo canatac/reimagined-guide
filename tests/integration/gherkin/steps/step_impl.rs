@@ -100,10 +100,115 @@ pub fn execute_step(step: &str, ctx: &mut Context) {
             );
         }
         // ===================================================================
+        // MW-2026-030: CORS reflection + auth bypass (P0, issue #647)
+        // ===================================================================
+        "I inspect CORS configuration" => {
+            // Already loaded
+        }
+        "CORS must use origin whitelist not reflection" => {
+            let startup = ctx
+                .values
+                .get("src/bin/email_api_dir/startup.rs")
+                .expect("startup should be loaded");
+            // Must NOT contain dangerous patterns: reflecting request Origin header
+            assert!(
+                !startup.contains("allowed_origin_fn"),
+                "CORS uses allowed_origin_fn which may reflect Origin"
+            );
+            assert!(
+                !startup.contains("Origin::mirror") && !startup.contains("reflect_origin"),
+                "CORS reflects Origin header (vulnerable to reflection attacks)"
+            );
+            // Must use whitelist approach
+            assert!(
+                startup.contains("allowed_origin"),
+                "CORS must use allowed_origin whitelist pattern"
+            );
+            assert!(
+                startup.contains("CORS_ALLOWED_ORIGINS"),
+                "CORS must read from CORS_ALLOWED_ORIGINS env var"
+            );
+        }
+        "CORS_ALLOWED_ORIGINS env var must be referenced" => {
+            let startup = ctx
+                .values
+                .get("src/bin/email_api_dir/startup.rs")
+                .expect("startup should be loaded");
+            assert!(
+                startup.contains("CORS_ALLOWED_ORIGINS"),
+                "CORS_ALLOWED_ORIGINS env var not referenced in startup.rs"
+            );
+        }
+        "docker-compose must set CORS_ALLOWED_ORIGINS" => {
+            // Check docker-compose.deploy.yml for CORS env var
+            let compose_path = "docker-compose.deploy.yml";
+            if let Ok(content) = fs::read_to_string(compose_path) {
+                assert!(
+                    content.contains("CORS_ALLOWED_ORIGINS"),
+                    "docker-compose.deploy.yml must set CORS_ALLOWED_ORIGINS"
+                );
+            }
+            // Also check docker-compose.web.yml
+            let web_compose = "docker-compose.web.yml";
+            if let Ok(content) = fs::read_to_string(web_compose) {
+                assert!(
+                    content.contains("CORS_ALLOWED_ORIGINS"),
+                    "docker-compose.web.yml must set CORS_ALLOWED_ORIGINS"
+                );
+            }
+        }
+
+        // ===================================================================
+        // MW-2026-031: Admin auth bypass regression (P0, issue #648)
+        // ===================================================================
+        "I inspect admin auth enforcement" => {
+            // Already loaded
+        }
+        "ADMIN_RBAC_ENFORCE feature flag must exist" => {
+            let admin_auth = ctx
+                .values
+                .get("src/bin/email_api_dir/admin_auth.rs")
+                .expect("admin_auth should be loaded");
+            assert!(
+                admin_auth.contains("ADMIN_RBAC_ENFORCE"),
+                "ADMIN_RBAC_ENFORCE feature flag not found"
+            );
+        }
+        "require_admin must reject when RBAC enabled and no token" => {
+            let admin_auth = ctx
+                .values
+                .get("src/bin/email_api_dir/admin_auth.rs")
+                .expect("admin_auth should be loaded");
+            // Must have a require_admin function that checks auth when RBAC is on
+            assert!(
+                admin_auth.contains("require_admin"),
+                "require_admin function not found"
+            );
+            // Must NOT unconditionally return Ok when RBAC is enabled
+            assert!(
+                admin_auth.contains("Unauthorized") || admin_auth.contains("401"),
+                "require_admin must return Unauthorized when no valid token"
+            );
+        }
+        "docker-compose must set ADMIN_RBAC_ENFORCE" => {
+            let compose_path = "docker-compose.deploy.yml";
+            if let Ok(content) = fs::read_to_string(compose_path) {
+                assert!(
+                    content.contains("ADMIN_RBAC_ENFORCE"),
+                    "docker-compose.deploy.yml must set ADMIN_RBAC_ENFORCE"
+                );
+                assert!(
+                    content.contains("ADMIN_RBAC_ENFORCE=${ADMIN_RBAC_ENFORCE:-1}"),
+                    "ADMIN_RBAC_ENFORCE must default to 1 (enabled) in production"
+                );
+            }
+        }
+
+        // ===================================================================
         // JMAP feature steps (issue #624)
         // ===================================================================
 
-        // --- JMAP route declarations ---
+        // --- JMAP route declarations --
         "the /.well-known/jmap endpoint must be registered" => {
             let routes = ctx
                 .values
@@ -151,7 +256,7 @@ pub fn execute_step(step: &str, ctx: &mut Context) {
             );
         }
 
-        // --- JMAP type definitions ---
+        // --- JMAP type definitions --
         "I inspect JMAP type definitions" => {
             // Already loaded by previous Given
         }
@@ -196,7 +301,7 @@ pub fn execute_step(step: &str, ctx: &mut Context) {
             );
         }
 
-        // --- JMAP method handlers ---
+        // --- JMAP method handlers --
         "I inspect JMAP method handlers" => {
             // Already loaded
         }
@@ -257,7 +362,7 @@ pub fn execute_step(step: &str, ctx: &mut Context) {
             );
         }
 
-        // --- JMAP route registration ---
+        // --- JMAP route registration --
         "I inspect startup route registration" => {
             // Already loaded
         }
@@ -276,7 +381,7 @@ pub fn execute_step(step: &str, ctx: &mut Context) {
             );
         }
 
-        // --- JMAP HTTP route config ---
+        // --- JMAP HTTP route config --
         "I inspect HTTP route configuration" => {
             // Already loaded
         }
@@ -291,7 +396,7 @@ pub fn execute_step(step: &str, ctx: &mut Context) {
             );
         }
 
-        // --- JMAP well-known handler ---
+        // --- JMAP well-known handler --
         "I inspect the well-known handler" => {
             // Already loaded
         }
@@ -336,7 +441,7 @@ pub fn execute_step(step: &str, ctx: &mut Context) {
             );
         }
 
-        // --- JMAP session handler ---
+        // --- JMAP session handler --
         "I inspect the session handler" => {
             // Already loaded
         }
@@ -361,7 +466,7 @@ pub fn execute_step(step: &str, ctx: &mut Context) {
             );
         }
 
-        // --- JMAP API handler ---
+        // --- JMAP API handler --
         "I inspect the API handler" => {
             // Already loaded
         }
