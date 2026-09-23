@@ -20,6 +20,13 @@ mail.misfits.ai {
     reverse_proxy /api/external-accounts/* localhost:3001
     reverse_proxy /api/emails/*/attachments/* localhost:3001
 
+    # /api/compose/* — must go through Next.js for Edge auth middleware (issue #780/#832).
+    # Without this, Caddy proxies /api/compose/send directly to email-api:8000,
+    # bypassing Next.js session auth enforcement AND hitting a non-existent route
+    # (backend only has /api/send, not /api/compose/send).
+    reverse_proxy /api/compose localhost:3001
+    reverse_proxy /api/compose/* localhost:3001
+
     # Public APIs + remaining: direct to backend (strip backend CORS headers, enforce whitelist)
     reverse_proxy /api/* localhost:8000 {
         header_down -Access-Control-Allow-Origin
