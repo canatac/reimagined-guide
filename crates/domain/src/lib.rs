@@ -290,6 +290,28 @@ pub struct ChangeRequestItem {
     pub changelog_entry: Option<serde_json::Value>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RetentionPolicyConfig {
+    pub user_id: String,
+    pub retention_days: i64, // 0 = never purge, 30/90/365 typical
+    pub auto_purge_enabled: bool,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RetentionAuditEntry {
+    pub id: String,
+    pub at: String,
+    pub action: String, // "purge" | "config_update" | "policy_eval"
+    pub user_id: String,
+    pub retention_days: i64,
+    pub emails_purged: i64,
+    pub oldest_retained: Option<String>,
+    pub note: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -522,5 +544,64 @@ mod tests {
         assert_eq!(ok, Ok(42));
         let err: DomainResult<i32> = Err(DomainError::NotFound);
         assert!(err.is_err());
+    }
+
+    #[test]
+    fn retention_policy_config_camelcase_roundtrip() {
+        let config = RetentionPolicyConfig {
+            user_id: "user-1".into(),
+            retention_days: 90,
+            auto_purge_enabled: true,
+            updated_at: "2026-01-01T00:00:00Z".into(),
+        };
+        let json = serde_json::to_value(&config).unwrap();
+        assert_eq!(json["userId"], "user-1");
+        assert_eq!(json["retentionDays"], 90);
+        assert_eq!(json["autoPurgeEnabled"], true);
+        assert_eq!(json["updatedAt"], "2026-01-01T00:00:00Z");
+        let parsed: RetentionPolicyConfig = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed.user_id, "user-1");
+        assert_eq!(parsed.retention_days, 90);
+        assert!(parsed.auto_purge_enabled);
+    }
+
+    #[test]
+    fn retention_audit_entry_camelcase_roundtrip() {
+        let entry = RetentionAuditEntry {
+            id: "audit-1".into(),
+            at: "2026-01-01T00:00:00Z".into(),
+            action: "purge".into(),
+            user_id: "user-1".into(),
+            retention_days: 30,
+            emails_purged: 42,
+            oldest_retained: Some("2025-12-01T00:00:00Z".into()),
+            note: Some("auto-purge".into()),
+        };
+        let json = serde_json::to_value(&entry).unwrap();
+        assert_eq!(json["id"], "audit-1");
+        assert_eq!(json["action"], "purge");
+        assert_eq!(json["userId"], "user-1");
+        assert_eq!(json["emailsPurged"], 42);
+        assert_eq!(json["oldestRetained"], "2025-12-01T00:00:00Z");
+        assert_eq!(json["note"], "auto-purge");
+        let parsed: RetentionAuditEntry = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed.action, "purge");
+        assert_eq!(parsed.emails_purged, 42);
+    }
+
+    #[test]
+    fn retention_audit_entry_optional_fields_default() {
+        let json = serde_json::json!({
+            "id": "audit-2",
+            "at": "2026-01-01T00:00:00Z",
+            "action": "config_update",
+            "userId": "user-2",
+            "retentionDays": 0,
+            "emailsPurged": 0
+        });
+        let parsed: RetentionAuditEntry = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed.oldest_retained, None);
+        assert_eq!(parsed.note, None);
+        assert_eq!(parsed.retention_days, 0);
     }
 }
