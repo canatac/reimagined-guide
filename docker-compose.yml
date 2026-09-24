@@ -75,10 +75,19 @@ services:
       - SMTP_RELAY_PORT=${SMTP_RELAY_PORT:-587}
       - SMTP_RELAY_USER=${SMTP_RELAY_USER}
       - SMTP_RELAY_PASSWORD=${SMTP_RELAY_PASSWORD}
+      - MONGODB_USERNAME=${MONGODB_USERNAME}
+      - MONGODB_PASSWORD=${MONGODB_PASSWORD}
+      - MONGODB_CLUSTER_URL=${MONGODB_CLUSTER_URL:-mongodb}
+      - MONGODB_APP_NAME=${MONGODB_APP_NAME:-mailserver}
+      - MONGODB_DATABASE=${MONGODB_DATABASE:-mailserver}
+      - USE_MONGODB=${USE_MONGODB:-true}
     command: ["email_api"]
     restart: unless-stopped
     depends_on:
-      - smtp-server
+      smtp-server:
+        condition: service_started
+      mongodb:
+        condition: service_healthy
 
   # IMAP Server
   imap-server:
