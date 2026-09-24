@@ -2,6 +2,7 @@
 #![allow(unused_imports, dead_code)]
 use actix_web::{web, HttpResponse, Responder};
 use bson::doc;
+use data_encoding::BASE32;
 use mongodb::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
