@@ -8,9 +8,10 @@
 //! - GET  /api/v1/retention/audit      — get audit log entries
 
 #![allow(unused_imports, dead_code)]
+use super::*;
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
-use chrono::Utc;
-use mongodb::bson::{self, doc};
+use bson::doc;
+use futures_util::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -74,8 +75,8 @@ async fn api_retention_policy_get(
     req: HttpRequest,
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
-    let user_id = crate::bin::email_api_dir::mailbox::folder_utils::resolve_user_id(&req);
-    let db_name = crate::bin::email_api_dir::admin_ops::ai_core::mongo_db_name();
+    let user_id = crate::resolve_user_id(&req);
+    let db_name = crate::mongo_db_name();
     let coll = mongo
         .database(&db_name)
         .collection::<bson::Document>(RETENTION_COLL);
@@ -125,13 +126,13 @@ async fn api_retention_policy_set(
     req: HttpRequest,
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
-    let user_id = crate::bin::email_api_dir::mailbox::folder_utils::resolve_user_id(&req);
-    let db_name = crate::bin::email_api_dir::admin_ops::ai_core::mongo_db_name();
+    let user_id = crate::resolve_user_id(&req);
+    let db_name = crate::mongo_db_name();
     let coll = mongo
         .database(&db_name)
         .collection::<bson::Document>(RETENTION_COLL);
 
-    let now = Utc::now().to_rfc3339();
+    let now = chrono::Utc::now().to_rfc3339();
     let retention_days = body.retention_days.unwrap_or(DEFAULT_RETENTION_DAYS);
     let auto_purge_enabled = body.auto_purge_enabled.unwrap_or(true);
 
@@ -142,12 +143,16 @@ async fn api_retention_policy_set(
         "updated_at": &now,
     };
 
-    let opts = mongodb::options::UpdateOptions::builder()
-        .upsert(true)
-        .build();
+    // Insert if not exists, then update
+    let _ = coll.insert_one(doc! {
+        "user_id": &user_id,
+        "retention_days": DEFAULT_RETENTION_DAYS,
+        "auto_purge_enabled": true,
+        "created_at": &now,
+    }).await;
 
     match coll
-        .update_one(doc! { "user_id": &user_id }, doc! { "$set": &upsert_doc }, opts)
+        .update_one(doc! { "user_id": &user_id }, doc! { "$set": &upsert_doc })
         .await
     {
         Ok(_) => {
