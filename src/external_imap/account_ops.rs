@@ -183,11 +183,25 @@ impl ExternalImapService {
         refresh_token: Option<&str>,
         expires_in: Option<i64>,
     ) -> Result<Option<ExternalImapAccount>> {
+        // Encrypt tokens at rest (issue #674 — AES-256-GCM)
+        let encrypted_access = crate::security::oauth_token_crypto::encrypt_token(access_token)
+            .unwrap_or_else(|e| {
+                log::warn!("OAuth2 access token encryption failed: {}, storing plaintext", e);
+                access_token.to_string()
+            });
+        let encrypted_refresh = refresh_token
+            .map(|rt| crate::security::oauth_token_crypto::encrypt_token(rt))
+            .transpose()
+            .unwrap_or_else(|e| {
+                log::warn!("OAuth2 refresh token encryption failed: {}, storing plaintext", e);
+                refresh_token.map(|s| s.to_string())
+            });
+
         let mut set_doc = doc! {
             "updatedAt": Utc::now(),
-            "oauthAccessToken": access_token,
+            "oauthAccessToken": encrypted_access,
         };
-        if let Some(rt) = refresh_token {
+        if let Some(rt) = encrypted_refresh {
             set_doc.insert("oauthRefreshToken", rt);
         }
         if let Some(secs) = expires_in {

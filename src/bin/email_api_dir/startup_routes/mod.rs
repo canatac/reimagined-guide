@@ -4,10 +4,12 @@
 
 mod admin;
 mod auth;
+mod compliance;
 mod dashboard;
 mod dmarc;
 mod diag;
 mod docs;
+mod e2e;
 mod external;
 mod jmap;
 mod mailbox;
@@ -19,10 +21,12 @@ mod webhook;
 
 pub(crate) use admin::register_admin_routes;
 pub(crate) use auth::register_auth_routes;
+pub(crate) use compliance::register_compliance_routes;
 pub(crate) use dashboard::register_dashboard_routes;
 pub(crate) use dmarc::register_dmarc_routes;
 pub(crate) use diag::register_diag_routes;
 pub(crate) use docs::register_docs_routes;
+pub(crate) use e2e::register_e2e_routes;
 pub(crate) use external::register_external_routes;
 pub(crate) use jmap::register_jmap_routes;
 pub(crate) use mailbox::register_mailbox_routes;

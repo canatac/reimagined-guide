@@ -94,9 +94,13 @@ async fn run_once(svc: &ExternalImapService) -> Result<()> {
                 }
             },
             Err(e) => {
+                use std::collections::hash_map::DefaultHasher;
+                use std::hash::{Hash, Hasher};
+                let mut hasher = DefaultHasher::new();
+                account.id.hash(&mut hasher);
+                let account_hash = hasher.finish();
                 eprintln!(
-                    "periodic_sync: start_sync_run failed for account {}: {e}",
-                    account.id
+                    "periodic_sync: start_sync_run failed for account-hash={account_hash:x}: {e}"
                 );
                 failed += 1;
             }

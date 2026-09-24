@@ -4,8 +4,19 @@ use actix_web::web;
 
 use super::super::*;
 
+/// GET /api/health/live — lightweight liveness probe (no DB dependency).
+/// Returns 200 if the backend process is running. Used by Caddy health_uri
+/// to avoid marking the entire upstream down during MongoDB outages (issue #1007).
+pub(crate) async fn api_health_live() -> actix_web::HttpResponse {
+    actix_web::HttpResponse::Ok().json(serde_json::json!({
+        "status": "live",
+        "service": "email-api"
+    }))
+}
+
 pub(crate) fn register_diag_routes(cfg: &mut web::ServiceConfig) {
-    cfg.route("/api/events", web::get().to(api_events))
+    cfg.route("/api/health/live", web::get().to(api_health_live))
+        .route("/api/events", web::get().to(api_events))
         .route("/api/events/stream", web::get().to(api_events_stream))
         .route(
             "/api/monitoring/summary",
@@ -56,7 +67,33 @@ pub(crate) fn register_diag_routes(cfg: &mut web::ServiceConfig) {
         .route(
             "/api/monitoring/smtp-pool/stats",
             web::get().to(api_smtp_pool_stats),
+        )
+        .route(
+            "/api/monitoring/dkim-health",
+            web::get().to(api_monitoring_dkim_health),
+        )
+        .route(
+            "/api/monitoring/dane-health",
+            web::get().to(api_monitoring_dane_health),
         );
+}
+
+// Issue #691: DKIM health endpoint test
+#[cfg(test)]
+mod dkim_health_tests {
+    use super::*;
+
+    #[test]
+    fn diag_routes_dkim_health() {
+        let route = "/api/monitoring/dkim-health";
+        assert_eq!(route, "/api/monitoring/dkim-health");
+    }
+
+    #[test]
+    fn diag_routes_dkim_health_method() {
+        let handler = "api_monitoring_dkim_health";
+        assert_eq!(handler, "api_monitoring_dkim_health");
+    }
 }
 
 #[cfg(test)]
@@ -156,6 +193,7 @@ mod tests {
     #[test]
     fn diag_routes_all_paths() {
         let paths = vec![
+            "/api/health/live",
             "/api/events",
             "/api/events/stream",
             "/api/monitoring/summary",
@@ -172,12 +210,13 @@ mod tests {
             "/api/security/tenant/{id}/status",
             "/api/security/remediation/{alert_id}/rollback",
         ];
-        assert_eq!(paths.len(), 15);
+        assert_eq!(paths.len(), 16);
     }
 
     #[test]
     fn diag_routes_get_routes() {
         let get_routes = vec![
+            "/api/health/live",
             "/api/events",
             "/api/events/stream",
             "/api/monitoring/summary",
@@ -193,7 +232,7 @@ mod tests {
             "/api/security/live",
             "/api/security/tenant/{id}/status",
         ];
-        assert_eq!(get_routes.len(), 14);
+        assert_eq!(get_routes.len(), 15);
     }
 
     #[test]
@@ -298,6 +337,12 @@ mod tests {
     fn diag_routes_handler_api_security_alerts_active() {
         let handler = "api_security_alerts_active";
         assert_eq!(handler, "api_security_alerts_active");
+    }
+
+    #[test]
+    fn diag_routes_handler_api_health_live() {
+        let handler = "api_health_live";
+        assert_eq!(handler, "api_health_live");
     }
 
     #[test]

@@ -58,12 +58,21 @@ pub(crate) async fn build_mongo_options(
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(30000);
 
+    let connect_timeout_secs = env::var("MONGODB_CONNECT_TIMEOUT_SECS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(5);
+    let heartbeat_secs = env::var("MONGODB_HEARTBEAT_SECS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(10);
+
     options.max_pool_size = Some(max_pool_size);
     options.min_pool_size = Some(min_pool_size);
     options.max_idle_time = Some(Duration::from_millis(max_idle_time_ms));
-    options.connect_timeout = Some(Duration::from_secs(5));
+    options.connect_timeout = Some(Duration::from_secs(connect_timeout_secs));
     options.server_selection_timeout = Some(Duration::from_secs(5));
-    options.heartbeat_freq = Some(Duration::from_secs(10));
+    options.heartbeat_freq = Some(Duration::from_secs(heartbeat_secs));
 
     Ok(options)
 }
@@ -164,7 +173,7 @@ pub(crate) fn build_cors_layer() -> Cors {
 }
 
 // Route registration helpers live in `startup_routes.rs`.
-use super::startup_routes::{register_admin_routes, register_auth_routes, register_dashboard_routes, register_dmarc_routes, register_diag_routes, register_docs_routes, register_external_routes, register_jmap_routes, register_mailbox_routes, register_mta_sts_routes, register_prometheus_routes, register_retention_routes, register_subscription_routes, register_webhook_routes};
+use super::startup_routes::{register_admin_routes, register_auth_routes, register_compliance_routes, register_dashboard_routes, register_dmarc_routes, register_diag_routes, register_docs_routes, register_e2e_routes, register_external_routes, register_jmap_routes, register_mailbox_routes, register_mta_sts_routes, register_prometheus_routes, register_retention_routes, register_subscription_routes, register_webhook_routes};
 
 pub(crate) fn register_http_routes(cfg: &mut web::ServiceConfig) {
     register_docs_routes(cfg);
@@ -180,7 +189,9 @@ pub(crate) fn register_http_routes(cfg: &mut web::ServiceConfig) {
     register_mta_sts_routes(cfg);
     register_jmap_routes(cfg);
     register_subscription_routes(cfg);
+    register_compliance_routes(cfg);
     register_retention_routes(cfg);
+    register_e2e_routes(cfg);
 }
 
 #[cfg(test)]
