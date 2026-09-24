@@ -1,4 +1,5 @@
 use super::*;
+use crate::smtp_client::mta_sts::{enforce_mta_sts, MtaStsResult};
 
 #[path = "mx_events.rs"]
 mod events;
@@ -199,6 +200,43 @@ pub(super) async fn send_via_mx(email: &Email) -> std::io::Result<()> {
 
     println!("Resolving MX records for domain: {}", recipient_domain);
     let (smtp_server, smtp_port, dns_ms) = resolve_mx_target(recipient_domain, &ctx, t_total, budget).await?;
+
+    // MTA-STS enforcement (RFC 8461): check policy before connecting.
+    match enforce_mta_sts(recipient_domain, &smtp_server).await {
+        Ok(MtaStsResult::TlsRequired) => {
+            println!("MTA-STS: policy requires TLS for {} (MX: {})", recipient_domain, smtp_server);
+            // If the only open port is a plaintext port, enforce TLS.
+            if smtp_port == 25 {
+                ctx.emit_bounce_soft(
+                    format!("MTA-STS: plaintext port 25 blocked by policy for {}", recipient_domain),
+                    Some(smtp_server.clone()),
+                    None,
+                    Some(t_total.elapsed().as_millis() as u64),
+                    Some(dns_ms),
+                );
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    format!("MTA-STS enforcement: {} requires TLS but only port 25 is open", recipient_domain),
+                ));
+            }
+        }
+        Ok(MtaStsResult::NoPolicy) => {
+            println!("MTA-STS: no policy for {}, proceeding", recipient_domain);
+        }
+        Err(e) => {
+            // Enforcement failure — in enforce mode, block delivery.
+            if e.kind() == std::io::ErrorKind::PermissionDenied {
+                ctx.emit_bounce_soft(
+                    format!("MTA-STS enforcement failure: {}", e),
+                    Some(smtp_server.clone()),
+                    None,
+                    Some(t_total.elapsed().as_millis() as u64),
+                    Some(dns_ms),
+                );
+                return Err(e);
+            }
+        }
+    }
 
     println!("Connecting to {}:{}", smtp_server, smtp_port);
     let t_connect = Instant::now();
