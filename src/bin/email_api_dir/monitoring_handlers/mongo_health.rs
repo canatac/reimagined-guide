@@ -37,8 +37,14 @@ pub(crate) async fn api_monitoring_mongo_health(
     let pool_min = std::env::var("MONGODB_MIN_POOL_SIZE").ok().and_then(|s| s.parse::<u32>().ok());
     let pool_idle_max_ms = std::env::var("MONGODB_MAX_IDLE_TIME_MS").ok().and_then(|s| s.parse::<u64>().ok());
     let wait_queue_timeout_ms = std::env::var("MONGODB_WAIT_QUEUE_TIMEOUT_MS").ok().and_then(|s| s.parse::<u64>().ok());
-    let connect_timeout_secs = Some(10u64);
-    let heartbeat_secs = Some(10u64);
+    let connect_timeout_secs = std::env::var("MONGODB_CONNECT_TIMEOUT_SECS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .or(Some(5));
+    let heartbeat_secs = std::env::var("MONGODB_HEARTBEAT_SECS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .or(Some(10));
 
     let response = MongoHealthResponse {
         status,
