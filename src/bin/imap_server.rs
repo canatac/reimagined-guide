@@ -43,9 +43,6 @@ async fn main() -> std::io::Result<()> {
                 opts.max_idle_time = Some(std::time::Duration::from_millis(
                     std::env::var("MONGODB_MAX_IDLE_TIME_MS").ok().and_then(|s| s.parse::<u64>().ok()).unwrap_or(30000),
                 ));
-                opts.wait_queue_timeout = Some(std::time::Duration::from_millis(
-                    std::env::var("MONGODB_WAIT_QUEUE_TIMEOUT_MS").ok().and_then(|s| s.parse::<u64>().ok()).unwrap_or(3000),
-                ));
                 opts.connect_timeout = Some(std::time::Duration::from_secs(5));
                 opts.server_selection_timeout = Some(std::time::Duration::from_secs(5));
                 opts.heartbeat_freq = Some(std::time::Duration::from_secs(10));
