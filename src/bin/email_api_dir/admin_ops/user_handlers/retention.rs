@@ -114,7 +114,6 @@ pub(crate) async fn run_auto_purge_all(mongo: &mongodb::Client) -> i64 {
     };
     // Collect configs first to avoid holding the cursor across awaits.
     let configs: Vec<RetentionPolicyConfig> = cursor.try_collect().await.unwrap_or_default();
-    drop(cursor);
     for config in configs {
         let count = purge_expired_metadata(mongo, &config.user_id, config.retention_days).await;
         if count > 0 {

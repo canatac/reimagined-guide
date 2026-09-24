@@ -9,8 +9,9 @@
 
 #![allow(unused_imports, dead_code)]
 use super::*;
-use actix_web::{web, HttpRequest, HttpResponse, Responder};
+use actix_web::{web, HttpRequest, HttpResponse, Responder;
 use bson::doc;
+use chrono::Utc;
 use futures_util::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -75,8 +76,8 @@ async fn api_retention_policy_get(
     req: HttpRequest,
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
-    let user_id = crate::resolve_user_id(&req);
-    let db_name = crate::mongo_db_name();
+    let user_id = crate::mailbox::resolve_user_id(&req);
+    let db_name = crate::admin_ops::mongo_db_name();
     let coll = mongo
         .database(&db_name)
         .collection::<bson::Document>(RETENTION_COLL);
@@ -126,8 +127,8 @@ async fn api_retention_policy_set(
     req: HttpRequest,
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
-    let user_id = crate::resolve_user_id(&req);
-    let db_name = crate::mongo_db_name();
+    let user_id = crate::mailbox::resolve_user_id(&req);
+    let db_name = crate::admin_ops::mongo_db_name();
     let coll = mongo
         .database(&db_name)
         .collection::<bson::Document>(RETENTION_COLL);
@@ -189,8 +190,8 @@ async fn api_retention_purge(
     req: HttpRequest,
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
-    let user_id = crate::bin::email_api_dir::mailbox::folder_utils::resolve_user_id(&req);
-    let db_name = crate::bin::email_api_dir::admin_ops::ai_core::mongo_db_name();
+    let user_id = crate::mailbox::resolve_user_id(&req);
+    let db_name = crate::admin_ops::mongo_db_name();
 
     // First get the user's retention policy
     let policy_coll = mongo
@@ -267,8 +268,8 @@ async fn api_retention_audit(
     req: HttpRequest,
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
-    let user_id = crate::bin::email_api_dir::mailbox::folder_utils::resolve_user_id(&req);
-    let db_name = crate::bin::email_api_dir::admin_ops::ai_core::mongo_db_name();
+    let user_id = crate::mailbox::resolve_user_id(&req);
+    let db_name = crate::admin_ops::mongo_db_name();
     let coll = mongo
         .database(&db_name)
         .collection::<bson::Document>(AUDIT_COLL);
@@ -280,7 +281,7 @@ async fn api_retention_audit(
         .await
     {
         Ok(cursor) => {
-            let docs: Vec<bson::Document> = cursor.try_collect().unwrap_or_default();
+            let docs: Vec<bson::Document> = cursor.try_collect().await.unwrap_or_default();
             let entries: Vec<serde_json::Value> = docs
                 .iter()
                 .map(|d| {
