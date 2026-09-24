@@ -27,6 +27,14 @@ mail.misfits.ai {
     reverse_proxy /api/compose localhost:3001
     reverse_proxy /api/compose/* localhost:3001
 
+    # /api/health* — rewrite to backend mongo-health endpoint (issue #930).
+    # Docker healthcheck + monitoring need this route; backend exposes
+    # /api/monitoring/mongo-health, not /api/health.
+    handle /api/health* {
+        rewrite * /api/monitoring/mongo-health
+        reverse_proxy localhost:8000
+    }
+
     # Public APIs + remaining: direct to backend (strip backend CORS headers, enforce whitelist)
     reverse_proxy /api/* localhost:8000 {
         header_down -Access-Control-Allow-Origin
