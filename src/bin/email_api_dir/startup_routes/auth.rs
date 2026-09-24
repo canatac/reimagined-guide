@@ -10,6 +10,11 @@ pub(crate) fn register_auth_routes(cfg: &mut web::ServiceConfig) {
         .route("/api/auth/logout", web::post().to(auth_logout))
         .route("/api/auth/refresh", web::post().to(auth_refresh))
         .route("/api/auth/2fa/verify", web::post().to(api_2fa_verify))
+        .route("/api/auth/2fa/setup", web::post().to(api_2fa_setup))
+        .route("/api/auth/2fa/enable", web::post().to(api_2fa_enable))
+        .route("/api/auth/2fa/disable", web::post().to(api_2fa_disable))
+        .route("/api/auth/2fa/recovery", web::post().to(api_2fa_recovery))
+        .route("/api/auth/2fa/status", web::post().to(api_2fa_status))
         .route(
             "/api/auth/password-reset/request",
             web::post().to(api_password_reset_request),
@@ -77,6 +82,36 @@ mod tests {
     fn auth_routes_2fa_verify() {
         let route = "/api/auth/2fa/verify";
         assert_eq!(route, "/api/auth/2fa/verify");
+    }
+
+    #[test]
+    fn auth_routes_2fa_setup() {
+        let route = "/api/auth/2fa/setup";
+        assert_eq!(route, "/api/auth/2fa/setup");
+    }
+
+    #[test]
+    fn auth_routes_2fa_enable() {
+        let route = "/api/auth/2fa/enable";
+        assert_eq!(route, "/api/auth/2fa/enable");
+    }
+
+    #[test]
+    fn auth_routes_2fa_disable() {
+        let route = "/api/auth/2fa/disable";
+        assert_eq!(route, "/api/auth/2fa/disable");
+    }
+
+    #[test]
+    fn auth_routes_2fa_recovery() {
+        let route = "/api/auth/2fa/recovery";
+        assert_eq!(route, "/api/auth/2fa/recovery");
+    }
+
+    #[test]
+    fn auth_routes_2fa_status() {
+        let route = "/api/auth/2fa/status";
+        assert_eq!(route, "/api/auth/2fa/status");
     }
 
     #[test]
