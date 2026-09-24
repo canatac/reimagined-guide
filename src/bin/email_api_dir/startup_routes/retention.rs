@@ -1,12 +1,13 @@
 //! Email metadata retention policy — configurable + auto-purge + audit log
-//! Issue #704: MW-2026-112
+//! Issue #701/#704: MW-2026-112
+//!
+//! ePrivacy Regulation Art.5(1)c + GDPR Art.5(1)e compliance.
 //!
 //! Provides:
 //! - GET  /api/v1/retention/policy     — get current retention policy
 //! - POST /api/v1/retention/policy     — update retention period
 //! - POST /api/v1/retention/purge      — trigger manual purge
 //! - GET  /api/v1/retention/audit      — get audit log entries
-
 #![allow(unused_imports, dead_code)]
 use super::*;
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
@@ -343,6 +344,7 @@ async fn write_audit_entry(
 
 #[cfg(test)]
 mod tests {
+
     #[test]
     fn retention_routes_policy_get_path() {
         assert_eq!(
