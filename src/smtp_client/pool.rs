@@ -283,6 +283,14 @@ async fn establish_relay_connection(
                 ),
             )
         })??;
+        // DANE: log TLSA enforcement status for observability (issue #679).
+        let dane_enforced = super::dane::has_tlsa_records(relay_host).await;
+        log::info!(
+            "SMTP relay TLS connected: {}:{} dane_enforced={}",
+            relay_host,
+            relay_port,
+            dane_enforced
+        );
         let mut s = tls_stream;
         s.write_all(format!("EHLO {}\r\n", ehlo_hostname).as_bytes())
             .await?;
