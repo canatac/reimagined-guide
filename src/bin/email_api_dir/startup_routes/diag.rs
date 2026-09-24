@@ -60,6 +60,10 @@ pub(crate) fn register_diag_routes(cfg: &mut web::ServiceConfig) {
         .route(
             "/api/monitoring/dkim-health",
             web::get().to(api_monitoring_dkim_health),
+        )
+        .route(
+            "/api/monitoring/dane-health",
+            web::get().to(api_monitoring_dane_health),
         );
 }
 

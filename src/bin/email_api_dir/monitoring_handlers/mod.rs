@@ -11,6 +11,7 @@ pub(crate) mod webhook;
 pub(crate) mod webhook_incoming;
 pub(crate) mod mongo_health;
 pub(crate) mod dkim_health;
+pub(crate) mod dane_health;
 mod smtp_pool;
 
 pub(crate) use monitoring::*;
@@ -23,6 +24,7 @@ pub(crate) use webhook::*;
 pub(crate) use webhook_incoming::*;
 pub(crate) use mongo_health::*;
 pub(crate) use dkim_health::*;
+pub(crate) use dane_health::*;
 #[allow(unused_imports)]
 pub(crate) use shared::*;
 
