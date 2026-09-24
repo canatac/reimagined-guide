@@ -52,7 +52,7 @@ const DKIM_RETRY_BASE_MS: u64 = 200;
 impl DkimService for RealDkimService {
     async fn sign_email(&self, email: &EmailRequest) -> Result<serde_json::Value, std::io::Error> {
         let dkim_service_url = env::var("DKIM_SERVICE_URL").map_err(|_| {
-            DkimError::ConfigError("DKIM_SERVICE_URL not set".to_string()).into()
+            std::io::Error::from(DkimError::ConfigError("DKIM_SERVICE_URL not set".to_string()))
         })?;
 
         let client = reqwest::Client::builder()
