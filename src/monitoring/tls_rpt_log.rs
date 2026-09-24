@@ -3,7 +3,7 @@
 //! Tracks TLS handshake success/failure per destination domain
 //! for TLS-RPT report generation (RFC 8460).
 
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -31,7 +31,7 @@ pub enum TlsFailureReason {
     StarttlsNotSupported,
     TlsaInvalid,
     DnssecInvalid,
-    stsPolicyInvalid,
+    StsPolicyInvalid,
     StsWebpkiInvalid,
     DaneRequired,
     Unknown(String),
@@ -50,7 +50,7 @@ impl std::fmt::Display for TlsFailureReason {
             TlsFailureReason::StarttlsNotSupported => write!(f, "starttls-not-supported"),
             TlsFailureReason::TlsaInvalid => write!(f, "tlsa-invalid"),
             TlsFailureReason::DnssecInvalid => write!(f, "dnssec-invalid"),
-            TlsFailureReason::stsPolicyInvalid => write!(f, "sts-policy-invalid"),
+            TlsFailureReason::StsPolicyInvalid => write!(f, "sts-policy-invalid"),
             TlsFailureReason::StsWebpkiInvalid => write!(f, "sts-webpki-invalid"),
             TlsFailureReason::DaneRequired => write!(f, "dane-required"),
             TlsFailureReason::Unknown(s) => write!(f, "{}", s),

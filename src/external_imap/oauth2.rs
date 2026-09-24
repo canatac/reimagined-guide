@@ -104,7 +104,7 @@ pub async fn refresh_oauth2_token(
         "grant_type=refresh_token&client_id={}&client_secret={}&refresh_token={}",
         urlencoding::encode(&config.client_id),
         urlencoding::encode(&config.client_secret),
-        urlencoding::encode(refresh_token),
+        urlencoding::encode(&refresh_token),
     );
 
     let response = client

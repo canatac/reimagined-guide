@@ -8,7 +8,7 @@
 //! from `JWT_SECRET` via HKDF-SHA256 (fallback for dev only).
 
 use aes_gcm::{
-    aead::{Aead, KeyInit, OsRng},
+    aead::{Aead, KeyInit},
     Aes256Gcm, Key, Nonce,
 };
 use base64::engine::Engine;
