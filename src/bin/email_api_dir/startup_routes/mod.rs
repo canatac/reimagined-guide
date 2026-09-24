@@ -4,6 +4,7 @@
 
 mod admin;
 mod auth;
+mod compliance;
 mod dashboard;
 mod dmarc;
 mod diag;
@@ -18,6 +19,7 @@ mod webhook;
 
 pub(crate) use admin::register_admin_routes;
 pub(crate) use auth::register_auth_routes;
+pub(crate) use compliance::register_compliance_routes;
 pub(crate) use dashboard::register_dashboard_routes;
 pub(crate) use dmarc::register_dmarc_routes;
 pub(crate) use diag::register_diag_routes;
