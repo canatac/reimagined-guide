@@ -9,6 +9,7 @@ pub mod alert;
 pub mod audit;
 pub mod auth_event;
 pub mod bus;
+pub mod oauth_token_crypto;
 pub mod remediation;
 pub mod rules;
 pub mod e2e;
