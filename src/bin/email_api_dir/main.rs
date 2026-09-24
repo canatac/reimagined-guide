@@ -95,8 +95,8 @@ use mongodb::bson;
 use mongodb::bson::doc;
 use reqwest;
 use simple_smtp_server::entities::{
-    AdminUserActivity, AdminUserRecord, CalendarEvent, ChangeRequestItem, Email, WorkflowEvent,
-    WorkflowStage,
+    AdminUserActivity, AdminUserRecord, CalendarEvent, ChangeRequestItem, Email,
+    RetentionPolicyConfig, RetentionAuditEntry, WorkflowEvent, WorkflowStage,
 };
 use simple_smtp_server::external_imap::{
     CreateExternalAccountInput, ExternalAccountCredentials, ExternalFolderMappingInput,
