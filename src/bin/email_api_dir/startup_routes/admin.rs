@@ -82,6 +82,22 @@ pub(crate) fn register_admin_routes(cfg: &mut web::ServiceConfig) {
         .route(
             "/api/admin/tls-rpt/alerts",
             web::get().to(api_admin_tls_rpt_alerts),
+        )
+        .route(
+            "/api/admin/retention-policy",
+            web::get().to(api_get_retention_policy),
+        )
+        .route(
+            "/api/admin/retention-policy",
+            web::put().to(api_update_retention_policy),
+        )
+        .route(
+            "/api/admin/retention-policy/purge",
+            web::post().to(api_trigger_purge),
+        )
+        .route(
+            "/api/admin/retention-audit",
+            web::get().to(api_retention_audit_log),
         );
 }
 

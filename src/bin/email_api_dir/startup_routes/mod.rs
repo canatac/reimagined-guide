@@ -14,6 +14,7 @@ mod jmap;
 mod mailbox;
 mod mta_sts;
 mod prometheus;
+mod retention;
 mod subscription;
 mod webhook;
 
@@ -29,6 +30,7 @@ pub(crate) use jmap::register_jmap_routes;
 pub(crate) use mailbox::register_mailbox_routes;
 pub(crate) use mta_sts::register_mta_sts_routes;
 pub(crate) use prometheus::register_prometheus_routes;
+pub(crate) use retention::register_retention_routes;
 pub(crate) use subscription::register_subscription_routes;
 pub(crate) use webhook::register_webhook_routes;
 
