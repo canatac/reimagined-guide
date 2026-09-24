@@ -236,10 +236,24 @@ pub(crate) async fn apply_dkim_signature(
         }
         Err(e) => {
             eprintln!("DKIM service error on /api/send: {}", e);
-            Err(HttpResponse::InternalServerError().json(serde_json::json!({
-                "sent": false,
-                "message": format!("Failed to generate DKIM signature: {}", e),
-            })))
+            // Issue #691: distinguish unreachable (retryable) from signing failure (non-retryable).
+            // TimedOut = network/timeout from our retry loop → 503 + Retry-After.
+            // Other = 4xx from DKIM service or JSON parse error → 500 (client must fix input).
+            if e.kind() == std::io::ErrorKind::TimedOut {
+                Err(HttpResponse::ServiceUnavailable()
+                    .insert_header(("Retry-After", "5"))
+                    .json(serde_json::json!({
+                        "sent": false,
+                        "retryable": true,
+                        "message": format!("DKIM service temporarily unavailable: {}", e),
+                    })))
+            } else {
+                Err(HttpResponse::InternalServerError().json(serde_json::json!({
+                    "sent": false,
+                    "retryable": false,
+                    "message": format!("Failed to generate DKIM signature: {}", e),
+                })))
+            }
         }
     }
 }
