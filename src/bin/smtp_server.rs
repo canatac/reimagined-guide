@@ -244,19 +244,25 @@ async fn init_mongo_client(client_uri: &str) -> Result<Arc<mongodb::Client>, Mai
 }
 
 /// Build MongoDB client options with connection pool configuration.
+/// Conservative defaults to prevent socat fork leak from exhausting
+/// MongoDB connection backlog (issue #930).
 async fn build_mongo_options(client_uri: &str) -> Result<mongodb::options::ClientOptions, mongodb::error::Error> {
     let mut options = mongodb::options::ClientOptions::parse(client_uri).await?;
     let max_pool_size = std::env::var("MONGODB_MAX_POOL_SIZE")
-        .ok().and_then(|s| s.parse::<u32>().ok()).unwrap_or(50);
-    let min_pool_size = std::env::var("MONGODB_MIN_POOL_SIZE")
         .ok().and_then(|s| s.parse::<u32>().ok()).unwrap_or(10);
-    let _max_idle_time_ms = std::env::var("MONGODB_MAX_IDLE_TIME_MS")
-        .ok().and_then(|s| s.parse::<u64>().ok()).unwrap_or(60000);
+    let min_pool_size = std::env::var("MONGODB_MIN_POOL_SIZE")
+        .ok().and_then(|s| s.parse::<u32>().ok()).unwrap_or(2);
+    let max_idle_time_ms = std::env::var("MONGODB_MAX_IDLE_TIME_MS")
+        .ok().and_then(|s| s.parse::<u64>().ok()).unwrap_or(30000);
+    let wait_queue_timeout_ms = std::env::var("MONGODB_WAIT_QUEUE_TIMEOUT_MS")
+        .ok().and_then(|s| s.parse::<u64>().ok()).unwrap_or(3000);
 
     options.max_pool_size = Some(max_pool_size);
     options.min_pool_size = Some(min_pool_size);
-    options.max_idle_time = Some(std::time::Duration::from_millis(_max_idle_time_ms));
-    options.connect_timeout = Some(std::time::Duration::from_secs(10));
+    options.max_idle_time = Some(std::time::Duration::from_millis(max_idle_time_ms));
+    options.wait_queue_timeout = Some(std::time::Duration::from_millis(wait_queue_timeout_ms));
+    options.connect_timeout = Some(std::time::Duration::from_secs(5));
+    options.server_selection_timeout = Some(std::time::Duration::from_secs(5));
     options.heartbeat_freq = Some(std::time::Duration::from_secs(10));
 
     Ok(options)

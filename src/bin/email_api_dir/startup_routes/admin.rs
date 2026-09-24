@@ -70,6 +70,18 @@ pub(crate) fn register_admin_routes(cfg: &mut web::ServiceConfig) {
         .route(
             "/api/admin/observability/overview",
             web::get().to(api_admin_observability_overview),
+        )
+        .route(
+            "/api/admin/tls-rpt/summary",
+            web::get().to(api_admin_tls_rpt_summary),
+        )
+        .route(
+            "/api/admin/tls-rpt/domains/{domain}",
+            web::get().to(api_admin_tls_rpt_domain),
+        )
+        .route(
+            "/api/admin/tls-rpt/alerts",
+            web::get().to(api_admin_tls_rpt_alerts),
         );
 }
 
