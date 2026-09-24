@@ -98,18 +98,10 @@ pub async fn validate_dane_for_domain(
     domain: &str,
     cert: &rustls::pki_types::CertificateDer<'_>,
 ) -> Result<(), String> {
-    simple_smtp_server::smtp_client::dane::validate_server_cert_dane(domain, cert)
-        .await
-        .into()
-}
-
-impl From<simple_smtp_server::smtp_client::dane::DaneValidationResult> for Result<(), String> {
-    fn from(result: simple_smtp_server::smtp_client::dane::DaneValidationResult) -> Self {
-        use simple_smtp_server::smtp_client::dane::DaneValidationResult::*;
-        match result {
-            Valid | NoRecords => Ok(()),
-            ValidationFailed(msg) => Err(msg),
-        }
+    use simple_smtp_server::smtp_client::dane::DaneValidationResult;
+    match simple_smtp_server::smtp_client::dane::validate_server_cert_dane(domain, cert).await {
+        DaneValidationResult::Valid | DaneValidationResult::NoRecords => Ok(()),
+        DaneValidationResult::ValidationFailed(msg) => Err(msg),
     }
 }
 
