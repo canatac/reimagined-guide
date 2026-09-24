@@ -87,8 +87,10 @@ pub async fn refresh_oauth2_token(
     let config = provider_config(&account.provider)
         .ok_or_else(|| format!("Unsupported OAuth2 provider: {}", account.provider))?;
 
-    let refresh_token = account.oauth_refresh_token.as_ref()
+    // Decrypt refresh token if encrypted at rest (issue #674)
+    let refresh_token_enc = account.oauth_refresh_token.as_ref()
         .ok_or_else(|| "No refresh token available for account".to_string())?;
+    let refresh_token = crate::security::oauth_token_crypto::decrypt_token_compat(refresh_token_enc);
 
     if config.client_id.is_empty() || config.client_secret.is_empty() {
         return Err(format!(
