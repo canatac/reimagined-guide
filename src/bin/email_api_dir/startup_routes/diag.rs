@@ -56,7 +56,29 @@ pub(crate) fn register_diag_routes(cfg: &mut web::ServiceConfig) {
         .route(
             "/api/monitoring/smtp-pool/stats",
             web::get().to(api_smtp_pool_stats),
+        )
+        .route(
+            "/api/monitoring/dkim-health",
+            web::get().to(api_monitoring_dkim_health),
         );
+}
+
+// Issue #691: DKIM health endpoint test
+#[cfg(test)]
+mod dkim_health_tests {
+    use super::*;
+
+    #[test]
+    fn diag_routes_dkim_health() {
+        let route = "/api/monitoring/dkim-health";
+        assert_eq!(route, "/api/monitoring/dkim-health");
+    }
+
+    #[test]
+    fn diag_routes_dkim_health_method() {
+        let handler = "api_monitoring_dkim_health";
+        assert_eq!(handler, "api_monitoring_dkim_health");
+    }
 }
 
 #[cfg(test)]

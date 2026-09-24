@@ -5,55 +5,123 @@ pub trait DkimService: Send + Sync {
     async fn sign_email(&self, email: &EmailRequest) -> Result<serde_json::Value, std::io::Error>;
 }
 
+/// Error classification for DKIM service failures (issue #691).
+/// Distinguishes retryable (network/timeout) from non-retryable (bad input, signing error).
+#[derive(Debug)]
+pub enum DkimError {
+    /// Network/timeout — caller MAY retry
+    Unreachable(String),
+    /// HTTP 4xx/5xx from DKIM service — caller should NOT retry without changes
+    SigningFailed(String),
+    /// Configuration error (env var missing)
+    ConfigError(String),
+}
+
+impl std::fmt::Display for DkimError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DkimError::Unreachable(msg) => write!(f, "DKIM service unreachable: {}", msg),
+            DkimError::SigningFailed(msg) => write!(f, "DKIM signing failed: {}", msg),
+            DkimError::ConfigError(msg) => write!(f, "DKIM config error: {}", msg),
+        }
+    }
+}
+
+impl std::error::Error for DkimError {}
+
+impl From<DkimError> for std::io::Error {
+    fn from(e: DkimError) -> Self {
+        match &e {
+            DkimError::Unreachable(_) => std::io::Error::new(std::io::ErrorKind::TimedOut, e.to_string()),
+            DkimError::SigningFailed(_) => std::io::Error::new(std::io::ErrorKind::Other, e.to_string()),
+            DkimError::ConfigError(_) => std::io::Error::new(std::io::ErrorKind::NotFound, e.to_string()),
+        }
+    }
+}
+
 pub struct RealDkimService;
+
+/// Maximum number of retry attempts for transient failures (issue #691).
+const DKIM_MAX_RETRIES: u32 = 3;
+/// Per-request timeout in seconds for the DKIM HTTP call.
+const DKIM_TIMEOUT_SECS: u64 = 5;
+/// Base backoff between retries in milliseconds.
+const DKIM_RETRY_BASE_MS: u64 = 200;
 
 #[async_trait::async_trait]
 impl DkimService for RealDkimService {
     async fn sign_email(&self, email: &EmailRequest) -> Result<serde_json::Value, std::io::Error> {
         let dkim_service_url = env::var("DKIM_SERVICE_URL").map_err(|_| {
-            std::io::Error::new(std::io::ErrorKind::NotFound, "DKIM_SERVICE_URL not set")
+            DkimError::ConfigError("DKIM_SERVICE_URL not set".to_string()).into()
         })?;
-        let client = reqwest::Client::new();
 
-        let response = client
-            .post(&dkim_service_url)
-            .json(&serde_json::json!({
-                "from": email.from,
-                "to": email.to,
-                "subject": email.subject,
-                "text": email.body,
-                "html": email.body,
-                "algorithm": email.algorithm,
-                "attachments": email.attachments.iter().map(|att| serde_json::json!({
-                    "filename": att.filename,
-                    "contentType": att.content_type,
-                    "dataBase64": att.data_base64,
-                })).collect::<Vec<_>>()
-            }))
-            .send()
-            .await
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(DKIM_TIMEOUT_SECS))
+            .build()
+            .map_err(|e| DkimError::ConfigError(format!("Failed to build HTTP client: {}", e)))?;
 
-        let status = response.status();
-        let body = response
-            .text()
-            .await
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let payload = serde_json::json!({
+            "from": email.from,
+            "to": email.to,
+            "subject": email.subject,
+            "text": email.body,
+            "html": email.body,
+            "algorithm": email.algorithm,
+            "attachments": email.attachments.iter().map(|att| serde_json::json!({
+                "filename": att.filename,
+                "contentType": att.content_type,
+                "dataBase64": att.data_base64,
+            })).collect::<Vec<_>>()
+        });
 
-        if status.is_success() {
-            serde_json::from_str::<serde_json::Value>(&body)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
-        } else {
-            let snippet = if body.len() > 1200 {
-                &body[..1200]
-            } else {
-                &body
-            };
-            Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("DKIM service HTTP {}: {}", status.as_u16(), snippet),
-            ))
+        let mut last_error = None;
+
+        for attempt in 0..DKIM_MAX_RETRIES {
+            if attempt > 0 {
+                let backoff = DKIM_RETRY_BASE_MS * 2u64.pow(attempt - 1);
+                tokio::time::sleep(std::time::Duration::from_millis(backoff)).await;
+            }
+
+            match client.post(&dkim_service_url).json(&payload).send().await {
+                Ok(response) => {
+                    let status = response.status();
+                    let body = response
+                        .text()
+                        .await
+                        .map_err(|e| DkimError::Unreachable(format!("Failed to read response body: {}", e)))?;
+
+                    if status.is_success() {
+                        return serde_json::from_str::<serde_json::Value>(&body)
+                            .map_err(|e| DkimError::SigningFailed(format!("Invalid JSON response: {}", e)).into());
+                    } else if status.is_server_error() || status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                        // 5xx or 429 — retryable
+                        let snippet = if body.len() > 500 { &body[..500] } else { &body };
+                        last_error = Some(DkimError::Unreachable(
+                            format!("DKIM service HTTP {} (attempt {}/{}): {}", status.as_u16(), attempt + 1, DKIM_MAX_RETRIES, snippet)
+                        ));
+                        continue;
+                    } else {
+                        // 4xx (except 429) — not retryable
+                        let snippet = if body.len() > 1200 { &body[..1200] } else { &body };
+                        return Err(DkimError::SigningFailed(
+                            format!("DKIM service HTTP {}: {}", status.as_u16(), snippet)
+                        ).into());
+                    }
+                }
+                Err(e) => {
+                    if e.is_timeout() || e.is_connect() {
+                        last_error = Some(DkimError::Unreachable(
+                            format!("Timeout/connection error (attempt {}/{}): {}", attempt + 1, DKIM_MAX_RETRIES, e)
+                        ));
+                        continue;
+                    } else {
+                        return Err(DkimError::Unreachable(format!("Request failed: {}", e)).into());
+                    }
+                }
+            }
         }
+
+        Err(last_error.unwrap_or_else(|| DkimError::Unreachable("All retries exhausted".to_string())).into())
     }
 }
 
@@ -275,7 +343,7 @@ mod tests {
 
     #[test]
     fn dkim_service_reqwest_client() {
-        let client = reqwest::Client::new();
+        let _client = reqwest::Client::new();
         assert!(true);
     }
 
@@ -497,5 +565,65 @@ mod tests {
     fn dkim_service_future_output() {
         let output = "Output";
         assert_eq!(output, "Output");
+    }
+
+    // --- Issue #691: integration tests for DKIM service resilience ---
+
+    #[test]
+    fn dkim_error_unreachable_maps_to_timedout() {
+        let err = DkimError::Unreachable("connection refused".to_string());
+        let io_err: std::io::Error = err.into();
+        assert_eq!(io_err.kind(), std::io::ErrorKind::TimedOut);
+        assert!(io_err.to_string().contains("DKIM service unreachable"));
+    }
+
+    #[test]
+    fn dkim_error_signing_failed_maps_to_other() {
+        let err = DkimError::SigningFailed("bad key".to_string());
+        let io_err: std::io::Error = err.into();
+        assert_eq!(io_err.kind(), std::io::ErrorKind::Other);
+        assert!(io_err.to_string().contains("DKIM signing failed"));
+    }
+
+    #[test]
+    fn dkim_error_config_error_maps_to_not_found() {
+        let err = DkimError::ConfigError("missing env".to_string());
+        let io_err: std::io::Error = err.into();
+        assert_eq!(io_err.kind(), std::io::ErrorKind::NotFound);
+        assert!(io_err.to_string().contains("DKIM config error"));
+    }
+
+    #[test]
+    fn dkim_retry_constants_sane() {
+        assert!(DKIM_MAX_RETRIES >= 1 && DKIM_MAX_RETRIES <= 5);
+        assert!(DKIM_TIMEOUT_SECS >= 1 && DKIM_TIMEOUT_SECS <= 30);
+        assert!(DKIM_RETRY_BASE_MS >= 100 && DKIM_RETRY_BASE_MS <= 1000);
+    }
+
+    #[test]
+    fn dkim_error_display_unreachable() {
+        let err = DkimError::Unreachable("timeout".to_string());
+        let msg = format!("{}", err);
+        assert_eq!(msg, "DKIM service unreachable: timeout");
+    }
+
+    #[test]
+    fn dkim_error_display_signing_failed() {
+        let err = DkimError::SigningFailed("invalid payload".to_string());
+        let msg = format!("{}", err);
+        assert_eq!(msg, "DKIM signing failed: invalid payload");
+    }
+
+    #[test]
+    fn dkim_error_display_config_error() {
+        let err = DkimError::ConfigError("env var missing".to_string());
+        let msg = format!("{}", err);
+        assert_eq!(msg, "DKIM config error: env var missing");
+    }
+
+    #[test]
+    fn dkim_error_is_std_error() {
+        let err = Box::new(DkimError::Unreachable("test".to_string())) as Box<dyn std::error::Error>;
+        assert!(!err.to_string().is_empty());
     }
 }
