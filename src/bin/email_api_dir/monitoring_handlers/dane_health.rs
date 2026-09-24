@@ -46,7 +46,7 @@ pub(crate) async fn api_monitoring_dane_health(
     DANE_CHECKS_TOTAL.fetch_add(1, Ordering::Relaxed);
 
     // Use the existing DANE module to check TLSA records
-    match crate::smtp_client::dane::lookup_tlsa_records(&domain).await {
+    match simple_smtp_server::smtp_client::dane::lookup_tlsa_records(&domain).await {
         Ok(records) if !records.is_empty() => {
             DANE_ENFORCED_TOTAL.fetch_add(1, Ordering::Relaxed);
             HttpResponse::Ok().json(DaneHealthResponse {
@@ -88,7 +88,7 @@ pub async fn should_enforce_dane(domain: &str) -> bool {
     if domain.is_empty() {
         return false;
     }
-    crate::smtp_client::dane::has_tlsa_records(domain).await
+    simple_smtp_server::smtp_client::dane::has_tlsa_records(domain).await
 }
 
 /// Validate a server certificate against DANE TLSA records for a domain.
@@ -98,14 +98,14 @@ pub async fn validate_dane_for_domain(
     domain: &str,
     cert: &rustls::pki_types::CertificateDer<'_>,
 ) -> Result<(), String> {
-    crate::smtp_client::dane::validate_server_cert_dane(domain, cert)
+    simple_smtp_server::smtp_client::dane::validate_server_cert_dane(domain, cert)
         .await
         .into()
 }
 
-impl From<crate::smtp_client::dane::DaneValidationResult> for Result<(), String> {
-    fn from(result: crate::smtp_client::dane::DaneValidationResult) -> Self {
-        use crate::smtp_client::dane::DaneValidationResult::*;
+impl From<simple_smtp_server::smtp_client::dane::DaneValidationResult> for Result<(), String> {
+    fn from(result: simple_smtp_server::smtp_client::dane::DaneValidationResult) -> Self {
+        use simple_smtp_server::smtp_client::dane::DaneValidationResult::*;
         match result {
             Valid | NoRecords => Ok(()),
             ValidationFailed(msg) => Err(msg),
