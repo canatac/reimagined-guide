@@ -42,23 +42,27 @@ pub(crate) async fn build_mongo_options(
     client_uri: &str,
 ) -> Result<ClientOptions, mongodb::error::Error> {
     let mut options = ClientOptions::parse(client_uri).await?;
+    // Conservative pool defaults to prevent socat fork leak from exhausting
+    // MongoDB connection backlog (issue #930). Each container should keep
+    // its connection count low when MongoDB is reached via host socat forward.
     let max_pool_size = env::var("MONGODB_MAX_POOL_SIZE")
         .ok()
         .and_then(|s| s.parse::<u32>().ok())
-        .unwrap_or(50);
+        .unwrap_or(10);
     let min_pool_size = env::var("MONGODB_MIN_POOL_SIZE")
         .ok()
         .and_then(|s| s.parse::<u32>().ok())
-        .unwrap_or(10);
+        .unwrap_or(2);
     let max_idle_time_ms = env::var("MONGODB_MAX_IDLE_TIME_MS")
         .ok()
         .and_then(|s| s.parse::<u64>().ok())
-        .unwrap_or(60000);
+        .unwrap_or(30000);
 
     options.max_pool_size = Some(max_pool_size);
     options.min_pool_size = Some(min_pool_size);
     options.max_idle_time = Some(Duration::from_millis(max_idle_time_ms));
-    options.connect_timeout = Some(Duration::from_secs(10));
+    options.connect_timeout = Some(Duration::from_secs(5));
+    options.server_selection_timeout = Some(Duration::from_secs(5));
     options.heartbeat_freq = Some(Duration::from_secs(10));
 
     Ok(options)
