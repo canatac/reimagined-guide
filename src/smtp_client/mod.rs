@@ -189,7 +189,7 @@ enum StreamType {
 
 // Sous-modules extraits pour clean code (refactor architecte).
 mod body_utils;
-mod dane;
+pub mod dane;
 mod discovery;
 mod mx;
 pub mod pool;
