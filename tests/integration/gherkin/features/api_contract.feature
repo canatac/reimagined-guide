@@ -43,3 +43,17 @@ Feature: reimagined-guide API/UI contract integrity
     And require_admin must reject when RBAC enabled and no token
     And docker-compose must set ADMIN_RBAC_ENFORCE
 
+  # ============================================================
+  # MW-2026-022: IMAP external account sync feeds unified inbox (issue #626)
+  # ============================================================
+
+  Scenario: IMAP external account sync feeds unified inbox (MW-2026-022)
+    Given the source file "src/bin/email_api_dir/mailbox/unified_handlers.rs" is loaded
+    And the source file "src/external_imap/periodic_sync.rs" is loaded
+    And the source file "src/bin/email_api_dir/startup_routes/mailbox.rs" is loaded
+    When I inspect the unified inbox contract
+    Then unified inbox must merge native and external account emails
+    And periodic sync worker must be present for external accounts
+    And unified inbox route must expose external account messages
+    And external messages must carry account_type and account_email metadata
+
