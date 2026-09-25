@@ -12,13 +12,11 @@ const KEY_LEN: usize = 32; // 256 bits
 const NONCE_LEN: usize = 12; // 96 bits for GCM
 
 /// Derive a 256-bit key from the environment variable.
-/// The env var should contain a base64-encoded 32-byte key.
-/// If not set, generates a deterministic key from a development seed.
+/// The env var must contain a base64-encoded 32-byte key.
+/// Panics if not set — no hardcoded fallback (CodeQL: rust/hard-coded-cryptographic-value).
 fn get_encryption_key() -> [u8; KEY_LEN] {
-    let key_str = std::env::var("OAUTH_ENCRYPTION_KEY").unwrap_or_else(|_| {
-        // Dev fallback — NOT for production
-        "ZGV2LW9ubHkta2V5LWNoYW5nZS1pbi1wcm9k".to_string() // base64("dev-only-key-change-in-pad")
-    });
+    let key_str = std::env::var("OAUTH_ENCRYPTION_KEY")
+        .expect("OAUTH_ENCRYPTION_KEY env var must be set (base64-encoded 32-byte key)");
 
     let decoded = STANDARD.decode(&key_str).unwrap_or_else(|_| {
         // If not valid base64, hash the string to get 32 bytes
@@ -93,9 +91,16 @@ pub fn reencrypt_token(encrypted_b64: &str, old_key: &str, new_key: &str) -> Res
 mod tests {
     use super::*;
 
+    /// Generate a random 32-byte key for tests (avoids hardcoded cryptographic values).
+    fn set_random_test_key() {
+        let random_key: [u8; KEY_LEN] = aes_gcm::aead::rand_core::RngCore::generate::<[u8; KEY_LEN]>(&mut OsRng);
+        let encoded = STANDARD.encode(&random_key);
+        std::env::set_var("OAUTH_ENCRYPTION_KEY", &encoded);
+    }
+
     #[test]
     fn test_encrypt_decrypt_roundtrip() {
-        std::env::set_var("OAUTH_ENCRYPTION_KEY", "dGVzdC1rZXktMzItYnl0ZXktZm9yLWFpZQ"); // 32-byte base64
+        set_random_test_key();
         let original = "ya29.a0test-access-token-value";
         let encrypted = encrypt_token(original).expect("encrypt");
         assert_ne!(encrypted, original);
@@ -106,7 +111,7 @@ mod tests {
 
     #[test]
     fn test_encrypt_produces_different_ciphertexts() {
-        std::env::set_var("OAUTH_ENCRYPTION_KEY", "dGVzdC1rZXktMzItYnl0ZXktZm9yLWFpZQ");
+        set_random_test_key();
         let token = "same-token-value";
         let enc1 = encrypt_token(token).expect("encrypt1");
         let enc2 = encrypt_token(token).expect("encrypt2");
@@ -119,14 +124,14 @@ mod tests {
 
     #[test]
     fn test_decrypt_invalid_base64() {
-        std::env::set_var("OAUTH_ENCRYPTION_KEY", "dGVzdC1rZXktMzItYnl0ZXktZm9yLWFpZQ");
+        set_random_test_key();
         let result = decrypt_token("!!!invalid-base64!!!");
         assert!(result.is_err());
     }
 
     #[test]
     fn test_decrypt_tampered_ciphertext() {
-        std::env::set_var("OAUTH_ENCRYPTION_KEY", "dGVzdC1rZXktMzItYnl0ZXktZm9yLWFpZQ");
+        set_random_test_key();
         let original = "secret-token";
         let encrypted = encrypt_token(original).expect("encrypt");
 
@@ -144,7 +149,7 @@ mod tests {
     #[test]
     fn test_key_from_arbitrary_string() {
         // Key that's not valid base64 — should be hashed
-        std::env::set_var("OAUTH_ENCRYPTION_KEY", "my-secret-passphrase");
+        std::env::set_var("OAUTH_ENCRYPTION_KEY", "my-secret-passphrase-test");
         let token = "test-token-123";
         let encrypted = encrypt_token(token).expect("encrypt");
         let decrypted = decrypt_token(&encrypted).expect("decrypt");
