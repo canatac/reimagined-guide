@@ -10,6 +10,7 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 
 const KEY_LEN: usize = 32; // 256 bits
 const NONCE_LEN: usize = 12; // 96 bits for GCM
+const HKDF_INFO: &[u8] = b"oauth2-token-encryption-v1"; // key domain separator
 
 /// Derive a 256-bit key from the environment variable via HKDF-SHA256.
 /// The env var must contain a base64-encoded value (any length ≥ 16 bytes recommended).
@@ -25,7 +26,7 @@ fn get_encryption_key() -> Option<[u8; KEY_LEN]> {
     use hkdf::Hkdf;
     let hk = Hkdf::<Sha256>::new(None, &ikm);
     let mut okm = [0u8; KEY_LEN];
-    hk.expand(b"oauth2-token-encryption-v1", &mut okm)
+    hk.expand(HKDF_INFO, &mut okm)
         .expect("HKDF expand for 32 bytes cannot fail");
     Some(okm)
 }
