@@ -40,7 +40,8 @@ pub fn encrypt_token(plaintext: &str) -> Result<String, String> {
     let cipher = Aes256Gcm::new_from_slice(&key)
         .map_err(|e| format!("key init failed: {}", e))?;
 
-    let nonce_bytes = aes_gcm::aead::rand_core::RngCore::generate::<[u8; NONCE_LEN]>(&mut OsRng);
+    let mut nonce_bytes = [0u8; NONCE_LEN];
+    aes_gcm::aead::rand_core::RngCore::fill_bytes(&mut OsRng, &mut nonce_bytes);
     let nonce = Nonce::from_slice(&nonce_bytes);
 
     let ciphertext = cipher

@@ -88,7 +88,7 @@ pub use mailbox::*;
 pub use admin_ops::*;
 pub use external_handlers::*;
 pub use jmap::*;
-pub use oauth2_handlers::*;
+// pub use oauth2_handlers::*; // disabled: functions moved to external_handlers/oauth2.rs
 
 use sha1::Sha1;
 

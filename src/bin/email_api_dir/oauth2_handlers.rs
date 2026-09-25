@@ -2,13 +2,13 @@
 //! Implements RFC 7628 (OAuth 2.0 for IMAP) with XOAUTH2 SASL mechanism.
 //! Supports Google (Gmail), Microsoft (Outlook), and Yahoo providers.
 
-use super::super::*;
-use crate::oauth2_crypto;
-use crate::oauth2_providers::{
+use super::*;
+use super::oauth2_crypto;
+use super::oauth2_providers::{
     self, OAuth2CallbackInput, OAuth2CallbackResponse, OAuth2StartAuthInput,
     OAuth2StartAuthResponse, OAuth2TokenStatus, StoredOAuth2Token,
 };
-use actix_web::{HttpRequest, HttpResponse, Responder};
+use actix_web::{web, HttpRequest, HttpResponse, Responder};
 use mongodb::bson::doc;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -292,6 +292,10 @@ pub(crate) async fn api_oauth2_callback(
         credentials: Some(ExternalAccountCredentials {
             secret_value: None, // Tokens stored separately encrypted
             secret_ref: Some(format!("oauth2:{}", account_id)),
+            oauth_access_token: None,
+            oauth_refresh_token: None,
+            oauth_token_expires_at: None,
+            oauth_scopes: None,
         }),
     };
 
