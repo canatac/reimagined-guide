@@ -8,6 +8,7 @@ pub(crate) mod register;
 pub(crate) mod password_reset;
 pub(crate) mod oauth;
 pub(crate) mod totp;
+pub(crate) mod two_factor;
 pub(crate) mod gdpr;
 pub(crate) mod anonymous_register;
 
@@ -17,6 +18,7 @@ pub(crate) use register::*;
 pub(crate) use password_reset::*;
 pub(crate) use oauth::*;
 pub(crate) use totp::*;
+pub(crate) use two_factor::*;
 pub(crate) use gdpr::*;
 pub(crate) use anonymous_register::*;
 

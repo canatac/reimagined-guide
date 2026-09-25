@@ -87,8 +87,39 @@ pub(crate) async fn auth_login(
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
     let locale = i18n::resolve_locale(&get_accept_language(&req_http), None);
+    // Helper: check if user has TOTP 2FA enabled in MongoDB.
+    let totp_enabled_db = || async {
+        let db_name = std::env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
+        let db = mongo.database(&db_name);
+        let email_lc = req.email.trim().to_lowercase();
+        // Check users collection
+        let coll = db.collection::<bson::Document>("users");
+        let local = req.email.split('@').next().unwrap_or(&req.email);
+        if let Ok(Some(doc)) = coll.find_one(doc! { "$or": [{ "username": local }, { "username": &req.email }] }).await {
+            if doc.get_bool("totp_enabled").unwrap_or(false) {
+                return true;
+            }
+        }
+        // Check admin_users collection
+        let admin_coll = db.collection::<bson::Document>("admin_users");
+        if let Ok(Some(doc)) = admin_coll.find_one(doc! { "$or": [{ "email": &email_lc }, { "email": &req.email }] }).await {
+            if doc.get_bool("totp_enabled").unwrap_or(false) {
+                return true;
+            }
+        }
+        false
+    };
+
     match logic.authenticate_user(&req.email, &req.password).await {
         Ok(Some(user)) => {
+            // Issue 2FA: if TOTP enabled, return 202 + requires_2fa (no session yet).
+            if totp_enabled_db().await {
+                return HttpResponse::Accepted().json(serde_json::json!({
+                    "requires_2fa": true,
+                    "message": "Password correct. Provide TOTP code or recovery code.",
+                    "methods": ["totp", "recovery"]
+                }));
+            }
             let display = if user.mailbox.is_empty() { req.email.clone() } else { user.mailbox.clone() };
             let response = match issue_session_if_admin(mongo.as_ref(), &req.email).await {
                 Some(token) => make_session_with_token(&req.email, &display, &token),
@@ -111,6 +142,14 @@ pub(crate) async fn auth_login(
             let env_pass = env::var("SMTP_PASSWORD").unwrap_or_default();
             if req.email == env_user || req.email == format!("{}@misfits.ai", env_user) {
                 if req.password == env_pass {
+                    // Issue 2FA: env-admin with TOTP enabled also requires 2FA step.
+                    if totp_enabled_db().await {
+                        return HttpResponse::Accepted().json(serde_json::json!({
+                            "requires_2fa": true,
+                            "message": "Password correct. Provide TOTP code or recovery code.",
+                            "methods": ["totp", "recovery"]
+                        }));
+                    }
                     let response = match issue_session_if_admin(mongo.as_ref(), &req.email).await {
                         Some(token) => make_session_with_token(&req.email, &env_user, &token),
                         None => make_session(&req.email, &env_user),
