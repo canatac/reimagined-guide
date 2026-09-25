@@ -11,32 +11,28 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 const KEY_LEN: usize = 32; // 256 bits
 const NONCE_LEN: usize = 12; // 96 bits for GCM
 
-/// Derive a 256-bit key from the environment variable.
-/// The env var should contain a base64-encoded 32-byte key.
-/// If not set, generates a deterministic key from a development seed.
-fn get_encryption_key() -> [u8; KEY_LEN] {
-    let key_str = std::env::var("OAUTH_ENCRYPTION_KEY").unwrap_or_else(|_| {
-        // Dev fallback — NOT for production
-        "ZGV2LW9ubHkta2V5LWNoYW5nZS1pbi1wcm9k".to_string() // base64("dev-only-key-change-in-pad")
-    });
+/// Derive a 256-bit key from the environment variable via HKDF-SHA256.
+/// The env var must contain a base64-encoded value (any length ≥ 16 bytes recommended).
+/// Returns None if the env var is not set — callers must handle the missing-key case.
+fn get_encryption_key() -> Option<[u8; KEY_LEN]> {
+    let key_str = std::env::var("OAUTH_ENCRYPTION_KEY").ok()?;
 
-    let decoded = STANDARD.decode(&key_str).unwrap_or_else(|_| {
-        // If not valid base64, hash the string to get 32 bytes
-        use sha2::{Digest, Sha256};
-        let mut hasher = Sha256::new();
-        hasher.update(key_str.as_bytes());
-        hasher.finalize().to_vec()
-    });
+    // Decode base64 or use raw bytes as HKDF input
+    let ikm = STANDARD.decode(&key_str).unwrap_or_else(|_| key_str.as_bytes().to_vec());
 
-    let mut key = [0u8; KEY_LEN];
-    let len = decoded.len().min(KEY_LEN);
-    key[..len].copy_from_slice(&decoded[..len]);
-    key
+    // Use HKDF-SHA256 to derive a uniform 256-bit key
+    use sha2::Sha256;
+    use hkdf::Hkdf;
+    let hk = Hkdf::<Sha256>::new(None, &ikm);
+    let mut okm = [0u8; KEY_LEN];
+    hk.expand(b"oauth2-token-encryption-v1", &mut okm)
+        .expect("HKDF expand for 32 bytes cannot fail");
+    Some(okm)
 }
 
 /// Encrypt a plaintext string, returns base64(nonce || ciphertext)
 pub fn encrypt_token(plaintext: &str) -> Result<String, String> {
-    let key = get_encryption_key();
+    let key = get_encryption_key().ok_or_else(|| "OAUTH_ENCRYPTION_KEY not set".to_string())?;
     let cipher = Aes256Gcm::new_from_slice(&key)
         .map_err(|e| format!("key init failed: {}", e))?;
 
@@ -58,7 +54,7 @@ pub fn encrypt_token(plaintext: &str) -> Result<String, String> {
 
 /// Decrypt a base64(nonce || ciphertext) string back to plaintext
 pub fn decrypt_token(encrypted_b64: &str) -> Result<String, String> {
-    let key = get_encryption_key();
+    let key = get_encryption_key().ok_or_else(|| "OAUTH_ENCRYPTION_KEY not set".to_string())?;
     let cipher = Aes256Gcm::new_from_slice(&key)
         .map_err(|e| format!("key init failed: {}", e))?;
 
