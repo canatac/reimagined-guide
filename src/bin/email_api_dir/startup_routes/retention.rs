@@ -344,6 +344,7 @@ async fn write_audit_entry(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
 
     #[test]
     fn retention_routes_policy_get_path() {
