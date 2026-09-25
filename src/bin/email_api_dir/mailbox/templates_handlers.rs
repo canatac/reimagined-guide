@@ -16,6 +16,12 @@ pub(crate) async fn api_templates_list(
     req: actix_web::HttpRequest,
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
+    // Auth guard: require valid session when RBAC is enforced (issue #729)
+    if admin_auth::rbac_enabled() {
+        if let Err(resp) = admin_auth::require_auth(&req, mongo.get_ref(), &mongo_db_name()).await {
+            return resp;
+        }
+    }
     let user_id = resolve_user_id(&req);
     let coll = mongo
         .database(&mongo_db_name())
@@ -68,6 +74,12 @@ pub(crate) async fn api_templates_create(
     mongo: web::Data<Arc<mongodb::Client>>,
     body: web::Json<TemplateCreateRequest>,
 ) -> impl Responder {
+    // Auth guard: require valid session when RBAC is enforced (issue #729)
+    if admin_auth::rbac_enabled() {
+        if let Err(resp) = admin_auth::require_auth(&req, mongo.get_ref(), &mongo_db_name()).await {
+            return resp;
+        }
+    }
     let user_id = resolve_user_id(&req);
     let coll = mongo
         .database(&mongo_db_name())
@@ -127,6 +139,12 @@ pub(crate) async fn api_templates_update(
     mongo: web::Data<Arc<mongodb::Client>>,
     body: web::Json<TemplateUpdateRequest>,
 ) -> impl Responder {
+    // Auth guard: require valid session when RBAC is enforced (issue #729)
+    if admin_auth::rbac_enabled() {
+        if let Err(resp) = admin_auth::require_auth(&req, mongo.get_ref(), &mongo_db_name()).await {
+            return resp;
+        }
+    }
     let user_id = resolve_user_id(&req);
     let template_id = path.into_inner();
     let coll = mongo
@@ -191,6 +209,12 @@ pub(crate) async fn api_templates_delete(
     path: web::Path<String>,
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
+    // Auth guard: require valid session when RBAC is enforced (issue #729)
+    if admin_auth::rbac_enabled() {
+        if let Err(resp) = admin_auth::require_auth(&req, mongo.get_ref(), &mongo_db_name()).await {
+            return resp;
+        }
+    }
     let user_id = resolve_user_id(&req);
     let template_id = path.into_inner();
     let coll = mongo
@@ -276,8 +300,16 @@ pub(crate) fn substitute_variables(text: &str, vars: &HashMap<String, String>) -
 }
 
 pub(crate) async fn api_templates_preview(
+    req: actix_web::HttpRequest,
+    mongo: web::Data<Arc<mongodb::Client>>,
     body: web::Json<TemplatePreviewRequest>,
 ) -> impl Responder {
+    // Auth guard: require valid session when RBAC is enforced (issue #729)
+    if admin_auth::rbac_enabled() {
+        if let Err(resp) = admin_auth::require_auth(&req, mongo.get_ref(), &mongo_db_name()).await {
+            return resp;
+        }
+    }
     let subject = substitute_variables(&body.subject, &body.variables);
     let body_text = substitute_variables(&body.body, &body.variables);
     HttpResponse::Ok().json(serde_json::json!({
