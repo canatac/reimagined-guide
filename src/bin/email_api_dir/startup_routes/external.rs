@@ -72,5 +72,30 @@ pub(crate) fn register_external_routes(cfg: &mut web::ServiceConfig) {
     .route(
         "/api/external-messages/{id}/action",
         web::post().to(api_external_message_action),
+    )
+    // OAuth2 IMAP authentication (issue #728)
+    .route(
+        "/api/oauth2/providers",
+        web::get().to(oauth2_handlers::api_oauth2_providers_list),
+    )
+    .route(
+        "/api/oauth2/start",
+        web::post().to(oauth2_handlers::api_oauth2_start),
+    )
+    .route(
+        "/api/oauth2/callback",
+        web::post().to(oauth2_handlers::api_oauth2_callback),
+    )
+    .route(
+        "/api/oauth2/refresh/{account_id}",
+        web::post().to(oauth2_handlers::api_oauth2_refresh),
+    )
+    .route(
+        "/api/oauth2/status/{account_id}",
+        web::get().to(oauth2_handlers::api_oauth2_status),
+    )
+    .route(
+        "/api/oauth2/revoke/{account_id}",
+        web::post().to(oauth2_handlers::api_oauth2_revoke),
     );
 }

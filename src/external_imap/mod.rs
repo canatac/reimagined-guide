@@ -131,6 +131,11 @@ impl ExternalImapService {
         Self { client }
     }
 
+    /// Get a reference to the MongoDB client (for OAuth2 token storage, etc.)
+    pub fn client(&self) -> Arc<Client> {
+        self.client.clone()
+    }
+
     fn db_name() -> String {
         std::env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string())
     }

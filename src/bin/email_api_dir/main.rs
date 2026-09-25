@@ -62,6 +62,9 @@ mod event_bus;
 mod deliverability_dto;
 mod mailing_list;
 mod dkim_service;
+mod oauth2_providers;
+mod oauth2_crypto;
+mod oauth2_handlers;
 mod startup;
 mod startup_routes;
 // Temporarily disabled in strict clippy hard-gate mode; dedicated integration
@@ -79,6 +82,7 @@ pub use monitoring_handlers::*;
 pub use mailbox::*;
 pub use admin_ops::*;
 pub use external_handlers::*;
+pub use oauth2_handlers::*;
 
 use sha1::Sha1;
 
