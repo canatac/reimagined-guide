@@ -254,22 +254,14 @@ mod tests {
             "/api/auth/logout",
             "/api/auth/refresh",
             "/api/auth/2fa/verify",
-            "/api/auth/2fa/setup",
-            "/api/auth/2fa/enable",
-            "/api/auth/2fa/disable",
-            "/api/auth/2fa/recovery",
-            "/api/auth/2fa/status",
             "/api/auth/password-reset/request",
             "/api/auth/password-reset/confirm",
             "/api/user/locale",
             "/api/auth/oauth/{provider}",
             "/api/auth/oauth/{provider}/start",
             "/api/auth/oauth/{provider}/callback",
-            "/api/crypto/sign-pq",
-            "/api/account",
-            "/api/auth/anonymous-register",
         ];
-        assert_eq!(paths.len(), 19);
+        assert_eq!(paths.len(), 11);
     }
 
     #[test]
@@ -280,17 +272,10 @@ mod tests {
             "/api/auth/logout",
             "/api/auth/refresh",
             "/api/auth/2fa/verify",
-            "/api/auth/2fa/setup",
-            "/api/auth/2fa/enable",
-            "/api/auth/2fa/disable",
-            "/api/auth/2fa/recovery",
-            "/api/auth/2fa/status",
             "/api/auth/password-reset/request",
             "/api/auth/password-reset/confirm",
-            "/api/crypto/sign-pq",
-            "/api/auth/anonymous-register",
         ];
-        assert_eq!(post_routes.len(), 14);
+        assert_eq!(post_routes.len(), 7);
     }
 
     #[test]
@@ -307,12 +292,6 @@ mod tests {
     fn auth_routes_patch_routes() {
         let patch_routes = vec!["/api/user/locale"];
         assert_eq!(patch_routes.len(), 1);
-    }
-
-    #[test]
-    fn auth_routes_delete_routes() {
-        let delete_routes = vec!["/api/account"];
-        assert_eq!(delete_routes.len(), 1);
     }
 
     #[test]
@@ -380,19 +359,5 @@ mod tests {
         assert_eq!(route, "/api/auth/anonymous-register");
         assert!(route.starts_with("/api/auth/"));
         assert!(route.contains("anonymous"));
-    }
-
-    #[test]
-    fn auth_routes_gdpr_delete_account() {
-        let route = "/api/account";
-        assert_eq!(route, "/api/account");
-        assert!(route.starts_with("/api/"));
-    }
-
-    #[test]
-    fn auth_routes_sign_pq() {
-        let route = "/api/crypto/sign-pq";
-        assert_eq!(route, "/api/crypto/sign-pq");
-        assert!(route.starts_with("/api/crypto/"));
     }
 }
