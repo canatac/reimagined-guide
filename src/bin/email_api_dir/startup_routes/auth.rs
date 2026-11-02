@@ -297,8 +297,7 @@ mod tests {
     fn auth_routes_get_routes() {
         let get_routes = vec![
             "/api/auth/oauth/{provider}",
-            "/api
-/auth/oauth/{provider}/start",
+            "/api/auth/oauth/{provider}/start",
             "/api/auth/oauth/{provider}/callback",
         ];
         assert_eq!(get_routes.len(), 3);
