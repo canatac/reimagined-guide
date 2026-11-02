@@ -95,4 +95,29 @@ mod tests {
         ];
         assert_eq!(modules.len(), 9);
     }
+
+    #[test]
+    fn auth_handlers_module_names() {
+        let module_names = vec![
+            "session",
+            "login",
+            "register",
+            "password_reset",
+            "oauth",
+            "totp",
+            "two_factor",
+            "gdpr",
+            "anonymous_register",
+        ];
+        assert_eq!(module_names.len(), 9);
+        assert_eq!(module_names[0], "session");
+        assert_eq!(module_names[1], "login");
+        assert_eq!(module_names[2], "register");
+        assert_eq!(module_names[3], "password_reset");
+        assert_eq!(module_names[4], "oauth");
+        assert_eq!(module_names[5], "totp");
+        assert_eq!(module_names[6], "two_factor");
+        assert_eq!(module_names[7], "gdpr");
+        assert_eq!(module_names[8], "anonymous_register");
+    }
 }
