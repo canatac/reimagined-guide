@@ -4,6 +4,7 @@
 //! - XOAUTH2 SASL string construction (RFC 7628)
 //! - Token refresh via refresh_token grant
 //! - Provider-specific OAuth2 endpoint configuration (Gmail, Outlook, Yahoo)
+//! - Encrypted refresh-token storage at rest (AES-256-GCM, issue #674)
 
 use crate::external_imap::ExternalImapAccount;
 use serde::{Deserialize, Serialize};
@@ -79,24 +80,45 @@ pub fn build_xoauth2_auth_string(email: &str, access_token: &str) -> String {
     format!("user={}\x01auth=Bearer {}\x01\x01", email, access_token)
 }
 
+/// Classify a provider token-endpoint failure so callers can map it to a
+/// stable error code (revoked/expired token vs. transient failure).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TokenRefreshError {
+    /// The refresh token was rejected (revoked, expired or invalid_grant).
+    Revoked,
+    /// Any other failure (network, malformed response, missing fields).
+    Other(String),
+}
+
+impl TokenRefreshError {
+    /// True when the provider explicitly rejected the refresh token.
+    pub fn is_revoked(&self) -> bool {
+        matches!(self, TokenRefreshError::Revoked)
+    }
+}
+
 /// Refresh an OAuth2 access token using the refresh_token grant.
 /// Returns the new token set on success.
+///
+/// The stored refresh token is decrypted at rest before use; a provider
+/// rejection of that token is reported as [`TokenRefreshError::Revoked`] so
+/// the caller can surface a clear "token revoked or expired" error.
 pub async fn refresh_oauth2_token(
     account: &ExternalImapAccount,
-) -> Result<OAuth2TokenResult, String> {
+) -> Result<OAuth2TokenResult, TokenRefreshError> {
     let config = provider_config(&account.provider)
-        .ok_or_else(|| format!("Unsupported OAuth2 provider: {}", account.provider))?;
+        .ok_or_else(|| TokenRefreshError::Other(format!("Unsupported OAuth2 provider: {}", account.provider)))?;
 
     // Decrypt refresh token if encrypted at rest (issue #674)
     let refresh_token_enc = account.oauth_refresh_token.as_ref()
-        .ok_or_else(|| "No refresh token available for account".to_string())?;
+        .ok_or_else(|| TokenRefreshError::Other("No refresh token available for account".to_string()))?;
     let refresh_token = crate::security::oauth_token_crypto::decrypt_token_compat(refresh_token_enc);
 
     if config.client_id.is_empty() || config.client_secret.is_empty() {
-        return Err(format!(
+        return Err(TokenRefreshError::Other(format!(
             "OAuth2 client credentials not configured for provider: {}",
             account.provider
-        ));
+        )));
     }
 
     let client = reqwest::Client::new();
@@ -113,22 +135,32 @@ pub async fn refresh_oauth2_token(
         .body(form_body)
         .send()
         .await
-        .map_err(|e| format!("OAuth2 token refresh request failed: {e}"))?;
+        .map_err(|e| TokenRefreshError::Other(format!("OAuth2 token refresh request failed: {e}")))?;
 
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
-        return Err(format!("OAuth2 token refresh failed (HTTP {status}): {body}"));
+        // Providers signal a revoked/expired refresh token with 400 and an
+        // OAuth error such as invalid_grant in the body.
+        let lower = body.to_ascii_lowercase();
+        if status.as_u16() == 400
+            && (lower.contains("invalid_grant") || lower.contains("revoked") || lower.contains("expired"))
+        {
+            return Err(TokenRefreshError::Revoked);
+        }
+        return Err(TokenRefreshError::Other(format!(
+            "OAuth2 token refresh failed (HTTP {status}): {body}"
+        )));
     }
 
     let token_data: serde_json::Value = response
         .json()
         .await
-        .map_err(|e| format!("Failed to parse OAuth2 token response: {e}"))?;
+        .map_err(|e| TokenRefreshError::Other(format!("Failed to parse OAuth2 token response: {e}")))?;
 
     let access_token = token_data["access_token"]
         .as_str()
-        .ok_or_else(|| "No access_token in OAuth2 response".to_string())?
+        .ok_or_else(|| TokenRefreshError::Other("No access_token in OAuth2 response".to_string()))?
         .to_string();
 
     let refresh_token_new = token_data["refresh_token"].as_str().map(String::from);
@@ -145,14 +177,46 @@ pub async fn refresh_oauth2_token(
     })
 }
 
+/// Encrypt a refresh token for storage at rest.
+/// Falls back to the plaintext value when encryption is unavailable so a
+/// token is never lost; decryption uses decrypt_token_compat.
+pub fn encrypt_refresh_token_for_storage(refresh_token: &str) -> String {
+    crate::security::oauth_token_crypto::encrypt_token(refresh_token)
+        .unwrap_or_else(|_| refresh_token.to_string())
+}
+
+/// Refresh the access token of an account if it is expired or about to
+/// expire, and return the token set to persist.
+///
+/// This is the automatic-refresh entry point used before an IMAP session is
+/// opened: callers do not need to check expiry themselves.
+pub async fn refresh_oauth2_access_token(
+    account: &ExternalImapAccount,
+) -> Result<OAuth2TokenResult, TokenRefreshError> {
+    if !is_token_expired(account) {
+        // Still valid: return the current access token, no network call.
+        let access_token = account
+            .oauth_access_token
+            .clone()
+            .ok_or_else(|| TokenRefreshError::Other("No access token stored for account".to_string()))?;
+        return Ok(OAuth2TokenResult {
+            access_token,
+            refresh_token: None,
+            expires_in: None,
+            scopes: account.oauth_scopes.clone(),
+        });
+    }
+
+    refresh_oauth2_token(account).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use chrono::Utc;
 
-    #[test]
-    fn is_token_expired_with_no_expiry() {
-        let acct = ExternalImapAccount {
+    fn test_account(expires_at: Option<chrono::DateTime<Utc>>) -> ExternalImapAccount {
+        ExternalImapAccount {
             id: "test".into(),
             owner_user_id: "user".into(),
             provider: "gmail".into(),
@@ -162,7 +226,7 @@ mod tests {
             secret_value: None,
             oauth_access_token: Some("token".into()),
             oauth_refresh_token: Some("refresh".into()),
-            oauth_token_expires_at: None,
+            oauth_token_expires_at: expires_at,
             oauth_scopes: None,
             imap_host: "imap.gmail.com".into(),
             imap_port: 993,
@@ -175,36 +239,18 @@ mod tests {
             last_error: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-        };
+        }
+    }
+
+    #[test]
+    fn is_token_expired_with_no_expiry() {
+        let acct = test_account(None);
         assert!(is_token_expired(&acct));
     }
 
     #[test]
     fn is_token_expired_with_future_expiry() {
-        let mut acct = ExternalImapAccount {
-            id: "test".into(),
-            owner_user_id: "user".into(),
-            provider: "gmail".into(),
-            email: "a@gmail.com".into(),
-            auth_type: "oauth2".into(),
-            secret_ref: None,
-            secret_value: None,
-            oauth_access_token: Some("token".into()),
-            oauth_refresh_token: Some("refresh".into()),
-            oauth_token_expires_at: Some(Utc::now() + chrono::Duration::hours(1)),
-            oauth_scopes: None,
-            imap_host: "imap.gmail.com".into(),
-            imap_port: 993,
-            imap_tls: true,
-            smtp_host: None,
-            smtp_port: None,
-            smtp_tls: None,
-            status: "active".into(),
-            last_sync_at: None,
-            last_error: None,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-        };
+        let mut acct = test_account(Some(Utc::now() + chrono::Duration::hours(1)));
         assert!(!is_token_expired(&acct));
 
         // Expired: past
@@ -244,5 +290,44 @@ mod tests {
     #[test]
     fn provider_config_unknown() {
         assert!(provider_config("unknown-provider").is_none());
+    }
+
+    #[test]
+    fn refresh_error_revoked_classification() {
+        let revoked = TokenRefreshError::Revoked;
+        assert!(revoked.is_revoked());
+        let other = TokenRefreshError::Other("network down".to_string());
+        assert!(!other.is_revoked());
+    }
+
+    #[test]
+    fn refresh_token_encryption_roundtrip_for_storage() {
+        std::env::set_var("OAUTH_TOKEN_ENCRYPTION_KEY", {
+            let key: [u8; 32] = [9u8; 32];
+            use base64::engine::Engine;
+            base64::engine::general_purpose::STANDARD.encode(key)
+        });
+        let plain = "refresh-token-plain-value";
+        let stored = encrypt_refresh_token_for_storage(plain);
+        assert_ne!(stored, plain);
+        let decrypted = crate::security::oauth_token_crypto::decrypt_token_compat(&stored);
+        assert_eq!(decrypted, plain);
+    }
+
+    #[tokio::test]
+    async fn refresh_access_token_skips_network_when_valid() {
+        let acct = test_account(Some(Utc::now() + chrono::Duration::hours(1)));
+        let result = refresh_oauth2_access_token(&acct).await.unwrap();
+        assert_eq!(result.access_token, "token");
+        assert!(result.refresh_token.is_none());
+    }
+
+    #[tokio::test]
+    async fn refresh_access_token_reports_revoked_without_refresh_token() {
+        let mut acct = test_account(Some(Utc::now() - chrono::Duration::minutes(1)));
+        acct.oauth_refresh_token = None;
+        let err = refresh_oauth2_access_token(&acct).await.unwrap_err();
+        assert!(!err.is_revoked());
+        assert!(err.to_string().contains("No refresh token"));
     }
 }

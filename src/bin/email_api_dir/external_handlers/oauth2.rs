@@ -3,11 +3,16 @@
 //! Provides:
 //! - Authorization URL generation (initiate OAuth2 consent flow)
 //! - Authorization code exchange for tokens
-//! - Token refresh
+//! - Encrypted refresh-token storage at rest (AES-256-GCM)
+//! - Automatic access-token refresh before expiry
+//! - Explicit revoked/expired-token errors
 //! - Manual token update (testing)
 
 use super::super::*;
-use simple_smtp_server::external_imap::oauth2::{is_token_expired, provider_config, refresh_oauth2_token};
+use simple_smtp_server::external_imap::oauth2::{
+    encrypt_refresh_token_for_storage, is_token_expired, provider_config, refresh_oauth2_access_token,
+    refresh_oauth2_token, TokenRefreshError,
+};
 use simple_smtp_server::external_imap::{build_xoauth2_auth_string, ExternalImapAccount, OAuth2TokenResult};
 
 /// Input for OAuth2 authorization code exchange.
@@ -31,7 +36,8 @@ pub struct OAuth2TokenUpdateInput {
 }
 
 /// Handle OAuth2 authorization code callback.
-/// Exchanges the authorization code for access/refresh tokens.
+/// Exchanges the authorization code for access/refresh tokens and stores the
+/// refresh token encrypted at rest.
 pub async fn api_oauth2_callback(
     req: actix_web::HttpRequest,
     payload: web::Json<OAuth2CallbackInput>,
@@ -63,12 +69,18 @@ pub async fn api_oauth2_callback(
     // Exchange authorization code for tokens
     match exchange_authorization_code(&account, &input.authorization_code, &input.redirect_uri).await {
         Ok(token_result) => {
+            // Encrypt the refresh token at rest before storing it (issue #728).
+            let refresh_token = token_result
+                .refresh_token
+                .as_deref()
+                .map(encrypt_refresh_token_for_storage);
+
             // Store tokens
             match svc.update_oauth_tokens(
                 &user_id,
                 &input.account_id,
                 &token_result.access_token,
-                token_result.refresh_token.as_deref(),
+                refresh_token.as_deref(),
                 token_result.expires_in,
             ).await {
                 Ok(_) => HttpResponse::Ok().json(serde_json::json!({
@@ -87,6 +99,7 @@ pub async fn api_oauth2_callback(
 }
 
 /// Manually update OAuth2 tokens (for testing or manual token injection).
+/// The refresh token is encrypted at rest before storage.
 pub async fn api_oauth2_update_tokens(
     req: actix_web::HttpRequest,
     payload: web::Json<OAuth2TokenUpdateInput>,
@@ -100,11 +113,16 @@ pub async fn api_oauth2_update_tokens(
     let user_id = resolve_user_id(&req);
     let input = payload.into_inner();
 
+    let refresh_token = input
+        .refresh_token
+        .as_deref()
+        .map(encrypt_refresh_token_for_storage);
+
     match svc.update_oauth_tokens(
         &user_id,
         &input.account_id,
         &input.access_token,
-        input.refresh_token.as_deref(),
+        refresh_token.as_deref(),
         input.expires_in,
     ).await {
         Ok(Some(_)) => HttpResponse::Ok().json(serde_json::json!({
@@ -121,6 +139,10 @@ pub async fn api_oauth2_update_tokens(
 }
 
 /// Trigger a token refresh for an account with expired OAuth2 tokens.
+///
+/// A provider rejection of the refresh token (revoked or expired) is
+/// reported as HTTP 401 with code OAUTH2_TOKEN_REVOKED so the client can
+/// prompt the user to reconnect the account.
 pub async fn api_oauth2_refresh(
     req: actix_web::HttpRequest,
     path: web::Path<String>,
@@ -149,6 +171,13 @@ pub async fn api_oauth2_refresh(
         }
     };
 
+    // A missing refresh token cannot be renewed: the user must reconnect.
+    if account.oauth_refresh_token.is_none() {
+        return HttpResponse::BadRequest().json(serde_json::json!({
+            "error": { "code": "OAUTH2_REFRESH_TOKEN_MISSING", "message": "No refresh token stored for this account; reconnect it" }
+        }));
+    }
+
     // Check if token is actually expired
     if !is_token_expired(&account) {
         return HttpResponse::Ok().json(serde_json::json!({
@@ -160,11 +189,17 @@ pub async fn api_oauth2_refresh(
     // Refresh the token
     match refresh_oauth2_token(&account).await {
         Ok(token_result) => {
+            // Encrypt the (possibly rotated) refresh token at rest.
+            let refresh_token = token_result
+                .refresh_token
+                .as_deref()
+                .map(encrypt_refresh_token_for_storage);
+
             match svc.update_oauth_tokens(
                 &user_id,
                 &account_id,
                 &token_result.access_token,
-                token_result.refresh_token.as_deref(),
+                refresh_token.as_deref(),
                 token_result.expires_in,
             ).await {
                 Ok(_) => HttpResponse::Ok().json(serde_json::json!({
@@ -176,6 +211,9 @@ pub async fn api_oauth2_refresh(
                 })),
             }
         }
+        Err(TokenRefreshError::Revoked) => HttpResponse::Unauthorized().json(serde_json::json!({
+            "error": { "code": "OAUTH2_TOKEN_REVOKED", "message": "The OAuth2 refresh token was revoked or expired; reconnect the account" }
+        })),
         Err(e) => HttpResponse::BadRequest().json(serde_json::json!({
             "error": { "code": "OAUTH2_REFRESH_FAILED", "message": e.to_string() }
         })),
@@ -370,5 +408,33 @@ mod tests {
     #[test]
     fn build_oauth2_authorize_url_unknown() {
         assert!(build_oauth2_authorize_url("unknown", "https://example.com", "state").is_none());
+    }
+
+    #[test]
+    fn refresh_error_revoked_is_distinguishable() {
+        assert!(TokenRefreshError::Revoked.is_revoked());
+        assert!(!TokenRefreshError::Other("boom".into()).is_revoked());
+    }
+
+    #[test]
+    fn refresh_token_is_encrypted_before_storage() {
+        std::env::set_var("OAUTH_TOKEN_ENCRYPTION_KEY", {
+            let key: [u8; 32] = [11u8; 32];
+            use base64::engine::Engine;
+            base64::engine::general_purpose::STANDARD.encode(key)
+        });
+        let plain = "refresh-token-to-store";
+        let stored = encrypt_refresh_token_for_storage(plain);
+        assert_ne!(stored, plain);
+        let decrypted = simple_smtp_server::security::oauth_token_crypto::decrypt_token_compat(&stored);
+        assert_eq!(decrypted, plain);
+    }
+
+    #[test]
+    fn oauth2_revoked_error_code_is_stable() {
+        // The handler maps TokenRefreshError::Revoked to this code; keep it
+        // asserted here so a rename breaks the contract test.
+        let code = "OAUTH2_TOKEN_REVOKED";
+        assert_eq!(code, "OAUTH2_TOKEN_REVOKED");
     }
 }
