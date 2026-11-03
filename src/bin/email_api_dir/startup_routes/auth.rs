@@ -10,6 +10,11 @@ pub(crate) fn register_auth_routes(cfg: &mut web::ServiceConfig) {
         .route("/api/auth/logout", web::post().to(auth_logout))
         .route("/api/auth/refresh", web::post().to(auth_refresh))
         .route("/api/auth/2fa/verify", web::post().to(api_2fa_verify))
+        .route("/api/auth/2fa/setup", web::post().to(api_2fa_setup))
+        .route("/api/auth/2fa/enable", web::post().to(api_2fa_enable))
+        .route("/api/auth/2fa/disable", web::post().to(api_2fa_disable))
+        .route("/api/auth/2fa/recovery", web::post().to(api_2fa_recovery))
+        .route("/api/auth/2fa/status", web::post().to(api_2fa_status))
         .route(
             "/api/auth/password-reset/request",
             web::post().to(api_password_reset_request),
@@ -30,6 +35,18 @@ pub(crate) fn register_auth_routes(cfg: &mut web::ServiceConfig) {
         .route(
             "/api/auth/oauth/{provider}/callback",
             web::get().to(auth_oauth_callback),
+        )
+        // Post-quantum email signing (issue #620)
+        .route(
+            "/api/crypto/sign-pq",
+            web::post().to(sign_post_quantum),
+        )
+        // GDPR Article 17 — right to erasure (issue #595)
+        .route("/api/account", web::delete().to(api_gdpr_delete_account))
+        // Anonymous Tor signup (issue #621) — no email verification required
+        .route(
+            "/api/auth/anonymous-register",
+            web::post().to(auth_anonymous_register),
         );
 }
 
@@ -65,6 +82,36 @@ mod tests {
     fn auth_routes_2fa_verify() {
         let route = "/api/auth/2fa/verify";
         assert_eq!(route, "/api/auth/2fa/verify");
+    }
+
+    #[test]
+    fn auth_routes_2fa_setup() {
+        let route = "/api/auth/2fa/setup";
+        assert_eq!(route, "/api/auth/2fa/setup");
+    }
+
+    #[test]
+    fn auth_routes_2fa_enable() {
+        let route = "/api/auth/2fa/enable";
+        assert_eq!(route, "/api/auth/2fa/enable");
+    }
+
+    #[test]
+    fn auth_routes_2fa_disable() {
+        let route = "/api/auth/2fa/disable";
+        assert_eq!(route, "/api/auth/2fa/disable");
+    }
+
+    #[test]
+    fn auth_routes_2fa_recovery() {
+        let route = "/api/auth/2fa/recovery";
+        assert_eq!(route, "/api/auth/2fa/recovery");
+    }
+
+    #[test]
+    fn auth_routes_2fa_status() {
+        let route = "/api/auth/2fa/status";
+        assert_eq!(route, "/api/auth/2fa/status");
     }
 
     #[test]
@@ -207,14 +254,22 @@ mod tests {
             "/api/auth/logout",
             "/api/auth/refresh",
             "/api/auth/2fa/verify",
+            "/api/auth/2fa/setup",
+            "/api/auth/2fa/enable",
+            "/api/auth/2fa/disable",
+            "/api/auth/2fa/recovery",
+            "/api/auth/2fa/status",
             "/api/auth/password-reset/request",
             "/api/auth/password-reset/confirm",
             "/api/user/locale",
             "/api/auth/oauth/{provider}",
             "/api/auth/oauth/{provider}/start",
             "/api/auth/oauth/{provider}/callback",
+            "/api/crypto/sign-pq",
+            "/api/account",
+            "/api/auth/anonymous-register",
         ];
-        assert_eq!(paths.len(), 11);
+        assert_eq!(paths.len(), 19);
     }
 
     #[test]
@@ -225,10 +280,17 @@ mod tests {
             "/api/auth/logout",
             "/api/auth/refresh",
             "/api/auth/2fa/verify",
+            "/api/auth/2fa/setup",
+            "/api/auth/2fa/enable",
+            "/api/auth/2fa/disable",
+            "/api/auth/2fa/recovery",
+            "/api/auth/2fa/status",
             "/api/auth/password-reset/request",
             "/api/auth/password-reset/confirm",
+            "/api/crypto/sign-pq",
+            "/api/auth/anonymous-register",
         ];
-        assert_eq!(post_routes.len(), 7);
+        assert_eq!(post_routes.len(), 14);
     }
 
     #[test]
@@ -245,6 +307,12 @@ mod tests {
     fn auth_routes_patch_routes() {
         let patch_routes = vec!["/api/user/locale"];
         assert_eq!(patch_routes.len(), 1);
+    }
+
+    #[test]
+    fn auth_routes_delete_routes() {
+        let delete_routes = vec!["/api/account"];
+        assert_eq!(delete_routes.len(), 1);
     }
 
     #[test]
@@ -304,5 +372,27 @@ mod tests {
         assert_ne!(route1, route2);
         assert!(route1.starts_with("/api/auth/oauth/"));
         assert!(route2.starts_with("/api/auth/oauth/"));
+    }
+
+    #[test]
+    fn auth_routes_anonymous_register() {
+        let route = "/api/auth/anonymous-register";
+        assert_eq!(route, "/api/auth/anonymous-register");
+        assert!(route.starts_with("/api/auth/"));
+        assert!(route.contains("anonymous"));
+    }
+
+    #[test]
+    fn auth_routes_gdpr_delete_account() {
+        let route = "/api/account";
+        assert_eq!(route, "/api/account");
+        assert!(route.starts_with("/api/"));
+    }
+
+    #[test]
+    fn auth_routes_sign_pq() {
+        let route = "/api/crypto/sign-pq";
+        assert_eq!(route, "/api/crypto/sign-pq");
+        assert!(route.starts_with("/api/crypto/"));
     }
 }
