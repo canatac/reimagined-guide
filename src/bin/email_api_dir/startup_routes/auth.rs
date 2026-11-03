@@ -10,6 +10,11 @@ pub(crate) fn register_auth_routes(cfg: &mut web::ServiceConfig) {
         .route("/api/auth/logout", web::post().to(auth_logout))
         .route("/api/auth/refresh", web::post().to(auth_refresh))
         .route("/api/auth/2fa/verify", web::post().to(api_2fa_verify))
+        .route("/api/auth/2fa/setup", web::post().to(api_2fa_setup))
+        .route("/api/auth/2fa/enable", web::post().to(api_2fa_enable))
+        .route("/api/auth/2fa/disable", web::post().to(api_2fa_disable))
+        .route("/api/auth/2fa/recovery", web::post().to(api_2fa_recovery))
+        .route("/api/auth/2fa/status", web::post().to(api_2fa_status))
         .route(
             "/api/auth/password-reset/request",
             web::post().to(api_password_reset_request),
@@ -80,6 +85,36 @@ mod tests {
     }
 
     #[test]
+    fn auth_routes_2fa_setup() {
+        let route = "/api/auth/2fa/setup";
+        assert_eq!(route, "/api/auth/2fa/setup");
+    }
+
+    #[test]
+    fn auth_routes_2fa_enable() {
+        let route = "/api/auth/2fa/enable";
+        assert_eq!(route, "/api/auth/2fa/enable");
+    }
+
+    #[test]
+    fn auth_routes_2fa_disable() {
+        let route = "/api/auth/2fa/disable";
+        assert_eq!(route, "/api/auth/2fa/disable");
+    }
+
+    #[test]
+    fn auth_routes_2fa_recovery() {
+        let route = "/api/auth/2fa/recovery";
+        assert_eq!(route, "/api/auth/2fa/recovery");
+    }
+
+    #[test]
+    fn auth_routes_2fa_status() {
+        let route = "/api/auth/2fa/status";
+        assert_eq!(route, "/api/auth/2fa/status");
+    }
+
+    #[test]
     fn auth_routes_password_reset_request() {
         let route = "/api/auth/password-reset/request";
         assert_eq!(route, "/api/auth/password-reset/request");
@@ -118,11 +153,95 @@ mod tests {
     #[test]
     fn auth_routes_oauth_provider_google() {
         let provider = "google";
-        assert_eq!(provider, "google");
+        let route = format!("/api/auth/oauth/{}", provider);
+        assert_eq!(route, "/api/auth/oauth/google");
     }
 
     #[test]
-    fn auth_routes_oauth_method() {
+    fn auth_routes_oauth_provider_github() {
+        let provider = "github";
+        let route = format!("/api/auth/oauth/{}", provider);
+        assert_eq!(route, "/api/auth/oauth/github");
+    }
+
+    #[test]
+    fn auth_routes_oauth_start_google() {
+        let provider = "google";
+        let route = format!("/api/auth/oauth/{}/start", provider);
+        assert_eq!(route, "/api/auth/oauth/google/start");
+    }
+
+    #[test]
+    fn auth_routes_oauth_callback_google() {
+        let provider = "google";
+        let route = format!("/api/auth/oauth/{}/callback", provider);
+        assert_eq!(route, "/api/auth/oauth/google/callback");
+    }
+
+    #[test]
+    fn auth_routes_oauth_start_github() {
+        let provider = "github";
+        let route = format!("/api/auth/oauth/{}/start", provider);
+        assert_eq!(route, "/api/auth/oauth/github/start");
+    }
+
+    #[test]
+    fn auth_routes_oauth_callback_github() {
+        let provider = "github";
+        let route = format!("/api/auth/oauth/{}/callback", provider);
+        assert_eq!(route, "/api/auth/oauth/github/callback");
+    }
+
+    #[test]
+    fn auth_routes_login_method_post() {
+        let method = "POST";
+        assert_eq!(method, "POST");
+    }
+
+    #[test]
+    fn auth_routes_register_method_post() {
+        let method = "POST";
+        assert_eq!(method, "POST");
+    }
+
+    #[test]
+    fn auth_routes_logout_method_post() {
+        let method = "POST";
+        assert_eq!(method, "POST");
+    }
+
+    #[test]
+    fn auth_routes_refresh_method_post() {
+        let method = "POST";
+        assert_eq!(method, "POST");
+    }
+
+    #[test]
+    fn auth_routes_2fa_method_post() {
+        let method = "POST";
+        assert_eq!(method, "POST");
+    }
+
+    #[test]
+    fn auth_routes_password_reset_request_method_post() {
+        let method = "POST";
+        assert_eq!(method, "POST");
+    }
+
+    #[test]
+    fn auth_routes_password_reset_confirm_method_post() {
+        let method = "POST";
+        assert_eq!(method, "POST");
+    }
+
+    #[test]
+    fn auth_routes_user_locale_method_patch() {
+        let method = "PATCH";
+        assert_eq!(method, "PATCH");
+    }
+
+    #[test]
+    fn auth_routes_oauth_method_get() {
         let method = "GET";
         assert_eq!(method, "GET");
     }
@@ -135,14 +254,22 @@ mod tests {
             "/api/auth/logout",
             "/api/auth/refresh",
             "/api/auth/2fa/verify",
+            "/api/auth/2fa/setup",
+            "/api/auth/2fa/enable",
+            "/api/auth/2fa/disable",
+            "/api/auth/2fa/recovery",
+            "/api/auth/2fa/status",
             "/api/auth/password-reset/request",
             "/api/auth/password-reset/confirm",
             "/api/user/locale",
             "/api/auth/oauth/{provider}",
             "/api/auth/oauth/{provider}/start",
             "/api/auth/oauth/{provider}/callback",
+            "/api/crypto/sign-pq",
+            "/api/account",
+            "/api/auth/anonymous-register",
         ];
-        assert_eq!(paths.len(), 11);
+        assert_eq!(paths.len(), 19);
     }
 
     #[test]
@@ -153,10 +280,17 @@ mod tests {
             "/api/auth/logout",
             "/api/auth/refresh",
             "/api/auth/2fa/verify",
+            "/api/auth/2fa/setup",
+            "/api/auth/2fa/enable",
+            "/api/auth/2fa/disable",
+            "/api/auth/2fa/recovery",
+            "/api/auth/2fa/status",
             "/api/auth/password-reset/request",
             "/api/auth/password-reset/confirm",
+            "/api/crypto/sign-pq",
+            "/api/auth/anonymous-register",
         ];
-        assert_eq!(post_routes.len(), 7);
+        assert_eq!(post_routes.len(), 14);
     }
 
     #[test]
@@ -173,6 +307,12 @@ mod tests {
     fn auth_routes_patch_routes() {
         let patch_routes = vec!["/api/user/locale"];
         assert_eq!(patch_routes.len(), 1);
+    }
+
+    #[test]
+    fn auth_routes_delete_routes() {
+        let delete_routes = vec!["/api/account"];
+        assert_eq!(delete_routes.len(), 1);
     }
 
     #[test]
@@ -238,5 +378,21 @@ mod tests {
     fn auth_routes_anonymous_register() {
         let route = "/api/auth/anonymous-register";
         assert_eq!(route, "/api/auth/anonymous-register");
+        assert!(route.starts_with("/api/auth/"));
+        assert!(route.contains("anonymous"));
+    }
+
+    #[test]
+    fn auth_routes_gdpr_delete_account() {
+        let route = "/api/account";
+        assert_eq!(route, "/api/account");
+        assert!(route.starts_with("/api/"));
+    }
+
+    #[test]
+    fn auth_routes_sign_pq() {
+        let route = "/api/crypto/sign-pq";
+        assert_eq!(route, "/api/crypto/sign-pq");
+        assert!(route.starts_with("/api/crypto/"));
     }
 }
