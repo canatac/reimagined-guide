@@ -123,7 +123,7 @@ pub async fn api_oauth2_update_tokens(
         &input.account_id,
         &input.access_token,
         refresh_token.as_deref(),
-        input.expires_in,
+        &input.expires_in,
     ).await {
         Ok(Some(_)) => HttpResponse::Ok().json(serde_json::json!({
             "status": "ok",
