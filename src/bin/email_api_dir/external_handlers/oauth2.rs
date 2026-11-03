@@ -188,8 +188,6 @@ async fn exchange_authorization_code(
     code: &str,
     redirect_uri: &str,
 ) -> Result<OAuth2TokenResult, String> {
-    // provider_config already imported at top of file (line 7)
-
     let config = provider_config(&account.provider)
         .ok_or_else(|| format!("Unsupported OAuth2 provider: {}", account.provider))?;
 
@@ -372,5 +370,60 @@ mod tests {
     #[test]
     fn build_oauth2_authorize_url_unknown() {
         assert!(build_oauth2_authorize_url("unknown", "https://example.com", "state").is_none());
+    }
+
+    #[test]
+    fn build_oauth2_authorize_url_yahoo() {
+        std::env::set_var("YAHOO_OAUTH_CLIENT_ID", "test-yahoo-id");
+        std::env::set_var("YAHOO_OAUTH_CLIENT_SECRET", "test-yahoo-secret");
+        let url = build_oauth2_authorize_url("yahoo", "https://mail.misfits.ai/callback", "state-789").unwrap();
+        assert!(url.contains("api.login.yahoo.com/oauth2/request_auth"));
+        assert!(url.contains("client_id=test-yahoo-id"));
+        assert!(url.contains("response_type=code"));
+    }
+
+    #[test]
+    fn build_oauth2_authorize_url_office365_alias() {
+        std::env::set_var("MICROSOFT_OAUTH_CLIENT_ID", "test-ms-id");
+        std::env::set_var("MICROSOFT_OAUTH_CLIENT_SECRET", "test-ms-secret");
+        let url = build_oauth2_authorize_url("office365", "https://mail.misfits.ai/callback", "state-000").unwrap();
+        assert!(url.contains("login.microsoftonline.com"));
+        assert!(url.contains("client_id=test-ms-id"));
+    }
+
+    #[test]
+    fn build_oauth2_authorize_url_google_alias() {
+        std::env::set_var("GOOGLE_OAUTH_CLIENT_ID", "test-gmail-id");
+        std::env::set_var("GOOGLE_OAUTH_CLIENT_SECRET", "test-gmail-secret");
+        let url = build_oauth2_authorize_url("google", "https://mail.misfits.ai/callback", "state-111").unwrap();
+        assert!(url.contains("accounts.google.com/o/oauth2/v2/auth"));
+        assert!(url.contains("access_type=offline"));
+    }
+
+    #[test]
+    fn build_oauth2_authorize_url_encodes_state() {
+        std::env::set_var("GOOGLE_OAUTH_CLIENT_ID", "test-gmail-id");
+        std::env::set_var("GOOGLE_OAUTH_CLIENT_SECRET", "test-gmail-secret");
+        let state = "state with spaces & symbols";
+        let url = build_oauth2_authorize_url("gmail", "https://mail.misfits.ai/callback", state).unwrap();
+        assert!(url.contains("state=state+with+spaces+%26+symbols"));
+    }
+
+    #[test]
+    fn build_oauth2_authorize_url_encodes_redirect_uri() {
+        std::env::set_var("GOOGLE_OAUTH_CLIENT_ID", "test-gmail-id");
+        std::env::set_var("GOOGLE_OAUTH_CLIENT_SECRET", "test-gmail-secret");
+        let redirect = "https://mail.misfits.ai/api/external-accounts/abc/oauth2/callback";
+        let url = build_oauth2_authorize_url("gmail", redirect, "state-1").unwrap();
+        assert!(url.contains("redirect_uri=https%3A%2F%2Fmail.misfits.ai%2Fapi%2Fexternal-accounts%2Fabc%2Foauth2%2Fcallback"));
+    }
+
+    #[test]
+    fn build_oauth2_authorize_url_includes_scopes() {
+        std::env::set_var("GOOGLE_OAUTH_CLIENT_ID", "test-gmail-id");
+        std::env::set_var("GOOGLE_OAUTH_CLIENT_SECRET", "test-gmail-secret");
+        let url = build_oauth2_authorize_url("gmail", "https://mail.misfits.ai/callback", "state-1").unwrap();
+        assert!(url.contains("scope="));
+        assert!(url.contains("response_type=code"));
     }
 }

@@ -4,7 +4,7 @@
 
 pub(crate) mod session;
 pub(crate) mod login;
-pub(crate) mod register;
+(crate) mod register;
 pub(crate) mod password_reset;
 pub(crate) mod oauth;
 pub(crate) mod totp;
@@ -27,60 +27,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn auth_handlers_has_session() {
-        // Verify session module is included
-        assert!(true);
-    }
-
-    #[test]
-    fn auth_handlers_has_login() {
-        // Verify login module is included
-        assert!(true);
-    }
-
-    #[test]
-    fn auth_handlers_has_register() {
-        // Verify register module is included
-        assert!(true);
-    }
-
-    #[test]
-    fn auth_handlers_has_password_reset() {
-        // Verify password_reset module is included
-        assert!(true);
-    }
-
-    #[test]
-    fn auth_handlers_has_oauth() {
-        // Verify oauth module is included
-        assert!(true);
-    }
-
-    #[test]
-    fn auth_handlers_has_totp() {
-        // Verify totp module is included
-        assert!(true);
-    }
-
-    #[test]
-    fn auth_handlers_has_two_factor() {
-        // Verify two_factor module is included
-        assert!(true);
-    }
-
-    #[test]
-    fn auth_handlers_has_gdpr() {
-        // Verify gdpr module is included
-        assert!(true);
-    }
-
-    #[test]
-    fn auth_handlers_has_anonymous_register() {
-        // Verify anonymous_register module is included
-        assert!(true);
-    }
-
-    #[test]
     fn auth_handlers_all_modules() {
         let modules = vec![
             "session",
@@ -94,30 +40,5 @@ mod tests {
             "anonymous_register",
         ];
         assert_eq!(modules.len(), 9);
-    }
-
-    #[test]
-    fn auth_handlers_module_names() {
-        let module_names = vec![
-            "session",
-            "login",
-            "register",
-            "password_reset",
-            "oauth",
-            "totp",
-            "two_factor",
-            "gdpr",
-            "anonymous_register",
-        ];
-        assert_eq!(module_names.len(), 9);
-        assert_eq!(module_names[0], "session");
-        assert_eq!(module_names[1], "login");
-        assert_eq!(module_names[2], "register");
-        assert_eq!(module_names[3], "password_reset");
-        assert_eq!(module_names[4], "oauth");
-        assert_eq!(module_names[5], "totp");
-        assert_eq!(module_names[6], "two_factor");
-        assert_eq!(module_names[7], "gdpr");
-        assert_eq!(module_names[8], "anonymous_register");
     }
 }
