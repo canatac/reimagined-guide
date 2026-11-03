@@ -5,6 +5,8 @@
 //! - Token refresh via refresh_token grant
 //! - Provider-specific OAuth2 endpoint configuration (Gmail, Outlook, Yahoo)
 //! - Encrypted refresh-token storage at rest (AES-256-GCM, issue #674)
+//! - Automatic access-token refresh before expiry
+//! - Explicit revoked/expired-token errors (issue #728)
 
 use crate::external_imap::ExternalImapAccount;
 use serde::{Deserialize, Serialize};
@@ -28,6 +30,34 @@ pub struct OAuth2TokenResult {
     pub expires_in: Option<i64>,
     pub scopes: Option<Vec<String>>,
 }
+
+/// Classify a provider token-endpoint failure so callers can map it to a
+/// stable error code (revoked/expired token vs. transient failure).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TokenRefreshError {
+    /// The refresh token was rejected (revoked, expired or invalid_grant).
+    Revoked,
+    /// Any other failure (network, malformed response, missing fields).
+    Other(String),
+}
+
+impl TokenRefreshError {
+    /// True when the provider explicitly rejected the refresh token.
+    pub fn is_revoked(&self) -> bool {
+        matches!(self, TokenRefreshError::Revoked)
+    }
+}
+
+impl std::fmt::Display for TokenRefreshError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TokenRefreshError::Revoked => write!(f, "OAuth2 refresh token revoked or expired"),
+            TokenRefreshError::Other(msg) => write!(f, "{}", msg),
+        }
+    }
+}
+
+impl std::error::Error for TokenRefreshError {}
 
 /// Get the OAuth2 provider config for a given provider name.
 pub fn provider_config(provider: &str) -> Option<OAuth2ProviderConfig> {
@@ -78,23 +108,6 @@ pub fn is_token_expired(account: &ExternalImapAccount) -> bool {
 /// Format (RFC 7628): user={email}\x01auth=Bearer {access_token}\x01\x01
 pub fn build_xoauth2_auth_string(email: &str, access_token: &str) -> String {
     format!("user={}\x01auth=Bearer {}\x01\x01", email, access_token)
-}
-
-/// Classify a provider token-endpoint failure so callers can map it to a
-/// stable error code (revoked/expired token vs. transient failure).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TokenRefreshError {
-    /// The refresh token was rejected (revoked, expired or invalid_grant).
-    Revoked,
-    /// Any other failure (network, malformed response, missing fields).
-    Other(String),
-}
-
-impl TokenRefreshError {
-    /// True when the provider explicitly rejected the refresh token.
-    pub fn is_revoked(&self) -> bool {
-        matches!(self, TokenRefreshError::Revoked)
-    }
 }
 
 /// Refresh an OAuth2 access token using the refresh_token grant.
@@ -323,7 +336,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn refresh_access_token_reports_revoked_without_refresh_token() {
+    async fn refresh_access_token_reports_missing_refresh_token() {
         let mut acct = test_account(Some(Utc::now() - chrono::Duration::minutes(1)));
         acct.oauth_refresh_token = None;
         let err = refresh_oauth2_access_token(&acct).await.unwrap_err();
