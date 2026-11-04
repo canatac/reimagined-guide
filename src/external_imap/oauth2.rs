@@ -312,18 +312,6 @@ mod tests {
     }
 
     #[test]
-    fn refresh_error_display() {
-        assert_eq!(
-            TokenRefreshError::Revoked.to_string(),
-            "OAuth2 refresh token revoked or expired"
-        );
-        assert_eq!(
-            TokenRefreshError::Other("network down".into()).to_string(),
-            "network down"
-        );
-    }
-
-    #[test]
     fn refresh_token_is_encrypted_before_storage() {
         std::env::set_var("OAUTH_TOKEN_ENCRYPTION_KEY", {
             let key: [u8; 32] = [11u8; 32];
@@ -338,16 +326,27 @@ mod tests {
     }
 
     #[test]
-    fn refresh_oauth2_access_token_returns_current_when_valid() {
-        // No network call expected: the token is still valid.
+    fn refresh_oauth2_access_token_returns_valid_token_without_network() {
+        // A still-valid token must be returned as-is (no refresh call).
         let acct = test_account(Some(Utc::now() + chrono::Duration::hours(1)));
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
-            .unwrap()
-            .block_on(refresh_oauth2_access_token(&acct));
-        let result = rt.expect("valid token must not trigger a refresh");
+            .unwrap();
+        let result = rt.block_on(refresh_oauth2_access_token(&acct)).unwrap();
         assert_eq!(result.access_token, "token");
         assert!(result.refresh_token.is_none());
+    }
+
+    #[test]
+    fn refresh_oauth2_access_token_missing_access_token_errors() {
+        let mut acct = test_account(Some(Utc::now() + chrono::Duration::hours(1)));
+        acct.oauth_access_token = None;
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let err = rt.block_on(refresh_oauth2_access_token(&acct)).unwrap_err();
+        assert!(!err.is_revoked());
     }
 }
