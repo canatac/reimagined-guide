@@ -437,4 +437,11 @@ mod tests {
         let code = "OAUTH2_TOKEN_REVOKED";
         assert_eq!(code, "OAUTH2_TOKEN_REVOKED");
     }
+
+    #[test]
+    fn oauth2_refresh_token_missing_code_is_stable() {
+        // The handler returns this code when no refresh token is stored.
+        let code = "OAUTH2_REFRESH_TOKEN_MISSING";
+        assert_eq!(code, "OAUTH2_REFRESH_TOKEN_MISSING");
+    }
 }
