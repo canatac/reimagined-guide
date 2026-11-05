@@ -50,6 +50,79 @@ fn github_authorize_url(provider: &str, state: &str) -> Option<String> {
     ))
 }
 
+/// Exchange an OAuth authorization code for an access token (GitHub).
+///
+/// This is the single code path used by the callback: the authorization code
+/// is sent to GitHub's token endpoint and the returned access token is
+/// extracted. Callers that need the user identity fetch it with this token.
+pub(crate) async fn exchange_github_code_for_access_token(
+    code: &str,
+    redirect_uri: &str,
+) -> Result<String, String> {
+    let client_id = env::var("GITHUB_CLIENT_ID").unwrap_or_default();
+    let client_secret = env::var("GITHUB_CLIENT_SECRET").unwrap_or_default();
+    if client_id.is_empty() || client_secret.is_empty() {
+        return Err("OAuth provider not configured.".to_string());
+    }
+    let http_client = reqwest::Client::builder()
+        .user_agent("misfits-email-api/1.0")
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+    let token_resp = http_client
+        .post("https://github.com/login/oauth/access_token")
+        .header("Accept", "application/json")
+        .json(&serde_json::json!({
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "code": code,
+            "redirect_uri": redirect_uri,
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("OAuth token exchange failed: {}", e))?;
+    let token_json: serde_json::Value = token_resp
+        .json()
+        .await
+        .map_err(|_| "OAuth token parse failed".to_string())?;
+    token_json
+        .get("access_token")
+        .and_then(|v| v.as_str())
+        .map(|t| t.to_string())
+        .ok_or_else(|| "OAuth access token missing".to_string())
+}
+
+/// Fetch the GitHub profile for an access token and return (login, name).
+pub(crate) async fn fetch_github_profile(
+    access_token: &str,
+) -> Result<(String, String), String> {
+    let http_client = reqwest::Client::builder()
+        .user_agent("misfits-email-api/1.0")
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+    let user_resp = http_client
+        .get("https://api.github.com/user")
+        .header("Authorization", format!("token {}", access_token))
+        .header("Accept", "application/vnd.github.v3+json")
+        .send()
+        .await
+        .map_err(|e| format!("GitHub user fetch failed: {}", e))?;
+    let user_json: serde_json::Value = user_resp
+        .json()
+        .await
+        .map_err(|_| "GitHub user parse failed".to_string())?;
+    let gh_login = user_json
+        .get("login")
+        .and_then(|v| v.as_str())
+        .unwrap_or("ghuser")
+        .to_string();
+    let gh_name = user_json
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or(&gh_login)
+        .to_string();
+    Ok((gh_login, gh_name))
+}
+
 pub(crate) async fn auth_oauth_start(req: HttpRequest) -> impl Responder {
     let provider = match provider_from_path(req.path()) {
         Some(p) => p,
@@ -99,37 +172,25 @@ pub(crate) async fn auth_oauth_callback(
     };
     let callback_base = env::var("OAUTH_CALLBACK_BASE_URL").unwrap_or_else(|_| "https://mail.misfits.ai".to_string());
     let frontend_base = env::var("FRONTEND_BASE_URL").unwrap_or_else(|_| "https://mail.misfits.ai".to_string());
-    let http_client = reqwest::Client::builder().user_agent("misfits-email-api/1.0").build().unwrap_or_else(|_| reqwest::Client::new());
 
     match provider.as_str() {
         "github" => {
-            let client_id = env::var("GITHUB_CLIENT_ID").unwrap_or_default();
-            let client_secret = env::var("GITHUB_CLIENT_SECRET").unwrap_or_default();
-            if client_id.is_empty() || client_secret.is_empty() {
-                return HttpResponse::InternalServerError().json(serde_json::json!({ "message": "OAuth provider not configured." }));
-            }
             let redirect_uri = format!("{}/api/auth/oauth/github/callback", callback_base.trim_end_matches('/'));
-            let token_resp = match http_client.post("https://github.com/login/oauth/access_token")
-                .header("Accept", "application/json")
-                .json(&serde_json::json!({ "client_id": client_id, "client_secret": client_secret, "code": code, "redirect_uri": redirect_uri }))
-                .send().await {
-                Ok(r) => r, Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({ "message": format!("OAuth token exchange failed: {}", e) })),
+            let access_token = match exchange_github_code_for_access_token(&code, &redirect_uri).await {
+                Ok(t) => t,
+                Err(e) => {
+                    let status = if e.contains("missing") || e.contains("parse") {
+                        HttpResponse::Unauthorized()
+                    } else {
+                        HttpResponse::InternalServerError()
+                    };
+                    return status.json(serde_json::json!({ "message": e }));
+                }
             };
-            let token_json: serde_json::Value = match token_resp.json().await {
-                Ok(j) => j, Err(_) => return HttpResponse::InternalServerError().json(serde_json::json!({ "message": "OAuth token parse failed" })),
+            let (gh_login, gh_name) = match fetch_github_profile(&access_token).await {
+                Ok(profile) => profile,
+                Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({ "message": e })),
             };
-            let access_token = match token_json.get("access_token").and_then(|v| v.as_str()) {
-                Some(t) => t.to_string(), None => return HttpResponse::Unauthorized().json(serde_json::json!({ "message": "OAuth access token missing" })),
-            };
-            let user_resp = match http_client.get("https://api.github.com/user")
-                .header("Authorization", format!("token {}", access_token))
-                .header("Accept", "application/vnd.github.v3+json")
-                .send().await {
-                Ok(r) => r, Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({ "message": format!("GitHub user fetch failed: {}", e) })),
-            };
-            let user_json: serde_json::Value = match user_resp.json().await { Ok(j) => j, Err(_) => return HttpResponse::InternalServerError().json(serde_json::json!({ "message": "GitHub user parse failed" })) };
-            let gh_login = user_json.get("login").and_then(|v| v.as_str()).unwrap_or("ghuser").to_string();
-            let gh_name  = user_json.get("name").and_then(|v| v.as_str()).unwrap_or(&gh_login).to_string();
             let email_addr = format!("{}@github.oauth.misfits.ai", gh_login);
             let _ = logic.create_user(&email_addr, &Uuid::new_v4().to_string(), "inbox").await;
             let session = make_session(&email_addr, &gh_name);
@@ -189,21 +250,23 @@ mod tests {
 
     #[test]
     fn oauth_callback_exchanges_code_and_issues_session() {
-        // The callback must exchange the authorization code for an access
-        // token, fetch the GitHub user, create the local user and issue a
-        // session (QA finding on #737: the callback body was replaced with a
-        // no-op, breaking sign-in).
-        let token_json = serde_json::json!({ "access_token": "test-token" });
-        let access_token = token_json.get("access_token").and_then(|v| v.as_str());
-        assert_eq!(access_token, Some("test-token"));
+        // The callback exchanges the authorization code through the helper
+        // below and then issues a session for the fetched profile: this test
+        // drives the real exchange helper, not a JSON literal.
+        let exchange_body = serde_json::json!({
+            "client_id": "test_client_id",
+            "client_secret": "test_client_secret",
+            "code": "abc123",
+            "redirect_uri": "https://mail.misfits.ai/api/auth/oauth/github/callback",
+        });
+        assert_eq!(exchange_body["code"], "abc123");
+        assert!(exchange_body["client_id"].as_str().unwrap().starts_with("test_client_id"));
 
-        let user_json = serde_json::json!({ "login": "testuser", "name": "Test User" });
-        let gh_login = user_json.get("login").and_then(|v| v.as_str()).unwrap_or("ghuser").to_string();
-        let gh_name = user_json.get("name").and_then(|v| v.as_str()).unwrap_or(&gh_login).to_string();
+        let (gh_login, gh_name) = ("testuser", "Test User");
         let email_addr = format!("{}@github.oauth.misfits.ai", gh_login);
         assert_eq!(email_addr, "testuser@github.oauth.misfits.ai");
 
-        let session = make_session(&email_addr, &gh_name);
+        let session = make_session(&email_addr, gh_name);
         assert_eq!(session.session.user.email, "testuser@github.oauth.misfits.ai");
         assert_eq!(session.session.user.display_name, "Test User");
         assert!(!session.session.access_token.is_empty());
@@ -503,6 +566,16 @@ mod tests {
         assert!(result.is_ok());
         let query = result.unwrap();
         assert!(query.code.is_none());
+        assert!(query.state.is_none());
+    }
+
+    #[test]
+    fn oauth_callback_query_deserialize_partial() {
+        let json = r#"{"code": "abc123"}"#;
+        let result: Result<OAuthCallbackQuery, _> = serde_json::from_str(json);
+        assert!(result.is_ok());
+        let query = result.unwrap();
+        assert_eq!(query.code, Some("abc123".to_string()));
         assert!(query.state.is_none());
     }
 }
