@@ -10,10 +10,18 @@
 
 use super::super::*;
 use simple_smtp_server::external_imap::oauth2::{
-    encrypt_refresh_token_for_storage, is_token_expired, provider_config, refresh_oauth2_access_token,
-    refresh_oauth2_token, TokenRefreshError,
+    is_token_expired, provider_config, refresh_oauth2_access_token, refresh_oauth2_token,
+    TokenRefreshError,
 };
 use simple_smtp_server::external_imap::{build_xoauth2_auth_string, ExternalImapAccount, OAuth2TokenResult};
+
+/// Encrypt a refresh token for storage at rest (AES-256-GCM).
+/// Falls back to the plaintext value when encryption is unavailable so a
+/// token is never lost; decryption uses decrypt_token_compat.
+fn encrypt_refresh_token_for_storage(refresh_token: &str) -> String {
+    simple_smtp_server::security::oauth_token_crypto::encrypt_token(refresh_token)
+        .unwrap_or_else(|_| refresh_token.to_string())
+}
 
 /// Input for OAuth2 authorization code exchange.
 #[derive(Debug, serde::Deserialize)]

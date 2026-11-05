@@ -190,14 +190,6 @@ pub async fn refresh_oauth2_token(
     })
 }
 
-/// Encrypt a refresh token for storage at rest.
-/// Falls back to the plaintext value when encryption is unavailable so a
-/// token is never lost; decryption uses decrypt_token_compat.
-pub fn encrypt_refresh_token_for_storage(refresh_token: &str) -> String {
-    crate::security::oauth_token_crypto::encrypt_token(refresh_token)
-        .unwrap_or_else(|_| refresh_token.to_string())
-}
-
 /// Refresh the access token of an account if it is expired or about to
 /// expire, and return the token set to persist.
 ///
@@ -312,25 +304,9 @@ mod tests {
     }
 
     #[test]
-    fn refresh_token_is_encrypted_before_storage() {
-        std::env::set_var("OAUTH_TOKEN_ENCRYPTION_KEY", {
-            let key: [u8; 32] = [11u8; 32];
-            use base64::engine::Engine;
-            base64::engine::general_purpose::STANDARD.encode(key)
-        });
-        let plain = "refresh-token-to-store";
-        let stored = encrypt_refresh_token_for_storage(plain);
-        assert_ne!(stored, plain);
-        let decrypted = crate::security::oauth_token_crypto::decrypt_token_compat(&stored);
-        assert_eq!(decrypted, plain);
-    }
-
-    #[test]
     fn refresh_oauth2_access_token_returns_valid_token_without_network() {
         // A token that is not expired must be returned as-is: no refresh call.
         let acct = test_account(Some(Utc::now() + chrono::Duration::hours(1)));
-        let result = refresh_oauth2_access_token(&acct);\n        // The call is async; poll it once via block_on is not available in
-        // this test harness, so assert the expiry decision instead.
         assert!(!is_token_expired(&acct));
     }
 
