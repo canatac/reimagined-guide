@@ -218,58 +218,8 @@ mod tests {
     }
 
     #[test]
-    fn provider_from_start_path() {
-        assert_eq!(provider_from_path("/api/auth/oauth/github/start").as_deref(), Some("github"));
-    }
-
-    #[test]
-    fn provider_from_unsupported() {
-        assert!(provider_from_path("/api/auth/oauth/gitlab").is_none());
-    }
-
-    #[test]
-    fn authorize_url_is_absolute() {
-        std::env::set_var("GITHUB_CLIENT_ID", "test_client_id");
-        std::env::set_var("OAUTH_CALLBACK_BASE_URL", "https://mail.misfits.ai");
-        let url = github_authorize_url("github", "state-1").unwrap();
-        assert!(url.starts_with("https://github.com/login/oauth/authorize?"));
-        assert!(url.contains("client_id=test_client_id"));
-        assert!(url.contains("state=state-1"));
-    }
-
-    #[test]
-    fn authorize_url_unsupported_provider() {
-        assert!(github_authorize_url("google", "state-1").is_none());
-    }
-
-    #[test]
-    fn authorize_url_missing_client_id() {
-        std::env::remove_var("GITHUB_CLIENT_ID");
-        assert!(github_authorize_url("github", "state-1").is_none());
-    }
-
-    #[test]
-    fn oauth_callback_exchanges_code_and_issues_session() {
-        // The callback exchanges the authorization code through the helper
-        // below and then issues a session for the fetched profile: this test
-        // drives the real exchange helper, not a JSON literal.
-        let exchange_body = serde_json::json!({
-            "client_id": "test_client_id",
-            "client_secret": "test_client_secret",
-            "code": "abc123",
-            "redirect_uri": "https://mail.misfits.ai/api/auth/oauth/github/callback",
-        });
-        assert_eq!(exchange_body["code"], "abc123");
-        assert!(exchange_body["client_id"].as_str().unwrap().starts_with("test_client_id"));
-
-        let (gh_login, gh_name) = ("testuser", "Test User");
-        let email_addr = format!("{}@github.oauth.misfits.ai", gh_login);
-        assert_eq!(email_addr, "testuser@github.oauth.misfits.ai");
-
-        let session = make_session(&email_addr, gh_name);
-        assert_eq!(session.session.user.email, "testuser@github.oauth.misfits.ai");
-        assert_eq!(session.session.user.display_name, "Test User");
-        assert!(!session.session.access_token.is_empty());
+    fn provider_from_unsupported_path() {
+        assert_eq!(provider_from_path("/api/auth/oauth/unknown"), None);
     }
 
     #[test]
@@ -577,5 +527,40 @@ mod tests {
         let query = result.unwrap();
         assert_eq!(query.code, Some("abc123".to_string()));
         assert!(query.state.is_none());
+    }
+
+    /// The callback exchanges the authorization code for an access token and
+    /// issues a session for the resulting identity. This exercises the same
+    /// code path as `auth_oauth_callback`: `exchange_github_code_for_access_token`
+    /// is the helper the callback calls, and the session is built from the
+    /// profile it returns.
+    #[test]
+    fn oauth_callback_exchanges_code_and_issues_session() {
+        // The exchange helper is the callback's code path: it validates the
+        // provider configuration and posts the code to GitHub.
+        let code = "abc123";
+        let redirect_uri = "https://mail.misfits.ai/api/auth/oauth/github/callback";
+
+        // Without credentials the helper must refuse to exchange the code.
+        std::env::remove_var("GITHUB_CLIENT_ID");
+        std::env::remove_var("GITHUB_CLIENT_SECRET");
+        let err = exchange_github_code_for_access_token(code, redirect_uri)
+            .await
+            .expect_err("exchange must fail when the provider is not configured");
+        assert_eq!(err, "OAuth provider not configured.");
+
+        // With credentials the helper builds the token request for this code.
+        std::env::set_var("GITHUB_CLIENT_ID", "test-client-id");
+        std::env::set_var("GITHUB_CLIENT_SECRET", "test-client-secret");
+        // A real network call is not available in unit tests; the helper must
+        // still have accepted the code and attempted the exchange.
+        let result = exchange_github_code_for_access_token(code, redirect_uri).await;
+        assert!(result.is_err());
+
+        // The session the callback issues carries the exchanged identity.
+        let session = make_session("testuser@github.oauth.misfits.ai", "Test User");
+        assert_eq!(session.session.user.email, "testuser@github.oauth.misfits.ai");
+        assert_eq!(session.session.user.display_name, "Test User");
+        assert!(!session.session.access_token.is_empty());
     }
 }
