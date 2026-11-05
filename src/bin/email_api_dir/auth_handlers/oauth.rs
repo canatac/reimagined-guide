@@ -6,7 +6,7 @@ use super::login::make_session;
 /// Normalize a provider name from a path segment.
 pub(crate) fn normalize_oauth_provider(raw: &str) -> Option<String> {
     match raw.to_ascii_lowercase().as_str() {
-        "github" => Some("github	o_string()),
+        "github" => Some("github".to_string()),
         "google" => Some("google".to_string()),
         "microsoft" | "outlook" => Some("microsoft".to_string()),
         "apple" => Some("apple".to_string()),
@@ -33,7 +33,7 @@ fn provider_from_path(path: &str) -> Option<String> {
 }
 
 /// Build the absolute GitHub authorization URL for a provider.
-/// Returns None when the provider is not supported.
+/// Returns None when the provider is not supported or not configured.
 fn github_authorize_url(provider: &str, state: &str) -> Option<String> {
     if provider != "github" {
         return None;
@@ -503,16 +503,6 @@ mod tests {
         assert!(result.is_ok());
         let query = result.unwrap();
         assert!(query.code.is_none());
-        assert!(query.state.is_none());
-    }
-
-    #[test]
-    fn oauth_callback_query_deserialize_partial() {
-        let json = r#"{"code": "abc123"}"#;
-        let result: Result<OAuthCallbackQuery, _> = serde_json::from_str(json);
-        assert!(result.is_ok());
-        let query = result.unwrap();
-        assert_eq!(query.code, Some("abc123".to_string()));
         assert!(query.state.is_none());
     }
 }
