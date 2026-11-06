@@ -7,6 +7,7 @@
 //! - Automatic access-token refresh before expiry
 //! - Explicit revoked/expired-token errors
 //! - Manual token update (testing)
+//! - Provider catalogue for the "Connect an external account" picker
 
 use super::super::*;
 use simple_smtp_server::external_imap::oauth2::{
@@ -34,6 +35,89 @@ pub struct OAuth2TokenUpdateInput {
     pub refresh_token: Option<String>,
     pub expires_in: Option<i64>,
     pub scopes: Option<Vec<String>>,
+}
+
+/// A provider offered in the "Connect an external account" picker.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OAuth2ProviderOption {
+    pub value: String,
+    pub label: String,
+    pub authorization_endpoint: String,
+    pub token_endpoint: String,
+    pub scopes: Vec<String>,
+}
+
+/// Provider keys accepted by the picker and the start route.
+/// `other` covers any provider not shipped as a built-in.
+pub const OAUTH2_PROVIDER_KEYS: [&str; 4] = ["gmail", "outlook", "yahoo", "other"];
+
+/// Normalize a provider key from user input (picker or query param).
+/// Accepts the common aliases and rejects anything else.
+pub fn normalize_oauth2_provider_key(raw: &str) -> Option<String> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "gmail" | "google" => Some("gmail".to_string()),
+        "outlook" | "microsoft" | "office365" => Some("outlook".to_string()),
+        "yahoo" => Some("yahoo".to_string()),
+        "other" | "autre" => Some("other".to_string()),
+        _ => None,
+    }
+}
+
+/// Authorization endpoint of a provider, used by the picker.
+fn provider_authorization_endpoint(provider: &str) -> Option<&'static str> {
+    match provider {
+        "gmail" => Some("https://accounts.google.com/o/oauth2/v2/auth"),
+        "outlook" => Some("https://login.microsoftonline.com/common/oauth2/v2.0/authorize"),
+        "yahoo" => Some("https://api.login.yahoo.com/oauth2/request_auth"),
+        _ => None,
+    }
+}
+
+/// Build the provider catalogue served to the account picker.
+/// Lists Gmail, Outlook, Yahoo and the 'Other' option; 'Other' carries no
+/// built-in endpoints because the operator configures the provider.
+pub fn oauth2_provider_catalogue() -> Vec<OAuth2ProviderOption> {
+    let mut providers = Vec::new();
+    for key in OAUTH2_PROVIDER_KEYS {
+        let (label, authorization_endpoint, token_endpoint, scopes) = match key {
+            "gmail" => (
+                "Gmail",
+                "https://accounts.google.com/o/oauth2/v2/auth",
+                "https://oauth2.googleapis.com/token",
+                vec!["https://mail.google.com/".to_string()],
+            ),
+            "outlook" => (
+                "Outlook",
+                "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+                "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+                vec![
+                    "https://outlook.office.com/IMAP.AccessAsUser.All".to_string(),
+                    "offline_access".to_string(),
+                ],
+            ),
+            "yahoo" => (
+                "Yahoo",
+                "https://api.login.yahoo.com/oauth2/request_auth",
+                "https://api.login.yahoo.com/oauth2/get_token",
+                vec!["mail-r".to_string()],
+            ),
+            _ => (
+                "Other",
+                "",
+                "",
+                Vec::new(),
+            ),
+        };
+        providers.push(OAuth2ProviderOption {
+            value: key.to_string(),
+            label: label.to_string(),
+            authorization_endpoint: authorization_endpoint.to_string(),
+            token_endpoint: token_endpoint.to_string(),
+            scopes,
+        });
+    }
+    providers
 }
 
 /// Handle OAuth2 authorization code callback.
@@ -233,6 +317,64 @@ pub async fn ensure_valid_access_token(
     Ok(token.access_token)
 }
 
+/// API handler: GET /api/external-accounts/oauth2/providers
+/// Returns the provider catalogue for the "Connect an external account" picker.
+pub async fn api_oauth2_providers_list(
+    req: actix_web::HttpRequest,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    if let Err(resp) = admin_auth::require_auth(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
+
+    HttpResponse::Ok().json(serde_json::json!({
+        "providers": oauth2_provider_catalogue()
+    }))
+}
+
+/// API handler: GET /api/external-accounts/oauth2/start?provider=gmail|outlook|yahoo|other
+///
+/// Starts the consent flow from the provider chosen by the user, without
+/// requiring an already-created external account. The provider is read from
+/// the `provider` query parameter.
+pub async fn api_oauth2_start_by_provider(
+    req: actix_web::HttpRequest,
+    query: web::Query<OAuth2StartQuery>,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    if let Err(resp) = admin_auth::require_auth(&req, &mongo, &mongo_db_name()).await {
+        return resp;
+    }
+
+    let provider = match normalize_oauth2_provider_key(&query.provider) {
+        Some(p) => p,
+        None => {
+            return HttpResponse::BadRequest().json(serde_json::json!({
+                "error": { "code": "OAUTH2_PROVIDER_NOT_SUPPORTED", "message": format!("Provider '{}' is not offered in the account picker", query.provider) }
+            }));
+        }
+    };
+
+    let callback_base = std::env::var("OAUTH_CALLBACK_BASE_URL")
+        .unwrap_or_else(|_| "https://mail.misfits.ai".to_string());
+    let redirect_uri = format!(
+        "{}/api/external-accounts/oauth2/callback",
+        callback_base.trim_end_matches('/')
+    );
+    let state = Uuid::new_v4().to_string();
+
+    match build_oauth2_authorize_url(&provider, &redirect_uri, &state) {
+        Some(url) => HttpResponse::Ok().json(serde_json::json!({
+            "authorizationUrl": url,
+            "state": state,
+            "provider": provider,
+        })),
+        None => HttpResponse::BadRequest().json(serde_json::json!({
+            "error": { "code": "OAUTH2_PROVIDER_NOT_SUPPORTED", "message": format!("Provider '{}' does not support OAuth2 authorization URL generation", provider) }
+        })),
+    }
+}
+
 /// API handler: GET /api/external-accounts/{id}/oauth2/start
 /// Returns the authorization URL for the account's provider.
 pub async fn api_oauth2_start(
@@ -329,19 +471,11 @@ mod tests {
 
     #[test]
     fn refresh_token_is_encrypted_before_storage() {
-        // Deterministic test-only key: no literal cryptographic value in the
-        // source (CodeQL rust/hard-coded-cryptographic-value).
-        let mut key = [0u8; 32];
-        let mut acc: u8 = 7;
-        for slot in key.iter_mut() {
-            acc = acc.wrapping_mul(31).wrapping_add(7).wrapping_add(17);
-            *slot = acc;
-        }
-        use base64::engine::Engine;
-        std::env::set_var(
-            "OAUTH_TOKEN_ENCRYPTION_KEY",
-            base64::engine::general_purpose::STANDARD.encode(key),
-        );
+        std::env::set_var("OAUTH_TOKEN_ENCRYPTION_KEY", {
+            let key: [u8; 32] = [11u8; 32];
+            use base64::engine::Engine;
+            base64::engine::general_purpose::STANDARD.encode(key)
+        });
         let plain = "refresh-token-to-store";
         let stored = encrypt_refresh_token_for_storage(plain);
         assert_ne!(stored, plain);
@@ -362,5 +496,35 @@ mod tests {
         // The handler returns this code when no refresh token is stored.
         let code = "OAUTH2_REFRESH_TOKEN_MISSING";
         assert_eq!(code, "OAUTH2_REFRESH_TOKEN_MISSING");
+    }
+
+    #[test]
+    fn provider_catalogue_lists_other_option() {
+        let providers = oauth2_provider_catalogue();
+        let values: Vec<&str> = providers.iter().map(|p| p.value.as_str()).collect();
+        assert_eq!(values, vec!["gmail", "outlook", "yahoo", "other"]);
+        let other = providers.iter().find(|p| p.value == "other").unwrap();
+        assert_eq!(other.label, "Other");
+        assert!(other.authorization_endpoint.is_empty());
+    }
+
+    #[test]
+    fn provider_keys_are_normalized() {
+        assert_eq!(normalize_oauth2_provider_key("Gmail").as_deref(), Some("gmail"));
+        assert_eq!(normalize_oauth2_provider_key("google").as_deref(), Some("gmail"));
+        assert_eq!(normalize_oauth2_provider_key("outlook").as_deref(), Some("outlook"));
+        assert_eq!(normalize_oauth2_provider_key("microsoft").as_deref(), Some("outlook"));
+        assert_eq!(normalize_oauth2_provider_key("yahoo").as_deref(), Some("yahoo"));
+        assert_eq!(normalize_oauth2_provider_key("autre").as_deref(), Some("other"));
+        assert_eq!(normalize_oauth2_provider_key("other").as_deref(), Some("other"));
+        assert_eq!(normalize_oauth2_provider_key("proton"), None);
+    }
+
+    #[test]
+    fn provider_authorization_endpoints_are_known() {
+        assert!(provider_authorization_endpoint("gmail").is_some());
+        assert!(provider_authorization_endpoint("outlook").is_some());
+        assert!(provider_authorization_endpoint("yahoo").is_some());
+        assert!(provider_authorization_endpoint("other").is_none());
     }
 }

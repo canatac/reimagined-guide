@@ -3,6 +3,16 @@ Feature: OAuth2 IMAP authentication (MW-2026-062 / issue #728)
   store their refresh token encrypted at rest, and renew the access token
   automatically before it expires.
 
+  Background:
+    Given the source file "src/bin/email_api_dir/external_handlers/oauth2.rs" is loaded
+    And the source file "src/external_imap/oauth2.rs" is loaded
+    And the source file "src/bin/email_api_dir/startup_routes/external.rs" is loaded
+    And the source file "src/security/oauth_token_crypto.rs" is loaded
+
+  Scenario: Provider picker offers Gmail, Outlook, Yahoo and Other
+    Given the source file "src/bin/email_api_dir/external_handlers/oauth2.rs" is loaded
+    Then the provider picker offers Gmail, Outlook, Yahoo and Other
+
   Scenario: Successful OAuth2 connection
     Given an external IMAP account with provider "gmail"
     And the provider client credentials are configured
