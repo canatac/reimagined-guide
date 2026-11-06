@@ -46,6 +46,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ExternalImapAccount'
+  /api/external-accounts/oauth2/providers:
+    get:
+      summary: List OAuth2 providers for the account picker
+      description: >
+        Returns the providers the client may offer in the "Connect an external
+        account" picker (Gmail, Outlook, Yahoo). Each entry carries the
+        provider key stored on the account, the display label, and the
+        authorization/token endpoints the client needs to start the flow.
+      responses:
+        '200':
+          description: Provider catalogue
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  providers:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/OAuth2ProviderOption'
   /api/external-accounts/{id}:
     get:
       summary: Get external account
@@ -102,6 +122,130 @@ paths:
                 properties:
                   deleted:
                     type: boolean
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/external-accounts/{id}/oauth2/start:
+    get:
+      summary: Get the provider authorization URL
+      description: >
+        Returns the provider consent URL in the body so a client that cannot
+        follow a redirect can navigate to it directly.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Authorization URL
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuth2AuthorizationUrl'
+        '400':
+          description: Provider does not support OAuth2
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/external-accounts/{id}/oauth2/authorize:
+    get:
+      summary: Redirect to the provider consent screen
+      description: >
+        302 redirect to the provider authorization endpoint. The client may
+        navigate here directly; the body also carries the URL for clients that
+        read it instead of following the Location header.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '302':
+          description: Redirect to the provider consent screen
+          headers:
+            Location:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuth2AuthorizationUrl'
+        '400':
+          description: Provider does not support OAuth2
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/external-accounts/{id}/oauth2/callback:
+    post:
+      summary: Exchange the authorization code for tokens
+      description: >
+        Stores the returned refresh token encrypted at rest (AES-256-GCM).
+        A revoked or expired code is reported as HTTP 401 with code
+        OAUTH2_TOKEN_REVOKED.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OAuth2CallbackInput'
+      responses:
+        '200':
+          description: Tokens stored
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  message: { type: string }
+        '401':
+          description: Code revoked or expired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/external-accounts/{id}/oauth2/refresh:
+    post:
+      summary: Refresh an expired access token
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Tokens refreshed (or still valid)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  message: { type: string }
+        '400':
+          description: No refresh token stored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Refresh token revoked or expired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '404':
           $ref: '#/components/responses/NotFound'
   /api/external-accounts/{id}/test:
@@ -356,6 +500,38 @@ components:
           properties:
             code: { type: string }
             message: { type: string }
+
+    OAuth2ProviderOption:
+      type: object
+      properties:
+        value:
+          type: string
+          description: Provider key stored on the account
+          example: gmail
+        label:
+          type: string
+          description: Label shown in the account picker
+          example: Gmail
+        authorizationEndpoint: { type: string }
+        tokenEndpoint: { type: string }
+        scopes:
+          type: array
+          items: { type: string }
+
+    OAuth2AuthorizationUrl:
+      type: object
+      properties:
+        authorizationUrl: { type: string, format: uri }
+        state: { type: string }
+        provider: { type: string }
+
+    OAuth2CallbackInput:
+      type: object
+      required: [accountId, authorizationCode, redirectUri]
+      properties:
+        accountId: { type: string }
+        authorizationCode: { type: string }
+        redirectUri: { type: string, format: uri }
 
     CreateExternalAccountInput:
       type: object
