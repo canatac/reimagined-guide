@@ -10,18 +10,11 @@
 
 use super::super::*;
 use simple_smtp_server::external_imap::oauth2::{
+    build_oauth2_authorize_url, encrypt_refresh_token_for_storage, exchange_authorization_code,
     is_token_expired, provider_config, refresh_oauth2_access_token, refresh_oauth2_token,
     TokenRefreshError,
 };
 use simple_smtp_server::external_imap::{build_xoauth2_auth_string, ExternalImapAccount, OAuth2TokenResult};
-
-/// Encrypt a refresh token for storage at rest (AES-256-GCM).
-/// Falls back to the plaintext value when encryption is unavailable so a
-/// token is never lost; decryption uses decrypt_token_compat.
-fn encrypt_refresh_token_for_storage(refresh_token: &str) -> String {
-    simple_smtp_server::security::oauth_token_crypto::encrypt_token(refresh_token)
-        .unwrap_or_else(|_| refresh_token.to_string())
-}
 
 /// Input for OAuth2 authorization code exchange.
 #[derive(Debug, serde::Deserialize)]
@@ -100,6 +93,9 @@ pub async fn api_oauth2_callback(
                 })),
             }
         }
+        Err(TokenRefreshError::Revoked) => HttpResponse::Unauthorized().json(serde_json::json!({
+            "error": { "code": "OAUTH2_TOKEN_REVOKED", "message": "The OAuth2 authorization code was revoked or expired; reconnect the account" }
+        })),
         Err(e) => HttpResponse::BadRequest().json(serde_json::json!({
             "error": { "code": "OAUTH2_CODE_EXCHANGE_FAILED", "message": e.to_string() }
         })),
@@ -131,7 +127,7 @@ pub async fn api_oauth2_update_tokens(
         &input.account_id,
         &input.access_token,
         refresh_token.as_deref(),
-        &input.expires_in,
+        input.expires_in,
     ).await {
         Ok(Some(_)) => HttpResponse::Ok().json(serde_json::json!({
             "status": "ok",
@@ -228,106 +224,13 @@ pub async fn api_oauth2_refresh(
     }
 }
 
-/// Exchange an OAuth2 authorization code for access/refresh tokens.
-async fn exchange_authorization_code(
+/// Ensure the access token of an account is valid, refreshing it if needed.
+/// Used before opening an IMAP session so callers never use an expired token.
+pub async fn ensure_valid_access_token(
     account: &ExternalImapAccount,
-    code: &str,
-    redirect_uri: &str,
-) -> Result<OAuth2TokenResult, String> {
-    let config = provider_config(&account.provider)
-        .ok_or_else(|| format!("Unsupported OAuth2 provider: {}", account.provider))?;
-
-    if config.client_id.is_empty() || config.client_secret.is_empty() {
-        return Err(format!(
-            "OAuth2 client credentials not configured for provider: {}",
-            account.provider
-        ));
-    }
-
-    let client = reqwest::Client::new();
-    let form_body = format!(
-        "grant_type=authorization_code&client_id={}&client_secret={}&code={}&redirect_uri={}",
-        urlencoding::encode(&config.client_id),
-        urlencoding::encode(&config.client_secret),
-        urlencoding::encode(code),
-        urlencoding::encode(redirect_uri),
-    );
-
-    let response = client
-        .post(&config.token_endpoint)
-        .header("Content-Type", "application/x-www-form-urlencoded")
-        .body(form_body)
-        .send()
-        .await
-        .map_err(|e| format!("OAuth2 code exchange request failed: {e}"))?;
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        return Err(format!("OAuth2 code exchange failed (HTTP {status}): {body}"));
-    }
-
-    let token_data: serde_json::Value = response
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse OAuth2 token response: {e}"))?;
-
-    let access_token = token_data["access_token"]
-        .as_str()
-        .ok_or_else(|| "No access_token in OAuth2 response".to_string())?
-        .to_string();
-
-    let refresh_token = token_data["refresh_token"].as_str().map(String::from);
-    let expires_in = token_data["expires_in"].as_i64();
-    let scopes = token_data["scope"].as_str().map(|s| {
-        s.split_whitespace().map(String::from).collect()
-    });
-
-    Ok(OAuth2TokenResult {
-        access_token,
-        refresh_token,
-        expires_in,
-        scopes,
-    })
-}
-
-/// Generate the OAuth2 authorization URL for initiating the consent flow.
-/// Returns the URL the user should be redirected to for provider consent.
-pub fn build_oauth2_authorize_url(
-    provider: &str,
-    redirect_uri: &str,
-    state: &str,
-) -> Option<String> {
-    let config = provider_config(provider)?;
-    let scope_param = config.scopes.join(" ");
-    let encoded_redirect = urlencoding::encode(redirect_uri);
-    let encoded_scope = urlencoding::encode(&scope_param);
-    let encoded_state = urlencoding::encode(state);
-
-    match provider.to_ascii_lowercase().as_str() {
-        "gmail" | "google" => Some(format!(
-            "https://accounts.google.com/o/oauth2/v2/auth?client_id={}&redirect_uri={}&response_type=code&scope={}&access_type=offline&prompt=consent&state={}",
-            urlencoding::encode(&config.client_id),
-            encoded_redirect,
-            encoded_scope,
-            encoded_state,
-        )),
-        "outlook" | "microsoft" | "office365" => Some(format!(
-            "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id={}&redirect_uri={}&response_type=code&scope={}&state={}",
-            urlencoding::encode(&config.client_id),
-            encoded_redirect,
-            encoded_scope,
-            encoded_state,
-        )),
-        "yahoo" => Some(format!(
-            "https://api.login.yahoo.com/oauth2/request_auth?client_id={}&redirect_uri={}&response_type=code&scope={}&state={}",
-            urlencoding::encode(&config.client_id),
-            encoded_redirect,
-            encoded_scope,
-            encoded_state,
-        )),
-        _ => None,
-    }
+) -> Result<String, TokenRefreshError> {
+    let token = refresh_oauth2_access_token(account).await?;
+    Ok(token.access_token)
 }
 
 /// API handler: GET /api/external-accounts/{id}/oauth2/start

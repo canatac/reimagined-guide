@@ -2,7 +2,7 @@
 //!
 //! Implements:
 //! - XOAUTH2 SASL string construction (RFC 7628)
-//! - Token refresh via refresh_token grant
+//! - Authorization-code exchange and refresh_token grant
 //! - Provider-specific OAuth2 endpoint configuration (Gmail, Outlook, Yahoo)
 //! - Encrypted refresh-token storage at rest (AES-256-GCM, issue #674)
 //! - Automatic access-token refresh before expiry
@@ -110,6 +110,85 @@ pub fn build_xoauth2_auth_string(email: &str, access_token: &str) -> String {
     format!("user={}\x01auth=Bearer {}\x01\x01", email, access_token)
 }
 
+/// Encrypt a refresh token for storage at rest (AES-256-GCM).
+/// Falls back to the plaintext value when encryption is unavailable so a
+/// token is never lost; decryption uses decrypt_token_compat.
+pub fn encrypt_refresh_token_for_storage(refresh_token: &str) -> String {
+    crate::security::oauth_token_crypto::encrypt_token(refresh_token)
+        .unwrap_or_else(|_| refresh_token.to_string())
+}
+
+/// Exchange an OAuth2 authorization code for access/refresh tokens.
+pub async fn exchange_authorization_code(
+    account: &ExternalImapAccount,
+    code: &str,
+    redirect_uri: &str,
+) -> Result<OAuth2TokenResult, TokenRefreshError> {
+    let config = provider_config(&account.provider)
+        .ok_or_else(|| TokenRefreshError::Other(format!("Unsupported OAuth2 provider: {}", account.provider)))?;
+
+    if config.client_id.is_empty() || config.client_secret.is_empty() {
+        return Err(TokenRefreshError::Other(format!(
+            "OAuth2 client credentials not configured for provider: {}",
+            account.provider
+        )));
+    }
+
+    let client = reqwest::Client::new();
+    let form_body = format!(
+        "grant_type=authorization_code&client_id={}&client_secret={}&code={}&redirect_uri={}",
+        urlencoding::encode(&config.client_id),
+        urlencoding::encode(&config.client_secret),
+        urlencoding::encode(code),
+        urlencoding::encode(redirect_uri),
+    );
+
+    let response = client
+        .post(&config.token_endpoint)
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .body(form_body)
+        .send()
+        .await
+        .map_err(|e| TokenRefreshError::Other(format!("OAuth2 code exchange request failed: {e}")))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        let lower = body.to_ascii_lowercase();
+        if status.as_u16() == 400
+            && (lower.contains("invalid_grant") || lower.contains("revoked") || lower.contains("expired"))
+        {
+            return Err(TokenRefreshError::Revoked);
+        }
+        return Err(TokenRefreshError::Other(format!(
+            "OAuth2 code exchange failed (HTTP {status}): {body}"
+        )));
+    }
+
+    let token_data: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| TokenRefreshError::Other(format!("Failed to parse OAuth2 token response: {e}")))?;
+
+    let access_token = token_data["access_token"]
+        .as_str()
+        .ok_or_else(|| TokenRefreshError::Other("No access_token in OAuth2 response".to_string()))?
+        .to_string();
+
+    let refresh_token = token_data["refresh_token"].as_str().map(String::from);
+    let expires_in = token_data["expires_in"].as_i64();
+    let scopes = token_data["scope"].as_str().map(|s| {
+        s.split_whitespace().map(String::from).collect()
+    });
+
+    Ok(OAuth2TokenResult {
+        access_token,
+        refresh_token,
+        expires_in,
+        scopes,
+    })
+}
+
 /// Refresh an OAuth2 access token using the refresh_token grant.
 /// Returns the new token set on success.
 ///
@@ -215,6 +294,45 @@ pub async fn refresh_oauth2_access_token(
     refresh_oauth2_token(account).await
 }
 
+/// Generate the OAuth2 authorization URL for initiating the consent flow.
+/// Returns the URL the user should be redirected to for provider consent.
+pub fn build_oauth2_authorize_url(
+    provider: &str,
+    redirect_uri: &str,
+    state: &str,
+) -> Option<String> {
+    let config = provider_config(provider)?;
+    let scope_param = config.scopes.join(" ");
+    let encoded_redirect = urlencoding::encode(redirect_uri);
+    let encoded_scope = urlencoding::encode(&scope_param);
+    let encoded_state = urlencoding::encode(state);
+
+    match provider.to_ascii_lowercase().as_str() {
+        "gmail" | "google" => Some(format!(
+            "https://accounts.google.com/o/oauth2/v2/auth?client_id={}&redirect_uri={}&response_type=code&scope={}&access_type=offline&prompt=consent&state={}",
+            urlencoding::encode(&config.client_id),
+            encoded_redirect,
+            encoded_scope,
+            encoded_state,
+        )),
+        "outlook" | "microsoft" | "office365" => Some(format!(
+            "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id={}&redirect_uri={}&response_type=code&scope={}&state={}",
+            urlencoding::encode(&config.client_id),
+            encoded_redirect,
+            encoded_scope,
+            encoded_state,
+        )),
+        "yahoo" => Some(format!(
+            "https://api.login.yahoo.com/oauth2/request_auth?client_id={}&redirect_uri={}&response_type=code&scope={}&state={}",
+            urlencoding::encode(&config.client_id),
+            encoded_redirect,
+            encoded_scope,
+            encoded_state,
+        )),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -314,5 +432,47 @@ mod tests {
     fn refresh_oauth2_access_token_needs_refresh_when_expired() {
         let acct = test_account(Some(Utc::now() - chrono::Duration::minutes(1)));
         assert!(is_token_expired(&acct));
+    }
+
+    #[test]
+    fn refresh_token_is_encrypted_before_storage() {
+        std::env::set_var("OAUTH_TOKEN_ENCRYPTION_KEY", {
+            let key: [u8; 32] = [11u8; 32];
+            use base64::engine::Engine;
+            base64::engine::general_purpose::STANDARD.encode(key)
+        });
+        let plain = "refresh-token-to-store";
+        let stored = encrypt_refresh_token_for_storage(plain);
+        assert_ne!(stored, plain);
+        let decrypted = crate::security::oauth_token_crypto::decrypt_token_compat(&stored);
+        assert_eq!(decrypted, plain);
+    }
+
+    #[test]
+    fn build_oauth2_authorize_url_gmail() {
+        std::env::set_var("GOOGLE_OAUTH_CLIENT_ID", "test-gmail-id");
+        std::env::set_var("GOOGLE_OAUTH_CLIENT_SECRET", "test-gmail-secret");
+        let url = build_oauth2_authorize_url("gmail", "https://mail.misfits.ai/callback", "state-123").unwrap();
+        assert!(url.contains("accounts.google.com/o/oauth2/v2/auth"));
+        assert!(url.contains("client_id=test-gmail-id"));
+        assert!(url.contains("response_type=code"));
+        assert!(url.contains("access_type=offline"));
+        assert!(url.contains("prompt=consent"));
+        assert!(url.contains("state=state-123"));
+    }
+
+    #[test]
+    fn build_oauth2_authorize_url_outlook() {
+        std::env::set_var("MICROSOFT_OAUTH_CLIENT_ID", "test-ms-id");
+        std::env::set_var("MICROSOFT_OAUTH_CLIENT_SECRET", "test-ms-secret");
+        let url = build_oauth2_authorize_url("outlook", "https://mail.misfits.ai/callback", "state-456").unwrap();
+        assert!(url.contains("login.microsoftonline.com"));
+        assert!(url.contains("client_id=test-ms-id"));
+        assert!(url.contains("response_type=code"));
+    }
+
+    #[test]
+    fn build_oauth2_authorize_url_unknown() {
+        assert!(build_oauth2_authorize_url("unknown", "https://example.com", "state").is_none());
     }
 }
