@@ -83,8 +83,16 @@ pub(crate) fn register_external_routes(cfg: &mut web::ServiceConfig) {
     )
     // OAuth 2.0 routes (MW-2026-062)
     .route(
+        "/api/external-accounts/oauth2/providers",
+        web::get().to(api_oauth2_list_providers),
+    )
+    .route(
         "/api/external-accounts/{id}/oauth2/start",
         web::get().to(api_oauth2_start),
+    )
+    .route(
+        "/api/external-accounts/{id}/oauth2/authorize",
+        web::get().to(api_oauth2_authorize),
     )
     .route(
         "/api/external-accounts/{id}/oauth2/callback",
@@ -213,6 +221,18 @@ mod tests {
     }
 
     #[test]
+    fn external_routes_oauth2_providers() {
+        let route = "/api/external-accounts/oauth2/providers";
+        assert_eq!(route, "/api/external-accounts/oauth2/providers");
+    }
+
+    #[test]
+    fn external_routes_oauth2_authorize() {
+        let route = "/api/external-accounts/{id}/oauth2/authorize";
+        assert_eq!(route, "/api/external-accounts/{id}/oauth2/authorize");
+    }
+
+    #[test]
     fn external_routes_all_paths() {
         let paths = vec![
             "/api/external-accounts",
@@ -230,12 +250,14 @@ mod tests {
             "/api/external-sync-runs/{run_id}",
             "/api/external-messages",
             "/api/external-messages/{id}/action",
+            "/api/external-accounts/oauth2/providers",
             "/api/external-accounts/{id}/oauth2/start",
+            "/api/external-accounts/{id}/oauth2/authorize",
             "/api/external-accounts/{id}/oauth2/callback",
             "/api/external-accounts/{id}/oauth2/tokens",
             "/api/external-accounts/{id}/oauth2/refresh",
         ];
-        assert_eq!(paths.len(), 19);
+        assert_eq!(paths.len(), 21);
     }
 
     #[test]
@@ -245,11 +267,13 @@ mod tests {
             "/api/external-accounts/{id}",
             "/api/external-accounts/{id}/folders",
             "/api/external-accounts/{id}/sync/status",
+            "/api/external-accounts/oauth2/providers",
             "/api/external-accounts/{id}/oauth2/start",
+            "/api/external-accounts/{id}/oauth2/authorize",
             "/api/external-sync-runs/{run_id}",
             "/api/external-messages",
         ];
-        assert_eq!(get_routes.len(), 7);
+        assert_eq!(get_routes.len(), 9);
     }
 
     #[test]
@@ -418,5 +442,17 @@ mod tests {
     fn external_routes_handler_api_external_account_send() {
         let handler = "api_external_account_send";
         assert_eq!(handler, "api_external_account_send");
+    }
+
+    #[test]
+    fn external_routes_handler_api_oauth2_list_providers() {
+        let handler = "api_oauth2_list_providers";
+        assert_eq!(handler, "api_oauth2_list_providers");
+    }
+
+    #[test]
+    fn external_routes_handler_api_oauth2_authorize() {
+        let handler = "api_oauth2_authorize";
+        assert_eq!(handler, "api_oauth2_authorize");
     }
 }

@@ -3,11 +3,19 @@ Feature: OAuth2 IMAP authentication (MW-2026-062 / issue #728)
   store their refresh token encrypted at rest, and renew the access token
   automatically before it expires.
 
+  Scenario: Provider picker lists the supported providers
+    Given the external IMAP API is running
+    When the client requests the OAuth2 provider catalogue
+    Then the response lists "gmail", "outlook" and "yahoo"
+    And each provider carries an authorization endpoint, a token endpoint and scopes
+
   Scenario: Successful OAuth2 connection
     Given an external IMAP account with provider "gmail"
     And the provider client credentials are configured
     When the user starts the OAuth2 consent flow
     Then an authorization URL for the provider consent screen is returned
+    When the client navigates to the authorize route
+    Then the API responds with a redirect to the provider consent screen
     When the provider redirects back with a valid authorization code
     Then the code is exchanged for an access token and a refresh token
     And the refresh token is stored encrypted at rest
