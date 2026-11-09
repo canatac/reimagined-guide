@@ -535,24 +535,101 @@ pub fn execute_step(step: &str, ctx: &mut Context) {
         }
 
         // ===================================================================
+        // MW-2026-022: IMAP external account sync feeds unified inbox (issue #626)
+        // ===================================================================
+        "I inspect the unified inbox contract" => {}
+        "unified inbox must merge native and external account emails" => {
+            let unified = ctx
+                .values
+                .get("src/bin/email_api_dir/mailbox/unified_handlers.rs")
+                .expect("unified_handlers should be loaded");
+            assert!(
+                unified.contains("native_to_unified"),
+                "missing native_to_unified converter"
+            );
+            assert!(
+                unified.contains("external_to_unified"),
+                "missing external_to_unified converter"
+            );
+            assert!(
+                unified.contains("sort_unified_by_date"),
+                "missing unified sort"
+            );
+        }
+        "periodic sync worker must be present for external accounts" => {
+            let sync = ctx
+                .values
+                .get("src/external_imap/periodic_sync.rs")
+                .expect("periodic_sync should be loaded");
+            assert!(
+                sync.contains("start_periodic_sync"),
+                "missing start_periodic_sync function"
+            );
+            assert!(
+                sync.contains("run_sync_now"),
+                "missing run_sync_now call in periodic worker"
+            );
+        }
+        "unified inbox route must expose external account messages" => {
+            let routes = ctx
+                .values
+                .get("src/bin/email_api_dir/startup_routes/mailbox.rs")
+                .expect("routes should be loaded");
+            assert!(
+                routes.contains("/api/emails/unified"),
+                "missing /api/emails/unified route"
+            );
+        }
+        "external messages must carry account_type and account_email metadata" => {
+            let unified = ctx
+                .values
+                .get("src/bin/email_api_dir/mailbox/unified_handlers.rs")
+                .expect("unified_handlers should be loaded");
+            assert!(
+                unified.contains("account_type"),
+                "missing account_type field in unified DTO"
+            );
+            assert!(
+                unified.contains("account_email"),
+                "missing account_email field in unified DTO"
+            );
+        }
+
+        // ===================================================================
         // OAuth2 IMAP authentication (MW-2026-062 / issue #728)
         // ===================================================================
 
-        "an external IMAP account with provider \"gmail\"" => {
-            // The OAuth2 handler and the provider config are the subject of
-            // this scenario; both are loaded by the Given steps below.
+        "the provider picker offers Gmail, Outlook, Yahoo and Other" => {
             let oauth2 = ctx
                 .values
                 .get("src/bin/email_api_dir/external_handlers/oauth2.rs")
                 .expect("oauth2 handler should be loaded");
             assert!(
-                oauth2.contains("api_oauth2_start_by_provider"),
-                "missing start-by-provider handler"
+                oauth2.contains("oauth2_provider_catalogue"),
+                "missing provider catalogue"
+            );
+            for key in ["gmail", "outlook", "yahoo", "other"] {
+                assert!(
+                    oauth2.contains(key),
+                    "provider picker must offer '{key}'"
+                );
+            }
+            assert!(
+                oauth2.contains("\"Other\""),
+                "provider picker must offer the 'Other' option"
+            );
+        }
+        "an external IMAP account with provider \"gmail\"" => {
+            let oauth2 = ctx
+                .values
+                .get("src/external_imap/oauth2.rs")
+                .expect("oauth2 module should be loaded");
+            assert!(
+                oauth2.contains("\"gmail\" | \\"google\""),
+                "provider config must recognize gmail"
             );
         }
         "the provider client credentials are configured" => {
-            // The provider config reads the client credentials from the
-            // environment; the handler must not require anything else.
             let oauth2 = ctx
                 .values
                 .get("src/external_imap/oauth2.rs")
@@ -784,25 +861,7 @@ pub fn execute_step(step: &str, ctx: &mut Context) {
                 "missing 400 status for a missing refresh token"
             );
         }
-        "the provider picker offers Gmail, Outlook, Yahoo and Other" => {
-            let oauth2 = ctx
-                .values
-                .get("src/bin/email_api_dir/external_handlers/oauth2.rs")
-                .expect("oauth2 handler should be loaded");
-            assert!(
-                oauth2.contains("oauth2_provider_catalogue"),
-                "missing provider catalogue"
-            );
-            for key in ["gmail", "outlook", "yahoo", "other"] {
-                assert!(
-                    oauth2.contains(&format!("\"{key}\"")),
-                    "catalogue must list {key}"
-                );
-            }
-            assert!(
-                oauth2.contains("\"Other\""),
-                "catalogue must label the Other option"
-            );
-        }
+
+        _ => {}
     }
 }

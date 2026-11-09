@@ -436,19 +436,11 @@ mod tests {
 
     #[test]
     fn refresh_token_is_encrypted_before_storage() {
-        // Deterministic test-only key: no literal cryptographic value in the
-        // source (CodeQL rust/hard-coded-cryptographic-value).
-        let mut key = [0u8; 32];
-        let mut acc: u8 = 7;
-        for slot in key.iter_mut() {
-            acc = acc.wrapping_mul(31).wrapping_add(7).wrapping_add(17);
-            *slot = acc;
-        }
-        use base64::engine::Engine;
-        std::env::set_var(
-            "OAUTH_TOKEN_ENCRYPTION_KEY",
-            base64::engine::general_purpose::STANDARD.encode(key),
-        );
+        std::env::set_var("OAUTH_TOKEN_ENCRYPTION_KEY", {
+            let key: [u8; 32] = [11u8; 32];
+            use base64::engine::Engine;
+            base64::engine::general_purpose::STANDARD.encode(key)
+        });
         let plain = "refresh-token-to-store";
         let stored = encrypt_refresh_token_for_storage(plain);
         assert_ne!(stored, plain);

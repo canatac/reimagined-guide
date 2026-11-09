@@ -51,7 +51,7 @@ paths:
       summary: List OAuth2 providers for the account picker
       description: >
         Returns the providers the client may offer in the "Connect an external
-        account" picker (Gmail, Outlook, Yahoo). Each entry carries the
+        account" picker (Gmail, Outlook, Yahoo, Other). Each entry carries the
         provider key stored on the account, the display label, and the
         authorization/token endpoints the client needs to start the flow.
       responses:
@@ -66,6 +66,31 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/OAuth2ProviderOption'
+  /api/external-accounts/oauth2/start:
+    get:
+      summary: Start the OAuth2 consent flow from a chosen provider
+      description: >
+        Returns the provider consent URL in the body so a client can navigate
+        to it directly. No external account needs to exist yet: the provider
+        is chosen by the caller (gmail, outlook, yahoo, other).
+      parameters:
+        - in: query
+          name: provider
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Authorization URL
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuth2AuthorizationUrl'
+        '400':
+          description: Unknown or unsupported provider
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/external-accounts/{id}:
     get:
       summary: Get external account
@@ -122,130 +147,6 @@ paths:
                 properties:
                   deleted:
                     type: boolean
-        '404':
-          $ref: '#/components/responses/NotFound'
-  /api/external-accounts/{id}/oauth2/start:
-    get:
-      summary: Get the provider authorization URL
-      description: >
-        Returns the provider consent URL in the body so a client that cannot
-        follow a redirect can navigate to it directly.
-      parameters:
-        - in: path
-          name: id
-          required: true
-          schema: { type: string }
-      responses:
-        '200':
-          description: Authorization URL
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OAuth2AuthorizationUrl'
-        '400':
-          description: Provider does not support OAuth2
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-        '404':
-          $ref: '#/components/responses/NotFound'
-  /api/external-accounts/{id}/oauth2/authorize:
-    get:
-      summary: Redirect to the provider consent screen
-      description: >
-        302 redirect to the provider authorization endpoint. The client may
-        navigate here directly; the body also carries the URL for clients that
-        read it instead of following the Location header.
-      parameters:
-        - in: path
-          name: id
-          required: true
-          schema: { type: string }
-      responses:
-        '302':
-          description: Redirect to the provider consent screen
-          headers:
-            Location:
-              schema: { type: string }
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OAuth2AuthorizationUrl'
-        '400':
-          description: Provider does not support OAuth2
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-        '404':
-          $ref: '#/components/responses/NotFound'
-  /api/external-accounts/{id}/oauth2/callback:
-    post:
-      summary: Exchange the authorization code for tokens
-      description: >
-        Stores the returned refresh token encrypted at rest (AES-256-GCM).
-        A revoked or expired code is reported as HTTP 401 with code
-        OAUTH2_TOKEN_REVOKED.
-      parameters:
-        - in: path
-          name: id
-          required: true
-          schema: { type: string }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/OAuth2CallbackInput'
-      responses:
-        '200':
-          description: Tokens stored
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  status: { type: string }
-                  message: { type: string }
-        '401':
-          description: Code revoked or expired
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-        '404':
-          $ref: '#/components/responses/NotFound'
-  /api/external-accounts/{id}/oauth2/refresh:
-    post:
-      summary: Refresh an expired access token
-      parameters:
-        - in: path
-          name: id
-          required: true
-          schema: { type: string }
-      responses:
-        '200':
-          description: Tokens refreshed (or still valid)
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  status: { type: string }
-                  message: { type: string }
-        '400':
-          description: No refresh token stored
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-        '401':
-          description: Refresh token revoked or expired
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
         '404':
           $ref: '#/components/responses/NotFound'
   /api/external-accounts/{id}/test:
@@ -321,7 +222,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ExternalFolderMappingInput'
+              $ref: '#/components/schemas/FolderMappingInput'
       responses:
         '200':
           description: Mapping updated
@@ -331,7 +232,101 @@ paths:
                 $ref: '#/components/schemas/ExternalImapFolder'
   /api/external-accounts/{id}/sync:
     post:
-      summary: Trigger sync now
+      summary: Start a sync run
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Sync started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalSyncRun'
+  /api/external-accounts/{id}/sync/status:
+    get:
+      summary: Get sync status
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Sync status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalSyncStatus'
+  /api/external-accounts/{id}/sync/pause:
+    post:
+      summary: Pause sync
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Paused
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+  /api/external-accounts/{id}/sync/resume:
+    post:
+      summary: Resume sync
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Resumed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+  /api/external-accounts/{id}/oauth2/start:
+    get:
+      summary: Get the provider authorization URL
+      description: >
+        Returns the provider consent URL in the body so a client that cannot
+        follow a redirect can navigate to it directly.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Authorization URL
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuth2AuthorizationUrl'
+        '400':
+          description: Provider does not support OAuth2
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/external-accounts/{id}/oauth2/callback:
+    post:
+      summary: Exchange the authorization code for tokens
+      description: >
+        Stores the returned refresh token encrypted at rest (AES-256-GCM).
+        A revoked or expired code is reported as HTTP 401 with code
+        OAUTH2_TOKEN_REVOKED.
       parameters:
         - in: path
           name: id
@@ -342,58 +337,54 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/StartSyncInput'
+              $ref: '#/components/schemas/OAuth2CallbackInput'
       responses:
         '200':
-          description: Sync completed
+          description: Tokens stored
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  runId: { type: string }
                   status: { type: string }
-                  run:
-                    $ref: '#/components/schemas/ExternalSyncRun'
-  /api/external-accounts/{id}/sync/status:
-    get:
-      summary: Latest sync status for account
-      parameters:
-        - in: path
-          name: id
-          required: true
-          schema: { type: string }
-      responses:
-        '200':
-          description: Latest sync run
+                  message: { type: string }
+        '401':
+          description: Code revoked or expired
           content:
             application/json:
               schema:
-                oneOf:
-                  - $ref: '#/components/schemas/ExternalSyncRun'
-                  - type: object
-                    properties:
-                      status:
-                        type: string
-                        example: idle
-  /api/external-accounts/{id}/sync/pause:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/external-accounts/{id}/oauth2/tokens:
     post:
-      summary: Pause account sync
+      summary: Manually update OAuth2 tokens (testing)
       parameters:
         - in: path
           name: id
           required: true
           schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OAuth2TokenUpdateInput'
       responses:
         '200':
-          description: Account paused
+          description: Tokens updated
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ExternalImapAccount'
-  /api/external-accounts/{id}/sync/resume:
+                type: object
+                properties:
+                  status: { type: string }
+                  message: { type: string }
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/external-accounts/{id}/oauth2/refresh:
     post:
-      summary: Resume account sync
+      summary: Refresh an expired access token
       parameters:
         - in: path
           name: id
@@ -401,14 +392,31 @@ paths:
           schema: { type: string }
       responses:
         '200':
-          description: Account resumed
+          description: Tokens refreshed (or still valid)
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ExternalImapAccount'
+                type: object
+                properties:
+                  status: { type: string }
+                  message: { type: string }
+        '400':
+          description: No refresh token stored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Refresh token revoked or expired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/external-sync-runs/{run_id}:
     get:
-      summary: Get sync run by id
+      summary: Get a sync run
       parameters:
         - in: path
           name: run_id
@@ -421,31 +429,25 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ExternalSyncRun'
-        '404':
-          $ref: '#/components/responses/NotFound'
   /api/external-messages:
     get:
       summary: List external messages
       parameters:
         - in: query
-          name: accountId
-          required: true
+          name: account_id
+          required: false
           schema: { type: string }
         - in: query
           name: folder
           required: false
           schema: { type: string }
         - in: query
-          name: page
+          name: limit
           required: false
-          schema: { type: integer, minimum: 1, default: 1 }
-        - in: query
-          name: pageSize
-          required: false
-          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+          schema: { type: integer }
       responses:
         '200':
-          description: Message page
+          description: External messages
           content:
             application/json:
               schema:
@@ -454,14 +456,10 @@ paths:
                   messages:
                     type: array
                     items:
-                      $ref: '#/components/schemas/ExternalImapMessage'
-                  page:
-                    type: integer
-                  pageSize:
-                    type: integer
+                      $ref: '#/components/schemas/ExternalMessage'
   /api/external-messages/{id}/action:
     post:
-      summary: Apply external message action
+      summary: Apply an action to an external message
       parameters:
         - in: path
           name: id
@@ -475,22 +473,23 @@ paths:
               $ref: '#/components/schemas/ExternalMessageActionInput'
       responses:
         '200':
-          description: Updated message
+          description: Action applied
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ExternalImapMessage'
-        '404':
-          $ref: '#/components/responses/NotFound'
+                type: object
+                properties:
+                  status: { type: string }
 
 components:
   responses:
     NotFound:
-      description: Resource not found
+      description: Not found
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorEnvelope'
+
   schemas:
     ErrorEnvelope:
       type: object
@@ -500,6 +499,105 @@ components:
           properties:
             code: { type: string }
             message: { type: string }
+
+    ExternalImapAccount:
+      type: object
+      properties:
+        id: { type: string }
+        provider: { type: string }
+        email: { type: string }
+        auth_type: { type: string }
+        status: { type: string }
+        last_sync_at: { type: string, format: date-time }
+        last_error: { type: string }
+
+    CreateExternalAccountInput:
+      type: object
+      required: [provider, email, authType, imap]
+      properties:
+        provider: { type: string }
+        email: { type: string }
+        authType: { type: string }
+        imap:
+          type: object
+          properties:
+            host: { type: string }
+            port: { type: integer }
+            tls: { type: boolean }
+
+    UpdateExternalAccountInput:
+      type: object
+      properties:
+        provider: { type: string }
+        email: { type: string }
+        authType: { type: string }
+
+    ImapTestResult:
+      type: object
+      properties:
+        ok: { type: boolean }
+        capabilities:
+          type: array
+          items: { type: string }
+        error: { type: string }
+
+    ExternalImapFolder:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        role: { type: string }
+
+    FolderMappingInput:
+      type: object
+      required: [role]
+      properties:
+        role: { type: string }
+
+    ImapDiscoverResult:
+      type: object
+      properties:
+        folders:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExternalImapFolder'
+
+    ExternalSyncRun:
+      type: object
+      properties:
+        id: { type: string }
+        account_id: { type: string }
+        status: { type: string }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+
+    ExternalSyncStatus:
+      type: object
+      properties:
+        account_id: { type: string }
+        status: { type: string }
+        last_sync_at: { type: string, format: date-time }
+        last_error: { type: string }
+
+    ExternalMessage:
+      type: object
+      properties:
+        id: { type: string }
+        account_id: { type: string }
+        account_type: { type: string }
+        account_email: { type: string }
+        folder: { type: string }
+        subject: { type: string }
+        from: { type: string }
+        to: { type: string }
+        date: { type: string, format: date-time }
+        snippet: { type: string }
+
+    ExternalMessageActionInput:
+      type: object
+      required: [action]
+      properties:
+        action: { type: string }
 
     OAuth2ProviderOption:
       type: object
@@ -533,178 +631,14 @@ components:
         authorizationCode: { type: string }
         redirectUri: { type: string, format: uri }
 
-    CreateExternalAccountInput:
+    OAuth2TokenUpdateInput:
       type: object
-      required: [provider, email, authType, imap]
+      required: [accountId, accessToken]
       properties:
-        provider: { type: string }
-        email: { type: string, format: email }
-        authType: { type: string, enum: [oauth2, app_password, password] }
-        imap:
-          $ref: '#/components/schemas/ExternalImapServerConfig'
-        smtp:
-          $ref: '#/components/schemas/ExternalSmtpServerConfig'
-        credentials:
-          $ref: '#/components/schemas/ExternalAccountCredentials'
-
-    UpdateExternalAccountInput:
-      type: object
-      properties:
-        provider: { type: string }
-        email: { type: string, format: email }
-        authType: { type: string }
-        status: { type: string, enum: [active, paused, error] }
-        imap:
-          $ref: '#/components/schemas/ExternalImapServerConfig'
-        smtp:
-          $ref: '#/components/schemas/ExternalSmtpServerConfig'
-        credentials:
-          $ref: '#/components/schemas/ExternalAccountCredentials'
-        lastError: { type: string }
-
-    ExternalImapServerConfig:
-      type: object
-      required: [host, port, tls]
-      properties:
-        host: { type: string }
-        port: { type: integer }
-        tls: { type: boolean }
-
-    ExternalSmtpServerConfig:
-      type: object
-      properties:
-        host: { type: string }
-        port: { type: integer }
-        tls: { type: boolean }
-
-    ExternalAccountCredentials:
-      type: object
-      properties:
-        secretValue: { type: string, description: "MVP storage, redacted in read APIs" }
-        secretRef: { type: string }
-
-    ExternalImapAccount:
-      type: object
-      properties:
-        id: { type: string }
-        ownerUserId: { type: string }
-        provider: { type: string }
-        email: { type: string, format: email }
-        authType: { type: string }
-        secretRef: { type: string, nullable: true }
-        secretValue: { type: string, nullable: true }
-        imapHost: { type: string }
-        imapPort: { type: integer }
-        imapTls: { type: boolean }
-        smtpHost: { type: string, nullable: true }
-        smtpPort: { type: integer, nullable: true }
-        smtpTls: { type: boolean, nullable: true }
-        status: { type: string }
-        lastSyncAt: { type: string, format: date-time, nullable: true }
-        lastError: { type: string, nullable: true }
-        createdAt: { type: string, format: date-time }
-        updatedAt: { type: string, format: date-time }
-
-    ExternalImapFolder:
-      type: object
-      properties:
-        id: { type: string }
         accountId: { type: string }
-        ownerUserId: { type: string }
-        remoteName: { type: string }
-        localRole: { type: string }
-        uidValidity: { type: integer, nullable: true }
-        highestUid: { type: integer, nullable: true }
-        highestModseq: { type: integer, nullable: true }
-        createdAt: { type: string, format: date-time }
-        updatedAt: { type: string, format: date-time }
-
-    ExternalImapMessage:
-      type: object
-      properties:
-        id: { type: string }
-        accountId: { type: string }
-        folderId: { type: string, nullable: true }
-        ownerUserId: { type: string }
-        remoteUid: { type: integer, nullable: true }
-        messageIdHeader: { type: string, nullable: true }
-        threadKey: { type: string, nullable: true }
-        from: { type: string, nullable: true }
-        to: { type: string, nullable: true }
-        subject: { type: string, nullable: true }
-        sentAt: { type: string, format: date-time, nullable: true }
-        flags:
+        accessToken: { type: string }
+        refreshToken: { type: string }
+        expiresIn: { type: integer }
+        scopes:
           type: array
           items: { type: string }
-        internalDate: { type: string, format: date-time, nullable: true }
-        bodyPreview: { type: string, nullable: true }
-        rawRef: { type: string, nullable: true }
-        dedupHash: { type: string, nullable: true }
-        deleted: { type: boolean }
-        createdAt: { type: string, format: date-time }
-        updatedAt: { type: string, format: date-time }
-
-    ExternalSyncRun:
-      type: object
-      properties:
-        id: { type: string }
-        accountId: { type: string }
-        ownerUserId: { type: string }
-        mode: { type: string, enum: [full, incremental] }
-        folders:
-          type: array
-          items: { type: string }
-        since: { type: string, format: date-time, nullable: true }
-        status: { type: string, enum: [running, success, failed, partial] }
-        statsFetched: { type: integer }
-        statsUpdated: { type: integer }
-        statsDeleted: { type: integer }
-        startedAt: { type: string, format: date-time }
-        endedAt: { type: string, format: date-time, nullable: true }
-        error: { type: string, nullable: true }
-
-    ImapTestResult:
-      type: object
-      properties:
-        ok: { type: boolean }
-        capabilities:
-          type: array
-          items: { type: string }
-        greeting: { type: string }
-        message: { type: string }
-
-    ImapDiscoverResult:
-      type: object
-      properties:
-        folders:
-          type: array
-          items: { type: string }
-        capabilities:
-          type: array
-          items: { type: string }
-
-    ExternalFolderMappingInput:
-      type: object
-      required: [localRole]
-      properties:
-        localRole: { type: string }
-
-    StartSyncInput:
-      type: object
-      required: [mode]
-      properties:
-        mode: { type: string, enum: [full, incremental] }
-        folders:
-          type: array
-          items: { type: string }
-        since: { type: string, format: date-time }
-
-    ExternalMessageActionInput:
-      type: object
-      required: [action]
-      properties:
-        action:
-          type: string
-          enum: [mark_read, mark_unread, star, unstar, move, delete, archive]
-        targetFolder:
-          type: string
