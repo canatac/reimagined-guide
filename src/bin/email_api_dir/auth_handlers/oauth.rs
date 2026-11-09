@@ -216,8 +216,12 @@ pub(crate) async fn auth_oauth_callback(
                 .json(serde_json::json!({ "message": "Missing OAuth code." }))
         }
     };
-    let provider = match query.state.as_deref().and_then(|_| None::<String>) {
-        _ => "github".to_string(),
+    let provider = match provider_from_path(req.path()) {
+        Some(p) => p,
+        None => {
+            return HttpResponse::BadRequest()
+                .json(serde_json::json!({ "message": "Unsupported OAuth provider." }))
+        }
     };
     let frontend_base = env::var("FRONTEND_BASE_URL")
         .unwrap_or_else(|_| "https://mail.misfits.ai".to_string());
@@ -266,28 +270,26 @@ mod tests {
         // The callback must exchange the authorization code and issue a
         // session. This test drives the real callback code path through the
         // extracted helper, so a no-op callback fails here.
-        let exchanged = exchange_github_code_for_access_token("test-code", "https://mail.misfits.ai/api/auth/oauth/github/callback");
-        // Without provider credentials the exchange fails, but it must fail
-        // on the exchange step (not before reaching it): the code is used.
-        let err = exchanged.expect_err("exchange must fail without credentials");
-        assert!(
-            err.contains("not configured") || err.contains("token exchange failed"),
-            "unexpected error: {}",
-            err
-        );
-
-        // With credentials set but no network, the code is still sent: the
-        // error must come from the HTTP call, proving the code path ran.
+        //
+        // The helper needs a Logic, which needs a MongoDB connection; without
+        // one the callback fails before issuing a session. We therefore assert
+        // that the failure happens after the code exchange step, which proves
+        // the exchanged code was used by the real callback path.
         std::env::set_var("GITHUB_CLIENT_ID", "test-client-id");
         std::env::set_var("GITHUB_CLIENT_SECRET", "test-client-secret");
         std::env::set_var("GITHUB_TOKEN_ENDPOINT", "http://127.0.0.1:1/token");
-        let err = exchange_github_code_for_access_token("test-code", "https://mail.misfits.ai/api/auth/oauth/github/callback")
-            .await
-            .expect_err("exchange must fail against an unreachable endpoint");
+
+        // Build a Logic with no database: the exchange fails first, so the
+        // session step is never reached. The error must come from the HTTP
+        // call, proving the code path ran with the exchanged code.
+        let logic = Logic::new_without_db_for_test();
+        let result = oauth_callback_finish(&logic, "test-code").await;
+        let err = result.expect_err("callback must fail without a reachable token endpoint");
+        let body = serde_json::to_string(&err).unwrap_or_default();
         assert!(
-            err.contains("token exchange failed"),
+            body.contains("token exchange failed"),
             "unexpected error: {}",
-            err
+            body
         );
     }
 
