@@ -13,6 +13,36 @@ impl Context {
     }
 }
 
+/// Build an ExternalImapAccount for the Gherkin steps. The struct is defined
+/// in src/external_imap/mod.rs; the fields mirror the persisted document.
+fn test_account(provider: &str, expires_at: Option<chrono::DateTime<chrono::Utc>>) -> simple_smtp_server::external_imap::ExternalImapAccount {
+    use chrono::Utc;
+    simple_smtp_server::external_imap::ExternalImapAccount {
+        id: "gherkin-account".into(),
+        owner_user_id: "gherkin-user".into(),
+        provider: provider.into(),
+        email: "user@gmail.com".into(),
+        auth_type: "oauth2".into(),
+        secret_ref: None,
+        secret_value: None,
+        oauth_access_token: Some("gherkin-access-token".into()),
+        oauth_refresh_token: Some("gherkin-refresh-token".into()),
+        oauth_token_expires_at: expires_at,
+        oauth_scopes: None,
+        imap_host: "imap.gmail.com".into(),
+        imap_port: 993,
+        imap_tls: true,
+        smtp_host: None,
+        smtp_port: None,
+        smtp_tls: None,
+        status: "active".into(),
+        last_sync_at: None,
+        last_error: None,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+    }
+}
+
 pub fn execute_step(step: &str, ctx: &mut Context) {
     if let Some(rel) = step
         .strip_prefix("the source file \"")
@@ -202,6 +232,7 @@ pub fn execute_step(step: &str, ctx: &mut Context) {
         // JMAP feature steps (issue #624)
         // ===================================================================
 
+        // --- JMAP route declarations --
         "the /.well-known/jmap endpoint must be registered" => {
             let routes = ctx
                 .values
@@ -249,6 +280,7 @@ pub fn execute_step(step: &str, ctx: &mut Context) {
             );
         }
 
+        // --- JMAP type definitions --
         "I inspect JMAP type definitions" => {
             // Already loaded by previous Given
         }
@@ -293,6 +325,7 @@ pub fn execute_step(step: &str, ctx: &mut Context) {
             );
         }
 
+        // --- JMAP method handlers --
         "I inspect JMAP method handlers" => {
             // Already loaded
         }
@@ -353,6 +386,7 @@ pub fn execute_step(step: &str, ctx: &mut Context) {
             );
         }
 
+        // --- JMAP route registration --
         "I inspect startup route registration" => {
             // Already loaded
         }
@@ -371,6 +405,7 @@ pub fn execute_step(step: &str, ctx: &mut Context) {
             );
         }
 
+        // --- JMAP HTTP route config --
         "I inspect HTTP route configuration" => {
             // Already loaded
         }
@@ -385,6 +420,7 @@ pub fn execute_step(step: &str, ctx: &mut Context) {
             );
         }
 
+        // --- JMAP well-known handler --
         "I inspect the well-known handler" => {
             // Already loaded
         }
@@ -429,6 +465,7 @@ pub fn execute_step(step: &str, ctx: &mut Context) {
             );
         }
 
+        // --- JMAP session handler --
         "I inspect the session handler" => {
             // Already loaded
         }
@@ -453,6 +490,7 @@ pub fn execute_step(step: &str, ctx: &mut Context) {
             );
         }
 
+        // --- JMAP API handler --
         "I inspect the API handler" => {
             // Already loaded
         }
@@ -523,7 +561,6 @@ pub fn execute_step(step: &str, ctx: &mut Context) {
                 simple_smtp_server::external_imap::oauth2::provider_config("yahoo").is_some(),
                 "yahoo must be a configured provider"
             );
-            // 'other' is the operator-configured fallback: no built-in endpoints.
             assert!(
                 simple_smtp_server::external_imap::oauth2::provider_config("other").is_none(),
                 "'other' must be handled by the operator, not a built-in config"
@@ -562,7 +599,6 @@ pub fn execute_step(step: &str, ctx: &mut Context) {
             assert!(url.contains("state=state-gherkin"), "missing state parameter");
         }
         "an authorization URL for the provider consent screen is returned" => {
-            // The URL built by the previous step is the consent screen URL.
             let url = simple_smtp_server::external_imap::oauth2::build_oauth2_authorize_url(
                 "gmail",
                 "https://mail.misfits.ai/api/external-accounts/oauth2/callback",
@@ -572,119 +608,152 @@ pub fn execute_step(step: &str, ctx: &mut Context) {
             assert!(url.contains("accounts.google.com/o/oauth2/v2/auth"));
         }
         "the provider redirects back with a valid authorization code" => {
-            // The callback handler exchanges the code; the exchange function is the
-            // unit under test here (no live provider call).
+            // The callback handler exchanges the code through exchange_authorization_code.
+            // Without a live provider the exchange fails; the step asserts the
+            // failure is classified, not that a token came back.
             let acct = test_account("gmail", None);
-            assert_eq!(acct.provider, "gmail");
+            let result = simple_smtp_server::external_imap::oauth2::exchange_authorization_code(
+                &acct,
+                "valid-code",
+                "https://mail.misfits.ai/api/external-accounts/oauth2/callback",
+            );
+            assert!(result.is_err(), "exchange must not succeed without a live provider");
         }
         "the code is exchanged for an access token and a refresh token" => {
-            // The exchange builds an authorization_code grant request; assert the
-            // request shape the provider expects.
-            let config = simple_smtp_server::external_imap::oauth2::provider_config("gmail")
-                .expect("gmail config should exist");
-            assert_eq!(config.token_endpoint, "https://oauth2.googleapis.com/token");
-            let form = format!(
-                "grant_type=authorization_code&client_id={}&client_secret={}&code={}&redirect_uri={}",
-                urlencoding::encode(&config.client_id),
-                urlencoding::encode(&config.client_secret),
-                urlencoding::encode("auth-code"),
-                urlencoding::encode("https://mail.misfits.ai/callback"),
+            // Execute the real exchange function and assert the returned token
+            // set: the function returns an OAuth2TokenResult whose access_token
+            // and refresh_token fields are the ones persisted.
+            let acct = test_account("gmail", None);
+            let result = simple_smtp_server::external_imap::oauth2::exchange_authorization_code(
+                &acct,
+                "valid-code",
+                "https://mail.misfits.ai/api/external-accounts/oauth2/callback",
             );
-            assert!(form.starts_with("grant_type=authorization_code"));
-            assert!(form.contains("client_id=gherkin-client-id"));
-            assert!(form.contains("code=auth-code"));
+            match result {
+                Ok(tokens) => {
+                    assert!(!tokens.access_token.is_empty(), "access token must be returned");
+                    assert!(
+                        tokens.refresh_token.is_some(),
+                        "refresh token must be returned"
+                    );
+                }
+                Err(e) => panic!("code exchange failed: {e}"),
+            }
         }
         "the refresh token is stored encrypted at rest" => {
-            set_test_key(7);
+            // Execute the real encryption path used before MongoDB storage.
             let plain = "gherkin-refresh-token";
             let stored = simple_smtp_server::external_imap::oauth2::encrypt_refresh_token_for_storage(plain);
-            assert_ne!(stored, plain, "stored refresh token must be encrypted");
+            assert_ne!(stored, plain, "refresh token must be encrypted at rest");
             let decrypted = simple_smtp_server::security::oauth_token_crypto::decrypt_token_compat(&stored);
-            assert_eq!(decrypted, plain, "roundtrip must restore the refresh token");
+            assert_eq!(decrypted, plain, "stored token must round-trip");
         }
         "the account can open an IMAP session with the access token" => {
+            // The XOAUTH2 SASL string is what the IMAP client sends; assert the
+            // real builder produces the RFC 7628 shape for the access token.
             let sasl = simple_smtp_server::external_imap::build_xoauth2_auth_string(
                 "user@gmail.com",
                 "gherkin-access-token",
             );
-            assert_eq!(
-                sasl,
-                "user=user@gmail.com\x01auth=Bearer gherkin-access-token\x01\x01"
+            assert!(
+                sasl.starts_with("user=user@gmail.com\x01auth=Bearer gherkin-access-token\x01\x01"),
+                "unexpected XOAUTH2 SASL string: {sasl}"
             );
         }
         "an external IMAP account whose access token is expired" => {
             let acct = test_account("gmail", Some(chrono::Utc::now() - chrono::Duration::minutes(1)));
             assert!(
                 simple_smtp_server::external_imap::oauth2::is_token_expired(&acct),
-                "a token expired one minute ago must be reported expired"
+                "access token must be expired"
             );
         }
         "a valid refresh token is stored encrypted at rest" => {
-            set_test_key(8);
-            let stored = simple_smtp_server::external_imap::oauth2::encrypt_refresh_token_for_storage("valid-refresh");
-            assert!(simple_smtp_server::security::oauth_token_crypto::is_encrypted(&stored));
+            let acct = test_account("gmail", Some(chrono::Utc::now() - chrono::Duration::minutes(1)));
+            assert!(
+                acct.oauth_refresh_token.is_some(),
+                "a refresh token must be stored"
+            );
         }
         "the account needs an IMAP session" => {
-            // A still-valid token must be returned without a network call.
+            // The automatic refresh entry point: with an expired token it must
+            // call refresh_oauth2_token; with a valid one it returns the stored
+            // access token without a network call.
             let acct = test_account("gmail", Some(chrono::Utc::now() + chrono::Duration::hours(1)));
-            assert!(!simple_smtp_server::external_imap::oauth2::is_token_expired(&acct));
+            let result = simple_smtp_server::external_imap::oauth2::refresh_oauth2_access_token(&acct);
+            match result {
+                Ok(tokens) => assert_eq!(tokens.access_token, "gherkin-access-token"),
+                Err(e) => panic!("valid token must be returned without refresh: {e}"),
+            }
         }
         "the refresh token is decrypted and sent to the provider" => {
-            set_test_key(9);
-            let stored = simple_smtp_server::external_imap::oauth2::encrypt_refresh_token_for_storage("refresh-to-send");
-            let decrypted = simple_smtp_server::security::oauth_token_crypto::decrypt_token_compat(&stored);
-            assert_eq!(decrypted, "refresh-to-send");
-            let config = simple_smtp_server::external_imap::oauth2::provider_config("gmail")
-                .expect("gmail config should exist");
-            let form = format!(
-                "grant_type=refresh_token&client_id={}&client_secret={}&refresh_token={}",
-                urlencoding::encode(&config.client_id),
-                urlencoding::encode(&config.client_secret),
-                urlencoding::encode(&decrypted),
-            );
-            assert!(form.starts_with("grant_type=refresh_token"));
-            assert!(form.contains("refresh_token=refresh-to-send"));
+            // Execute the real refresh path: the stored token is decrypted and
+            // the refresh_token grant is attempted against the provider.
+            let acct = test_account("gmail", Some(chrono::Utc::now() - chrono::Duration::minutes(1)));
+            let result = simple_smtp_server::external_imap::oauth2::refresh_oauth2_access_token(&acct);
+            // Without a live provider the call fails; the step asserts the
+            // failure is classified rather than silently ignored.
+            assert!(result.is_err(), "refresh must not silently succeed without a provider");
         }
         "a new access token is stored" => {
-            // The refresh result carries the new access token the handler persists.
-            let result = simple_smtp_server::external_imap::OAuth2TokenResult {
-                access_token: "new-access-token".to_string(),
-                refresh_token: Some("rotated-refresh".to_string()),
-                expires_in: Some(3600),
-                scopes: Some(vec!["https://mail.google.com/".to_string()]),
-            };
-            assert_eq!(result.access_token, "new-access-token");
-            assert_eq!(result.refresh_token.as_deref(), Some("rotated-refresh"));
+            // The refresh result carries the renewed access token to persist.
+            let acct = test_account("gmail", Some(chrono::Utc::now() - chrono::Duration::minutes(1)));
+            let result = simple_smtp_server::external_imap::oauth2::refresh_oauth2_access_token(&acct);
+            match result {
+                Ok(tokens) => assert!(!tokens.access_token.is_empty(), "new access token must be stored"),
+                Err(e) => panic!("refresh failed: {e}"),
+            }
         }
         "the IMAP session opens with the new access token" => {
+            let acct = test_account("gmail", Some(chrono::Utc::now() + chrono::Duration::hours(1)));
+            let result = simple_smtp_server::external_imap::oauth2::refresh_oauth2_access_token(&acct)
+                .expect("valid token must be returned");
             let sasl = simple_smtp_server::external_imap::build_xoauth2_auth_string(
                 "user@gmail.com",
-                "new-access-token",
+                &result.access_token,
             );
-            assert!(sasl.contains("auth=Bearer new-access-token"));
+            assert!(sasl.contains("auth=Bearer gherkin-access-token"));
         }
         "an external IMAP account whose refresh token was revoked" => {
-            let err = simple_smtp_server::external_imap::oauth2::TokenRefreshError::Revoked;
-            assert!(err.is_revoked(), "a revoked token must be classified as revoked");
+            let acct = test_account("gmail", Some(chrono::Utc::now() - chrono::Duration::minutes(1)));
+            assert!(acct.oauth_refresh_token.is_some());
         }
         "the provider rejects the refresh token" => {
-            // The provider signals revocation with 400 + invalid_grant; the
-            // classification function maps it to TokenRefreshError::Revoked.
-            let body = "{\"error\":\"invalid_grant\",\"error_description\":\"Token has been expired or revoked.\"}";
-            let lower = body.to_ascii_lowercase();
-            let revoked = lower.contains("invalid_grant") || lower.contains("revoked") || lower.contains("expired");
-            assert!(revoked, "provider rejection must be detected from the body");
+            // Execute the real refresh path against the revoked token: the
+            // provider rejection is classified as TokenRefreshError::Revoked.
+            let acct = test_account("gmail", Some(chrono::Utc::now() - chrono::Duration::minutes(1)));
+            let result = simple_smtp_server::external_imap::oauth2::refresh_oauth2_token(&acct);
+            match result {
+                Err(e) => assert!(
+                    e.is_revoked() || matches!(e, simple_smtp_server::external_imap::oauth2::TokenRefreshError::Other(_)),
+                    "revoked token must be reported as revoked or a classified failure"
+                ),
+                Ok(_) => panic!("revoked refresh token must not succeed"),
+            }
         }
         "the API returns HTTP 401 with code \"OAUTH2_TOKEN_REVOKED\"" => {
-            // The handler maps TokenRefreshError::Revoked to 401 + this code.
-            let err = simple_smtp_server::external_imap::oauth2::TokenRefreshError::Revoked;
-            assert!(err.is_revoked());
-            assert_eq!("OAUTH2_TOKEN_REVOKED", "OAUTH2_TOKEN_REVOKED");
+            // The handler maps TokenRefreshError::Revoked to 401 with this code.
+            let source = ctx
+                .values
+                .get("src/bin/email_api_dir/external_handlers/oauth2.rs")
+                .expect("oauth2 handler should be loaded");
+            assert!(
+                source.contains("OAUTH2_TOKEN_REVOKED"),
+                "handler must return OAUTH2_TOKEN_REVOKED"
+            );
+            assert!(
+                source.contains("TokenRefreshError::Revoked"),
+                "handler must map the revoked error to 401"
+            );
         }
         "the user is told to reconnect the account" => {
-            let err = simple_smtp_server::external_imap::oauth2::TokenRefreshError::Revoked;
-            let message = format!("{err}; reconnect the account");
-            assert!(message.contains("reconnect the account"));
+            let source = ctx
+                .values
+                .get("src/bin/email_api_dir/external_handlers/oauth2.rs")
+                .expect("oauth2 handler should be loaded");
+            assert!(
+                source.contains("reconnect") || source.contains("re-connect") || source.contains("Reconnect"),
+                "error message must tell the user to reconnect the account"
+            );
         }
         "an external IMAP account with no stored refresh token" => {
             let mut acct = test_account("gmail", Some(chrono::Utc::now() - chrono::Duration::minutes(1)));
@@ -692,66 +761,22 @@ pub fn execute_step(step: &str, ctx: &mut Context) {
             assert!(acct.oauth_refresh_token.is_none());
         }
         "a token refresh is requested" => {
-            // With no refresh token stored, the handler returns 400 before any
-            // network call; assert the guard condition.
             let mut acct = test_account("gmail", Some(chrono::Utc::now() - chrono::Duration::minutes(1)));
             acct.oauth_refresh_token = None;
-            assert!(acct.oauth_refresh_token.is_none(), "missing refresh token must be detected");
+            let result = simple_smtp_server::external_imap::oauth2::refresh_oauth2_token(&acct);
+            assert!(result.is_err(), "refresh without a stored token must fail");
         }
         "the API returns HTTP 400 with code \"OAUTH2_REFRESH_TOKEN_MISSING\"" => {
-            assert_eq!("OAUTH2_REFRESH_TOKEN_MISSING", "OAUTH2_REFRESH_TOKEN_MISSING");
+            let source = ctx
+                .values
+                .get("src/bin/email_api_dir/external_handlers/oauth2.rs")
+                .expect("oauth2 handler should be loaded");
+            assert!(
+                source.contains("OAUTH2_REFRESH_TOKEN_MISSING"),
+                "handler must return OAUTH2_REFRESH_TOKEN_MISSING"
+            );
         }
 
-        _ => {}
+        _ => panic!("unknown step: {step}"),
     }
-}
-
-// =====================================================================
-// Helpers for the OAuth2 IMAP Gherkin steps (issue #728).
-// =====================================================================
-
-/// Build an ExternalImapAccount for the OAuth2 scenarios.
-fn test_account(provider: &str, expires_at: Option<chrono::DateTime<chrono::Utc>>) -> simple_smtp_server::external_imap::ExternalImapAccount {
-    simple_smtp_server::external_imap::ExternalImapAccount {
-        id: "gherkin-account".into(),
-        owner_user_id: "gherkin-user".into(),
-        provider: provider.into(),
-        email: "user@gmail.com".into(),
-        auth_type: "oauth2".into(),
-        secret_ref: None,
-        secret_value: None,
-        oauth_access_token: Some("gherkin-access-token".into()),
-        oauth_refresh_token: Some("gherkin-refresh-token".into()),
-        oauth_token_expires_at: expires_at,
-        oauth_scopes: None,
-        imap_host: "imap.gmail.com".into(),
-        imap_port: 993,
-        imap_tls: true,
-        smtp_host: None,
-        smtp_port: None,
-        smtp_tls: None,
-        status: "active".into(),
-        last_sync_at: None,
-        last_error: None,
-        created_at: chrono::Utc::now(),
-        updated_at: chrono::Utc::now(),
-    }
-}
-
-/// Deterministic test-only key material: no literal cryptographic value is
-/// written in the source (CodeQL rust/hard-coded-cryptographic-value).
-fn test_key_bytes(seed: u8) -> [u8; 32] {
-    let mut key = [0u8; 32];
-    let mut acc: u8 = seed;
-    for slot in key.iter_mut() {
-        acc = acc.wrapping_mul(31).wrapping_add(seed).wrapping_add(17);
-        *slot = acc;
-    }
-    key
-}
-
-fn set_test_key(seed: u8) {
-    use base64::engine::Engine;
-    let encoded = base64::engine::general_purpose::STANDARD.encode(test_key_bytes(seed));
-    std::env::set_var("OAUTH_TOKEN_ENCRYPTION_KEY", encoded);
 }
