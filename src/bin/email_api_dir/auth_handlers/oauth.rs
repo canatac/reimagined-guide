@@ -548,92 +548,75 @@ mod tests {
         assert!(query.state.is_none());
     }
 
-    /// Mock GitHub token + user endpoints used to exercise the real callback
-    /// code path (oauth_callback_finish) without an HTTP server.
-    struct MockGithub {
-        server: wiremock::MockServer,
+    #[test]
+    fn provider_from_path_resolves_canonical_route() {
+        assert_eq!(provider_from_path("/api/auth/oauth/github").as_deref(), Some("github"));
+        assert_eq!(provider_from_path("api/auth/oauth/github").as_deref(), Some("github"));
+        assert_eq!(provider_from_path("/api/auth/oauth/github/").as_deref(), Some("github"));
+        assert_eq!(provider_from_path("/api/auth/oauth/google").as_deref(), Some("google"));
+        assert_eq!(provider_from_path("/api/auth/oauth/unknown"), None);
     }
 
-    impl MockGithub {
-        async fn start() -> Self {
-            use wiremock::matchers::{body_partial_json, method, path};
-            use wiremock::{Mock, MockServer, ResponseTemplate};
-
-            let server = MockServer::start().await;
-            Mock::given(method("POST"))
-                .and(path("/login/oauth/access_token"))
-                .and(body_partial_json(serde_json::json!({
-                    "code": "mock-code"
-                })))
-                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                    "access_token": "mock-access-token",
-                    "token_type": "bearer"
-                })))
-                .mount(&server)
-                .await;
-            Mock::given(method("GET"))
-                .and(path("/user"))
-                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                    "login": "mockuser",
-                    "name": "Mock User"
-                })))
-                .mount(&server)
-                .await;
-            MockGithub { server }
-        }
-
-        fn uri(&self) -> String {
-            self.server.uri()
-        }
+    #[test]
+    fn github_authorize_url_is_absolute_and_encodes_redirect() {
+        env::set_var("GITHUB_CLIENT_ID", "client-123");
+        env::set_var("OAUTH_CALLBACK_BASE_URL", "https://mail.misfits.ai");
+        let url = github_authorize_url("github", "state-1").unwrap();
+        assert!(url.starts_with("https://github.com/login/oauth/authorize?"));
+        assert!(url.contains("client_id=client-123"));
+        assert!(url.contains("redirect_uri=https%3A%2F%2Fmail.misfits.ai%2Fapi%2Fauth%2Foauth%2Fgithub%2Fcallback"));
+        assert!(url.contains("state=state-1"));
+        assert_eq!(github_authorize_url("google", "state-1"), None);
     }
 
     #[tokio::test]
-    async fn oauth_callback_exchanges_code_and_issues_session() {
-        use wiremock::matchers::body_partial_json;
-        let mock = MockGithub::start().await;
+    async fn exchange_github_code_uses_mock_token_endpoint() {
+        use wiremock::matchers::{body_partial_json, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
 
-        // Point the real callback code path at the mock endpoints.
-        std::env::set_var("GITHUB_CLIENT_ID", "mock-client-id");
-        std::env::set_var("GITHUB_CLIENT_SECRET", "mock-client-secret");
-        std::env::set_var("GITHUB_TOKEN_ENDPOINT", format!("{}/login/oauth/access_token", mock.uri()));
-        std::env::set_var("GITHUB_USER_ENDPOINT", format!("{}/user", mock.uri()));
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .and(body_partial_json(serde_json::json!({ "code": "abc123" })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "mock-access-token",
+                "token_type": "bearer"
+            })))
+            .mount(&server)
+            .await;
 
-        // The callback path is exercised through the real handler: build the
-        // query and the request the way actix would, then call the handler.
-        let query = OAuthCallbackQuery {
-            code: Some("mock-code".to_string()),
-            state: Some("state-123".to_string()),
-        };
-        let req = actix_web::test::TestRequest::default()
-            .uri("/api/auth/oauth/github/callback?code=mock-code&state=state-123")
-            .to_http_request();
+        env::set_var("GITHUB_CLIENT_ID", "client-123");
+        env::set_var("GITHUB_CLIENT_SECRET", "secret-456");
+        env::set_var("GITHUB_TOKEN_ENDPOINT", format!("{}/token", server.uri()));
 
-        // oauth_callback_finish is the extracted callback body; it is what
-        // auth_oauth_callback calls. Exercise it directly against the mock.
-        // Logic is not constructible here without Mongo, so the handler-level
-        // test asserts the exchange and profile fetch through the mock, which
-        // is the code path the QA asked for.
-        let redirect_uri = "https://mail.misfits.ai/api/auth/oauth/github/callback";
-        let access_token = exchange_github_code_for_access_token("mock-code", redirect_uri)
+        let token = exchange_github_code_for_access_token("abc123", "https://mail.misfits.ai/api/auth/oauth/github/callback")
             .await
-            .expect("token exchange must succeed against the mock");
-        assert_eq!(access_token, "mock-access-token");
+            .expect("token exchange must succeed against the mock endpoint");
+        assert_eq!(token, "mock-access-token");
+    }
 
-        let (login, name) = fetch_github_profile(&access_token)
+    #[tokio::test]
+    async fn fetch_github_profile_uses_mock_user_endpoint() {
+        use wiremock::matchers::{header, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/user"))
+            .and(header("Authorization", "token mock-access-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "login": "mockuser",
+                "name": "Mock User"
+            })))
+            .mount(&server)
+            .await;
+
+        env::set_var("GITHUB_USER_ENDPOINT", format!("{}/user", server.uri()));
+
+        let (login, name) = fetch_github_profile("mock-access-token")
             .await
-            .expect("profile fetch must succeed against the mock");
+            .expect("profile fetch must succeed against the mock endpoint");
         assert_eq!(login, "mockuser");
         assert_eq!(name, "Mock User");
-
-        // The session issued by the callback carries the GitHub-derived email.
-        let session = make_session(&format!("{}@github.oauth.misfits.ai", login), &name);
-        assert_eq!(session.session.user.email, "mockuser@github.oauth.misfits.ai");
-        assert_eq!(session.session.user.display_name, "Mock User");
-
-        // The query deserializer still accepts the callback query.
-        assert_eq!(query.code.as_deref(), Some("mock-code"));
-        assert_eq!(query.state.as_deref(), Some("state-123"));
-        assert_eq!(req.path(), "/api/auth/oauth/github/callback");
-        let _ = body_partial_json::<serde_json::Value>; // keep the matcher import used
     }
 }
