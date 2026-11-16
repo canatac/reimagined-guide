@@ -538,6 +538,9 @@ mod tests {
         assert!(query.state.is_none());
     }
 
+    /// Pre-existing test, restored (AC4): OAuthCallbackQuery still parses
+    /// Option fields, so a partial payload deserializes with the missing field
+    /// as None.
     #[test]
     fn oauth_callback_query_deserialize_partial() {
         let json = r#"{"code": "abc123"}"#;
@@ -555,55 +558,50 @@ mod tests {
     /// hand.
     #[tokio::test]
     async fn oauth_callback_exchanges_code_and_issues_session() {
-        use wiremock::matchers::{method, path};
+        use wiremock::matchers::{body_partial_json, method, path};
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
-        let token_server = MockServer::start().await;
+        let server = MockServer::start().await;
+        let base = server.uri();
+
+        std::env::set_var("GITHUB_CLIENT_ID", "test-client-id");
+        std::env::set_var("GITHUB_CLIENT_SECRET", "test-client-secret");
+        std::env::set_var("GITHUB_TOKEN_ENDPOINT", format!("{}/login/oauth/access_token", base));
+        std::env::set_var("GITHUB_USER_ENDPOINT", format!("{}/user", base));
+
         Mock::given(method("POST"))
             .and(path("/login/oauth/access_token"))
+            .and(body_partial_json(serde_json::json!({
+                "code": "test-auth-code"
+            })))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "access_token": "mock-gh-access-token",
+                "access_token": "mock-access-token",
                 "token_type": "bearer"
             })))
-            .mount(&token_server)
+            .mount(&server)
             .await;
-
-        let user_server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/user"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "login": "octocat",
-                "name": "Octo Cat"
+                "login": "mockuser",
+                "name": "Mock User"
             })))
-            .mount(&user_server)
+            .mount(&server)
             .await;
 
-        // Point the real callback code path at the mocks.
-        std::env::set_var("GITHUB_CLIENT_ID", "test-client-id");
-        std::env::set_var("GITHUB_CLIENT_SECRET", "test-client-secret");
-        std::env::set_var(
-            "GITHUB_TOKEN_ENDPOINT",
-            format!("{}/login/oauth/access_token", token_server.uri()),
-        );
-        std::env::set_var(
-            "GITHUB_USER_ENDPOINT",
-            format!("{}/user", user_server.uri()),
-        );
-        std::env::set_var("OAUTH_CALLBACK_BASE_URL", "https://mail.misfits.ai");
-
-        // The callback creates the user through the Logic; a Logic that cannot
-        // reach MongoDB is fine here because create_user's result is ignored,
-        // and the session is issued from the mocked profile either way.
-        let logic = Logic::new();
-
-        let (access_token, login) = oauth_callback_finish(&logic, "auth-code-123")
+        // The real callback code path: it exchanges the code against the mock
+        // token endpoint, fetches the profile from the mock user endpoint and
+        // issues the session itself.
+        let logic = Logic::new_test();
+        let (session_token, login) = oauth_callback_finish(&logic, "test-auth-code")
             .await
-            .expect("the real callback must exchange the code and issue a session");
+            .expect("the callback must complete against the mock endpoints");
 
-        assert_eq!(login, "octocat");
-        assert!(!access_token.is_empty());
-        let session = make_session("octocat@github.oauth.misfits.ai", "Octo Cat");
-        assert_eq!(session.session.user.email, "octocat@github.oauth.misfits.ai");
-        assert_eq!(session.session.user.display_name, "Octo Cat");
+        assert_eq!(login, "mockuser");
+        assert!(!session_token.is_empty());
+        // The session was issued for the profile returned by the mock, not a
+        // hand-built value: a no-op callback could not produce this token.
+        let session = make_session("mockuser@github.oauth.misfits.ai", "Mock User");
+        assert_eq!(session_token, session.session.access_token);
     }
 }
