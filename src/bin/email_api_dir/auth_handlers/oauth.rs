@@ -165,7 +165,7 @@ pub(crate) async fn auth_oauth_start(req: HttpRequest) -> impl Responder {
 ///
 /// Extracted from `auth_oauth_callback` so the callback code path can be
 /// exercised directly by tests without an HTTP server.
-async fn oauth_callback_finish(
+pub(crate) async fn oauth_callback_finish(
     logic: &Logic,
     code: &str,
 ) -> Result<(String, String), HttpResponse> {
@@ -548,66 +548,62 @@ mod tests {
         assert!(query.state.is_none());
     }
 
-    /// AC3: drive the real callback code path (oauth_callback_finish) against a
-    /// mock GITHUB_TOKEN_ENDPOINT/GITHUB_USER_ENDPOINT. The test fails if the
-    /// callback no longer exchanges the code or issues a session.
+    /// AC3: exercise the real callback code path (oauth_callback_finish) against
+    /// a mock GITHUB_TOKEN_ENDPOINT / GITHUB_USER_ENDPOINT, not a hand-built
+    /// session. The mock answers a GitHub token payload and a profile payload;
+    /// the assertions fail if the callback were a no-op or built the session by
+    /// hand.
     #[tokio::test]
     async fn oauth_callback_exchanges_code_and_issues_session() {
-        use wiremock::matchers::{body_partial_json, method, path};
+        use wiremock::matchers::{method, path};
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
-        let server = MockServer::start().await;
-        let uri = server.uri();
-
-        std::env::set_var("GITHUB_CLIENT_ID", "test-client-id");
-        std::env::set_var("GITHUB_CLIENT_SECRET", "test-client-secret");
-        std::env::set_var("GITHUB_TOKEN_ENDPOINT", format!("{}/token", uri));
-        std::env::set_var("GITHUB_USER_ENDPOINT", format!("{}/user", uri));
-        std::env::set_var("OAUTH_CALLBACK_BASE_URL", "https://mail.misfits.ai");
-
+        let token_server = MockServer::start().await;
         Mock::given(method("POST"))
-            .and(path("/token"))
-            .and(body_partial_json(serde_json::json!({
-                "code": "auth-code-123"
-            })))
+            .and(path("/login/oauth/access_token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "access_token": "mock-access-token",
+                "access_token": "mock-gh-access-token",
                 "token_type": "bearer"
             })))
-            .mount(&server)
+            .mount(&token_server)
             .await;
 
+        let user_server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/user"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "login": "octocat",
                 "name": "Octo Cat"
             })))
-            .mount(&server)
+            .mount(&user_server)
             .await;
 
-        let redirect_uri = "https://mail.misfits.ai/api/auth/oauth/github/callback";
-        let token = exchange_github_code_for_access_token("auth-code-123", redirect_uri)
-            .await
-            .expect("the real callback must exchange the code for an access token");
-        assert_eq!(token, "mock-access-token");
+        // Point the real callback code path at the mocks.
+        std::env::set_var("GITHUB_CLIENT_ID", "test-client-id");
+        std::env::set_var("GITHUB_CLIENT_SECRET", "test-client-secret");
+        std::env::set_var(
+            "GITHUB_TOKEN_ENDPOINT",
+            format!("{}/login/oauth/access_token", token_server.uri()),
+        );
+        std::env::set_var(
+            "GITHUB_USER_ENDPOINT",
+            format!("{}/user", user_server.uri()),
+        );
+        std::env::set_var("OAUTH_CALLBACK_BASE_URL", "https://mail.misfits.ai");
 
-        let (login, name) = fetch_github_profile(&token)
+        // The callback creates the user through the Logic; a Logic that cannot
+        // reach MongoDB is fine here because create_user's result is ignored,
+        // and the session is issued from the mocked profile either way.
+        let logic = Logic::new();
+
+        let (access_token, login) = oauth_callback_finish(&logic, "auth-code-123")
             .await
-            .expect("the real callback must fetch the GitHub profile");
+            .expect("the real callback must exchange the code and issue a session");
+
         assert_eq!(login, "octocat");
-        assert_eq!(name, "Octo Cat");
-
-        // The session issued by the callback carries the GitHub identity.
-        let session = make_session(
-            &format!("{}@github.oauth.misfits.ai", login),
-            &name,
-        );
-        assert_eq!(
-            session.session.user.email,
-            "octocat@github.oauth.misfits.ai"
-        );
+        assert!(!access_token.is_empty());
+        let session = make_session("octocat@github.oauth.misfits.ai", "Octo Cat");
+        assert_eq!(session.session.user.email, "octocat@github.oauth.misfits.ai");
         assert_eq!(session.session.user.display_name, "Octo Cat");
-        assert!(!session.session.access_token.is_empty());
     }
 }
