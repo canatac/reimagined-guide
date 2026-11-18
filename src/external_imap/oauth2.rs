@@ -59,11 +59,24 @@ impl std::fmt::Display for TokenRefreshError {
 
 impl std::error::Error for TokenRefreshError {}
 
+/// Resolve the token endpoint of a provider.
+///
+/// The endpoint is read from the environment when the operator (or a test)
+/// overrides it, so the authorization-code exchange and the refresh grant can
+/// be exercised against a mock server instead of the live provider.
+fn provider_token_endpoint(provider: &str, default: &str, env_var: &str) -> String {
+    std::env::var(env_var).unwrap_or_else(|_| default.to_string())
+}
+
 /// Get the OAuth2 provider config for a given provider name.
 pub fn provider_config(provider: &str) -> Option<OAuth2ProviderConfig> {
     match provider.to_ascii_lowercase().as_str() {
         "gmail" | "google" => Some(OAuth2ProviderConfig {
-            token_endpoint: "https://oauth2.googleapis.com/token".to_string(),
+            token_endpoint: provider_token_endpoint(
+                provider,
+                "https://oauth2.googleapis.com/token",
+                "GOOGLE_OAUTH_TOKEN_URL",
+            ),
             client_id: std::env::var("GOOGLE_OAUTH_CLIENT_ID").unwrap_or_default(),
             client_secret: std::env::var("GOOGLE_OAUTH_CLIENT_SECRET").unwrap_or_default(),
             scopes: vec![
@@ -71,7 +84,11 @@ pub fn provider_config(provider: &str) -> Option<OAuth2ProviderConfig> {
             ],
         }),
         "outlook" | "microsoft" | "office365" => Some(OAuth2ProviderConfig {
-            token_endpoint: "https://login.microsoftonline.com/common/oauth2/v2.0/token".to_string(),
+            token_endpoint: provider_token_endpoint(
+                provider,
+                "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+                "MICROSOFT_OAUTH_TOKEN_URL",
+            ),
             client_id: std::env::var("MICROSOFT_OAUTH_CLIENT_ID").unwrap_or_default(),
             client_secret: std::env::var("MICROSOFT_OAUTH_CLIENT_SECRET").unwrap_or_default(),
             scopes: vec![
@@ -80,7 +97,11 @@ pub fn provider_config(provider: &str) -> Option<OAuth2ProviderConfig> {
             ],
         }),
         "yahoo" => Some(OAuth2ProviderConfig {
-            token_endpoint: "https://api.login.yahoo.com/oauth2/get_token".to_string(),
+            token_endpoint: provider_token_endpoint(
+                provider,
+                "https://api.login.yahoo.com/oauth2/get_token",
+                "YAHOO_OAUTH_TOKEN_URL",
+            ),
             client_id: std::env::var("YAHOO_OAUTH_CLIENT_ID").unwrap_or_default(),
             client_secret: std::env::var("YAHOO_OAUTH_CLIENT_SECRET").unwrap_or_default(),
             scopes: vec![
@@ -399,6 +420,13 @@ mod tests {
         assert_eq!(config.token_endpoint, "https://oauth2.googleapis.com/token");
         assert_eq!(config.client_id, "test-client-id");
         assert!(config.scopes.contains(&"https://mail.google.com/".to_string()));
+    }
+
+    #[test]
+    fn provider_config_honours_token_url_override() {
+        std::env::set_var("GOOGLE_OAUTH_TOKEN_URL", "http://127.0.0.1:9999/token");
+        let config = provider_config("gmail").unwrap();
+        assert_eq!(config.token_endpoint, "http://127.0.0.1:9999/token");
     }
 
     #[test]

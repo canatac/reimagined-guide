@@ -82,6 +82,17 @@ pub(crate) fn register_external_routes(cfg: &mut web::ServiceConfig) {
         web::post().to(api_external_message_action),
     )
     // OAuth 2.0 routes (MW-2026-062)
+    // Provider catalogue for the "Connect an external account" picker.
+    .route(
+        "/api/external-accounts/oauth2/providers",
+        web::get().to(api_oauth2_providers_list),
+    )
+    // Start the consent flow from the provider chosen by the user, without an
+    // already-created account.
+    .route(
+        "/api/external-accounts/oauth2/start",
+        web::get().to(api_oauth2_start_by_provider),
+    )
     .route(
         "/api/external-accounts/{id}/oauth2/start",
         web::get().to(api_oauth2_start),
@@ -230,12 +241,14 @@ mod tests {
             "/api/external-sync-runs/{run_id}",
             "/api/external-messages",
             "/api/external-messages/{id}/action",
+            "/api/external-accounts/oauth2/providers",
+            "/api/external-accounts/oauth2/start",
             "/api/external-accounts/{id}/oauth2/start",
             "/api/external-accounts/{id}/oauth2/callback",
             "/api/external-accounts/{id}/oauth2/tokens",
             "/api/external-accounts/{id}/oauth2/refresh",
         ];
-        assert_eq!(paths.len(), 19);
+        assert_eq!(paths.len(), 21);
     }
 
     #[test]
@@ -245,11 +258,13 @@ mod tests {
             "/api/external-accounts/{id}",
             "/api/external-accounts/{id}/folders",
             "/api/external-accounts/{id}/sync/status",
+            "/api/external-accounts/oauth2/providers",
+            "/api/external-accounts/oauth2/start",
             "/api/external-accounts/{id}/oauth2/start",
             "/api/external-sync-runs/{run_id}",
             "/api/external-messages",
         ];
-        assert_eq!(get_routes.len(), 7);
+        assert_eq!(get_routes.len(), 9);
     }
 
     #[test]

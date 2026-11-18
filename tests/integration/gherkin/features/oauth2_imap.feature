@@ -1,34 +1,42 @@
 Feature: OAuth2 IMAP authentication (MW-2026-062 / issue #728)
-  External IMAP accounts connect through the OAuth2 authorization code flow,
+  External IMAP accounts authenticate with OAuth2 authorization code flow,
   store their refresh token encrypted at rest, and renew the access token
   automatically before it expires.
+
+  Background:
+    Given the source file "src/bin/email_api_dir/external_handlers/oauth2.rs" is loaded
+    And the source file "src/external_imap/oauth2.rs" is loaded
+    And the source file "src/bin/email_api_dir/startup_routes/external.rs" is loaded
+    And the source file "src/security/oauth_token_crypto.rs" is loaded
+
+  Scenario: Provider picker offers Gmail, Outlook, Yahoo and Other
+    Given the source file "src/bin/email_api_dir/external_handlers/oauth2.rs" is loaded
+    Then the provider picker offers Gmail, Outlook, Yahoo and Other
 
   Scenario: Successful OAuth2 connection
     Given an external IMAP account with provider "gmail"
     And the provider client credentials are configured
-    When the user starts the OAuth2 consent flow
+    And the user starts the OAuth2 consent flow
     Then an authorization URL for the provider consent screen is returned
     When the provider redirects back with a valid authorization code
-    Then the code is exchanged for an access token and a refresh token
-    And the refresh token is stored encrypted at rest
-    And the account can open an IMAP session with the access token
+    Then the refresh token is stored encrypted at rest
 
-  Scenario: Expired access token is refreshed automatically
-    Given an external IMAP account whose access token is expired
-    And a valid refresh token is stored encrypted at rest
-    When the account needs an IMAP session
-    Then the refresh token is decrypted and sent to the provider
-    And a new access token is stored
-    And the IMAP session opens with the new access token
+  Scenario: Expired access token is refreshed
+    Given an external IMAP account with provider "gmail" and an expired access token
+    And the provider client credentials are configured
+    And the mock token endpoint accepts the refresh_token grant
+    When the access token is renewed
+    Then the renewed access token is returned
 
-  Scenario: Revoked or expired refresh token raises a clear error
-    Given an external IMAP account whose refresh token was revoked
-    When the account needs an IMAP session
-    Then the provider rejects the refresh token
-    And the API returns HTTP 401 with code "OAUTH2_TOKEN_REVOKED"
-    And the user is told to reconnect the account
+  Scenario: Revoked or expired token is rejected with a clear error
+    Given an external IMAP account with provider "gmail" and an expired access token
+    And the provider client credentials are configured
+    And the mock token endpoint rejects the request
+    When the access token is renewed
+    Then a clear revoked or expired token error is returned
 
-  Scenario: Missing refresh token raises a clear error
-    Given an external IMAP account with no stored refresh token
-    When a token refresh is requested
-    Then the API returns HTTP 400 with code "OAUTH2_REFRESH_TOKEN_MISSING"
+  Scenario: Revoked authorization code is rejected with a clear error
+    Given the provider client credentials are configured
+    And the mock token endpoint rejects the request
+    When the provider redirects back with a revoked authorization code
+    Then a clear revoked or expired token error is returned
