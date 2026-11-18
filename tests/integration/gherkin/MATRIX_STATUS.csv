@@ -1,0 +1,2 @@
+row_id,feature,repo,status,evidence
+MW-2026-062,OAuth2 IMAP authentication,reimagined-guide,FAIL,Gherkin scenarios written for issue #728 (AC1-AC11); implementation pending
