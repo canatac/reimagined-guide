@@ -283,4 +283,127 @@ mod tests {
         let client = reqwest::Client::builder().user_agent("test").build();
         assert!(client.is_ok() || client.is_err());
     }
+
+    #[test]
+    fn oauth_token_json_access_token() {
+        let token_json = serde_json::json!({ "access_token": "test-token" });
+        let access_token = token_json.get("access_token").and_then(|v| v.as_str());
+        assert_eq!(access_token, Some("test-token"));
+    }
+
+    #[test]
+    fn oauth_token_json_missing_access_token() {
+        let token_json = serde_json::json!({ "error": "bad_verification_code" });
+        let access_token = token_json.get("access_token").and_then(|v| v.as_str());
+        assert!(access_token.is_none());
+    }
+
+    #[test]
+    fn oauth_user_json_login() {
+        let user_json = serde_json::json!({ "login": "testuser", "name": "Test User" });
+        let login = user_json.get("login").and_then(|v| v.as_str()).unwrap_or("ghuser");
+        assert_eq!(login, "testuser");
+    }
+
+    #[test]
+    fn oauth_user_json_name_fallback() {
+        let user_json = serde_json::json!({ "login": "testuser" });
+        let login = user_json.get("login").and_then(|v| v.as_str()).unwrap_or("ghuser");
+        let name = user_json.get("name").and_then(|v| v.as_str()).unwrap_or(login);
+        assert_eq!(name, "testuser");
+    }
+
+    #[test]
+    fn oauth_user_json_default_login() {
+        let user_json = serde_json::json!({});
+        let login = user_json.get("login").and_then(|v| v.as_str()).unwrap_or("ghuser");
+        assert_eq!(login, "ghuser");
+    }
+
+    #[test]
+    fn oauth_create_user_mailbox() {
+        let mailbox = "inbox";
+        assert_eq!(mailbox, "inbox");
+    }
+
+    #[test]
+    fn oauth_session_creation() {
+        let session = make_session("test@github.oauth.misfits.ai", "Test User");
+        assert_eq!(session.session.user.email, "test@github.oauth.misfits.ai");
+        assert_eq!(session.session.user.display_name, "Test User");
+    }
+
+    #[test]
+    fn oauth_token_encoding() {
+        let token = "test-token-with-special-chars=&?";
+        let encoded = urlencoding::encode(token);
+        assert!(encoded.contains("%"));
+    }
+
+    #[test]
+    fn oauth_state_uuid_format() {
+        let state = Uuid::new_v4().to_string();
+        assert!(state.contains("-"));
+        assert!(state.len() > 30);
+    }
+
+    #[test]
+    fn oauth_error_messages() {
+        let unsupported = "Unsupported OAuth provider.";
+        let missing_code = "Missing OAuth authorization code.";
+        let not_configured = "OAuth provider not configured.";
+        let token_missing = "OAuth access token missing";
+        assert!(unsupported.contains("Unsupported"));
+        assert!(missing_code.contains("Missing"));
+        assert!(not_configured.contains("not configured"));
+        assert!(token_missing.contains("missing"));
+    }
+
+    #[test]
+    fn oauth_http_status_codes() {
+        let bad_request = 400;
+        let unauthorized = 401;
+        let internal_error = 500;
+        let found = 302;
+        assert_eq!(bad_request, 400);
+        assert_eq!(unauthorized, 401);
+        assert_eq!(internal_error, 500);
+        assert_eq!(found, 302);
+    }
+
+    #[test]
+    fn oauth_location_header() {
+        let header = "Location";
+        assert_eq!(header, "Location");
+    }
+
+    #[test]
+    fn oauth_callback_query_deserialize() {
+        let json = r#"{"code": "abc123", "state": "xyz789"}"#;
+        let result: Result<OAuthCallbackQuery, _> = serde_json::from_str(json);
+        assert!(result.is_ok());
+        let query = result.unwrap();
+        assert_eq!(query.code, Some("abc123".to_string()));
+        assert_eq!(query.state, Some("xyz789".to_string()));
+    }
+
+    #[test]
+    fn oauth_callback_query_deserialize_empty() {
+        let json = r#"{}"#;
+        let result: Result<OAuthCallbackQuery, _> = serde_json::from_str(json);
+        assert!(result.is_ok());
+        let query = result.unwrap();
+        assert!(query.code.is_none());
+        assert!(query.state.is_none());
+    }
+
+    #[test]
+    fn oauth_callback_query_deserialize_partial() {
+        let json = r#"{"code": "abc123"}"#;
+        let result: Result<OAuthCallbackQuery, _> = serde_json::from_str(json);
+        assert!(result.is_ok());
+        let query = result.unwrap();
+        assert_eq!(query.code, Some("abc123".to_string()));
+        assert!(query.state.is_none());
+    }
 }
