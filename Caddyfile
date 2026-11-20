@@ -36,6 +36,9 @@ mail.misfits.ai {
     # Next.js /api/health/deep proxies backend /api/monitoring/mongo-health with
     # 5s timeout. Used by monitoring/alerting, NOT by container healthcheck.
     reverse_proxy /api/health/deep localhost:3001
+    # The OAuth return of the web (#736): /api/auth/callback is a route of
+    # misfits-web, which receives the session; every other /api/auth/* is the API.
+    reverse_proxy /api/auth/callback localhost:3001
 
     # Public APIs + remaining: direct to backend (strip backend CORS headers, enforce whitelist)
     reverse_proxy /api/* localhost:8000 {
