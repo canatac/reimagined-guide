@@ -2,52 +2,7 @@
 #![allow(unused_imports, dead_code)]
 use super::super::*;
 use super::session::LoginRequest;
-
-/// Cherche l'utilisateur dans `admin_users` par email; s'il est actif,
-/// persiste une session admin et renvoie le token à utiliser côté client.
-async fn issue_session_if_admin(
-    mongo: &mongodb::Client,
-    email: &str,
-) -> Option<String> {
-    let db_name = std::env::var("MONGODB_DATABASE").unwrap_or_else(|_| "mailserver".to_string());
-    let coll = mongo
-        .database(&db_name)
-        .collection::<AdminUserRecord>(super::super::admin_ops::ADMIN_USERS_COLL);
-    let email_lc = email.trim().to_lowercase();
-    let user_opt = match coll.find_one(doc! { "email": &email_lc }).await {
-        Ok(Some(u)) => Some(u),
-        Ok(None) => match coll.find_one(doc! { "email": email }).await {
-            Ok(Some(u)) => Some(u),
-            Ok(None) => None,
-            Err(e) => {
-                eprintln!("issue_session_if_admin: find_one (raw) failed: {}", e);
-                None
-            }
-        },
-        Err(e) => {
-            eprintln!("issue_session_if_admin: find_one failed: {}", e);
-            return None;
-        }
-    };
-    let user = match user_opt {
-        Some(u) => u,
-        None => return None,
-    };
-    if user.status != "active" {
-        return None;
-    }
-    let session = super::super::admin_auth::issue_admin_session(
-        mongo,
-        &db_name,
-        &user.id,
-        &user.email,
-        &user.role,
-        None,
-        None,
-    )
-    .await;
-    Some(session.token)
-}
+use super::session_store::signed_in;
 
 pub(crate) fn make_session(email: &str, display_name: &str) -> AuthResponse {
     make_session_with_token(email, display_name, &Uuid::new_v4().to_string())
@@ -121,21 +76,8 @@ pub(crate) async fn auth_login(
                 }));
             }
             let display = if user.mailbox.is_empty() { req.email.clone() } else { user.mailbox.clone() };
-            let response = match issue_session_if_admin(mongo.as_ref(), &req.email).await {
-                Some(token) => make_session_with_token(&req.email, &display, &token),
-                None => make_session(&req.email, &display),
-            };
-            // Set session_token cookie for frontend persistence
-            let cookie = actix_web::cookie::Cookie::build("session_token", &response.session.access_token)
-                .path("/")
-                .http_only(true)
-                .secure(true)
-                .same_site(actix_web::cookie::SameSite::Lax)
-                .max_age(actix_web::cookie::time::Duration::hours(24))
-                .finish();
-            HttpResponse::Ok()
-                .cookie(cookie)
-                .json(response)
+            // The session stored, so that the API recognises its token (#751).
+            signed_in(mongo.get_ref().as_ref(), &req.email, &display).await
         }
         Ok(None) => {
             let env_user = env::var("SMTP_USERNAME").unwrap_or_default();
@@ -150,20 +92,7 @@ pub(crate) async fn auth_login(
                             "methods": ["totp", "recovery"]
                         }));
                     }
-                    let response = match issue_session_if_admin(mongo.as_ref(), &req.email).await {
-                        Some(token) => make_session_with_token(&req.email, &env_user, &token),
-                        None => make_session(&req.email, &env_user),
-                    };
-                    let cookie = actix_web::cookie::Cookie::build("session_token", &response.session.access_token)
-                        .path("/")
-                        .http_only(true)
-                        .secure(true)
-                        .same_site(actix_web::cookie::SameSite::Lax)
-                        .max_age(actix_web::cookie::time::Duration::hours(24))
-                        .finish();
-                    return HttpResponse::Ok()
-                        .cookie(cookie)
-                        .json(response);
+                    return signed_in(mongo.get_ref().as_ref(), &req.email, &env_user).await;
                 }
             }
             let ip = req_ip_str(&req_http);
@@ -180,20 +109,7 @@ pub(crate) async fn auth_login(
             let env_pass = env::var("SMTP_PASSWORD").unwrap_or_default();
             if req.email == env_user || req.email == format!("{}@misfits.ai", env_user) {
                 if req.password == env_pass {
-                    let response = match issue_session_if_admin(mongo.as_ref(), &req.email).await {
-                        Some(token) => make_session_with_token(&req.email, &env_user, &token),
-                        None => make_session(&req.email, &env_user),
-                    };
-                    let cookie = actix_web::cookie::Cookie::build("session_token", &response.session.access_token)
-                        .path("/")
-                        .http_only(true)
-                        .secure(true)
-                        .same_site(actix_web::cookie::SameSite::Lax)
-                        .max_age(actix_web::cookie::time::Duration::hours(24))
-                        .finish();
-                    return HttpResponse::Ok()
-                        .cookie(cookie)
-                        .json(response);
+                    return signed_in(mongo.get_ref().as_ref(), &req.email, &env_user).await;
                 }
             }
             HttpResponse::Unauthorized().json(serde_json::json!({ "message": i18n::t(&locale, "error-login-invalid", &[]) }))

@@ -3,6 +3,7 @@
 #![allow(unused_imports, dead_code)]
 use super::super::*;
 use super::login::make_session;
+use super::session_store::{open_session, with_session};
 use actix_web::{HttpRequest, HttpResponse, Responder};
 use chrono::Utc;
 use std::sync::Arc;
@@ -78,6 +79,7 @@ pub(crate) async fn auth_anonymous_register(
     req: actix_web::web::Json<AnonymousRegisterRequest>,
     req_http: HttpRequest,
     logic: actix_web::web::Data<Arc<Logic>>,
+    mongo: actix_web::web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
     // Enforce Tor-only access
     if !is_tor_request(&req_http) {
@@ -146,27 +148,19 @@ pub(crate) async fn auth_anonymous_register(
         }
     }
 
-    // Create session immediately (no email verification needed)
-    let session = make_session(&primary_email, &display_name);
-
-    // Set session cookie
-    let cookie = actix_web::cookie::Cookie::build("session_token", &session.session.access_token)
-        .path("/")
-        .http_only(true)
-        .secure(true)
-        .same_site(actix_web::cookie::SameSite::Lax)
-        .max_age(actix_web::cookie::time::Duration::hours(24))
-        .finish();
-
-    HttpResponse::Created()
-        .cookie(cookie)
-        .json(serde_json::json!({
-            "email": primary_email,
-            "display_name": display_name,
-            "session": session.session,
-            "anonymous": true,
-            "tor": true
-        }))
+    // Create session immediately (no email verification needed), stored so
+    // that the API recognises its token (#751).
+    let session = match open_session(mongo.get_ref().as_ref(), &primary_email, &display_name).await {
+        Ok(session) => session,
+        Err(refused) => return refused,
+    };
+    with_session(HttpResponse::Created(), &session, serde_json::json!({
+        "email": primary_email,
+        "display_name": display_name,
+        "session": session.session,
+        "anonymous": true,
+        "tor": true
+    }))
 }
 
 #[cfg(test)]

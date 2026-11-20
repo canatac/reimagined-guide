@@ -2,6 +2,7 @@
 #![allow(unused_imports, dead_code)]
 use super::super::*;
 use super::login::make_session;
+use super::session_store::{open_session, with_session};
 use super::session::RegisterRequest;
 
 pub(crate) async fn auth_register(
@@ -78,19 +79,14 @@ pub(crate) async fn auth_register(
             to: welcome.to.clone(), timestamp: Utc::now().to_rfc3339(),
         }).await;
     }
-    let session = make_session(&primary_email, &display_name);
-    // Set session_token cookie for frontend persistence
-    let cookie = actix_web::cookie::Cookie::build("session_token", &session.session.access_token)
-        .path("/")
-        .http_only(true)
-        .secure(true)
-        .same_site(actix_web::cookie::SameSite::Lax)
-        .max_age(actix_web::cookie::time::Duration::hours(24))
-        .finish();
-    HttpResponse::Created()
-        .cookie(cookie)
-        .insert_header(("Content-Language", locale.as_str()))
-        .json(serde_json::json!({ "email": primary_email, "alias": alias_email, "session": session.session, "locale": locale }))
+    // The session stored, so that the API recognises its token (#751).
+    let session = match open_session(mongo.get_ref().as_ref(), &primary_email, &display_name).await {
+        Ok(session) => session,
+        Err(refused) => return refused,
+    };
+    let mut created = HttpResponse::Created();
+    created.insert_header(("Content-Language", locale.as_str()));
+    with_session(created, &session, serde_json::json!({ "email": primary_email, "alias": alias_email, "session": session.session, "locale": locale }))
 }
 
 #[cfg(test)]
