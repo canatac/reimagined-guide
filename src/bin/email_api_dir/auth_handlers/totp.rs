@@ -1,16 +1,18 @@
 // totp.rs — Helpers HOTP/TOTP + endpoint api_2fa_verify. Extraits de auth_handlers.rs.
 #![allow(unused_imports, dead_code)]
 use super::super::*;
-use super::login::make_session;
+use super::challenge;
+use super::session_store::{open_session, with_session};
 
 pub(crate) fn default_2fa_method() -> String { "email".to_string() }
 
+/// The second step of a password sign-in (#753): the challenge it returned
+/// and the code of the authenticator.
 #[derive(Deserialize)]
 pub(crate) struct TwoFactorVerifyRequest {
-    pub email: String,
+    #[serde(rename = "challengeId", alias = "challenge_id")]
+    pub challenge_id: String,
     pub code: String,
-    #[serde(default = "default_2fa_method")]
-    pub method: String,
 }
 
 pub(crate) fn compute_hotp(key: &[u8], counter: u64) -> u32 {
@@ -130,32 +132,23 @@ pub(crate) async fn api_2fa_verify(
     body: web::Json<TwoFactorVerifyRequest>,
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
-    let db = mongo_db_name();
-    if body.method == "totp" {
-        let coll = mongo.database(&db).collection::<bson::Document>("users");
-        let local = body.email.split('@').next().unwrap_or(&body.email);
-        let user_doc = match coll.find_one(doc! { "$or": [{ "username": local }, { "username": &body.email }] }).await {
-            Ok(Some(d)) => d,
-            Ok(None) => return HttpResponse::Unauthorized().json(serde_json::json!({ "verified": false, "error": "User not found" })),
-            Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({ "error": e.to_string() })),
-        };
-        let totp_secret = match user_doc.get_str("totp_secret").ok().filter(|s| !s.is_empty()) {
-            Some(s) => s.to_string(),
-            None => return HttpResponse::BadRequest().json(serde_json::json!({ "verified": false, "error": "TOTP not configured for this user" })),
-        };
-        if !verify_totp(&totp_secret, &body.code) {
-            return HttpResponse::Unauthorized().json(serde_json::json!({ "verified": false, "error": "Invalid TOTP code" }));
-        }
-    } else {
-        let coll = mongo.database(&db).collection::<bson::Document>("two_factor_codes");
-        let now_ms = Utc::now().timestamp_millis();
-        match coll.find_one(doc! { "email": &body.email, "code": &body.code, "used": false, "expires_at": { "$gt": bson::DateTime::from_millis(now_ms) } }).await {
-            Ok(Some(d)) => { if let Ok(oid) = d.get_object_id("_id") { let _ = coll.update_one(doc! { "_id": oid }, doc! { "$set": { "used": true } }).await; } }
-            Ok(None) => return HttpResponse::Unauthorized().json(serde_json::json!({ "verified": false, "error": "Invalid or expired code" })),
-            Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({ "error": e.to_string() })),
-        }
+    let client = mongo.get_ref().as_ref();
+    // A code alone opens nothing: it must answer a challenge of a correct
+    // password, unused, unexpired, under 5 attempts (#753).
+    let email = match challenge::attempt(client, &body.challenge_id).await {
+        Some(email) => email,
+        None => return challenge::refused(),
+    };
+    let account = challenge::two_factor_account(client, &email).await;
+    let secret = account.as_ref().and_then(|d| d.get_str("totp_secret").ok()).filter(|s| !s.is_empty());
+    let valid = secret.map(|secret| verify_totp(secret, body.code.trim())).unwrap_or(false);
+    if !valid || !challenge::consume(client, &body.challenge_id).await {
+        return challenge::refused();
     }
-    let display = body.email.split('@').next().unwrap_or(&body.email).to_string();
-    let session = make_session(&body.email, &display);
-    HttpResponse::Ok().json(serde_json::json!({ "verified": true, "session": session.session }))
+    let display = email.split('@').next().unwrap_or(&email).to_string();
+    let session = match open_session(client, &email, &display).await {
+        Ok(session) => session,
+        Err(unavailable) => return unavailable,
+    };
+    with_session(HttpResponse::Ok(), &session, serde_json::json!({ "verified": true, "session": session.session }))
 }
