@@ -231,8 +231,9 @@ pub(crate) async fn auth_oauth_callback(
     };
     let email = account_email(&user);
     // The account exists after its first sign-in; an error here is that one.
-    if let Err(e) = logic.create_user(&email, &Uuid::new_v4().to_string(), "inbox").await {
-        eprintln!("OAuth callback: create_user({}): {}", email, e);
+    // Neither the address nor the error, which may hold it, is logged.
+    if logic.create_user(&email, &Uuid::new_v4().to_string(), "inbox").await.is_err() {
+        eprintln!("OAuth callback: account not created (it may exist already)");
     }
     let session = match open_session(mongo.get_ref().as_ref(), &email, &user.name).await {
         Ok(session) => session,
