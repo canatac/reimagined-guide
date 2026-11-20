@@ -1,5 +1,5 @@
 # Stage 1: Builder — cache dependencies separately from app code
-FROM rust:1.88 AS builder
+FROM rust:1.89 AS builder
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
