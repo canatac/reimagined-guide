@@ -11,6 +11,7 @@ pub(crate) mod totp;
 pub(crate) mod two_factor;
 pub(crate) mod gdpr;
 pub(crate) mod anonymous_register;
+pub(crate) mod session_store;
 
 pub(crate) use session::*;
 pub(crate) use login::*;

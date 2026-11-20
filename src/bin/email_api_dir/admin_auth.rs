@@ -41,7 +41,7 @@ pub fn rbac_enabled() -> bool {
 }
 
 /// Nombre de secondes avant expiration d'une session admin (24h par défaut).
-fn session_ttl_secs() -> i64 {
+pub(crate) fn session_ttl_secs() -> i64 {
     env::var("ADMIN_SESSION_TTL_SECS")
         .ok()
         .and_then(|v| v.parse::<i64>().ok())
@@ -89,7 +89,7 @@ impl AuthUser {
 /// Extrait un token depuis un `HttpRequest`.
 ///
 /// Priorité: header `Authorization: Bearer *** puis cookie `session_token`.
-fn extract_token(req: &HttpRequest) -> Option<String> {
+pub(crate) fn extract_token(req: &HttpRequest) -> Option<String> {
     if let Some(h) = req.headers().get("Authorization") {
         if let Ok(s) = h.to_str() {
             if let Some(tok) = s.strip_prefix("Bearer ") {

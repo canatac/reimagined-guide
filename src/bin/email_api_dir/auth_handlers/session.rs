@@ -57,19 +57,30 @@ pub(crate) struct UserSession {
 
 // ─── Stateless stubs ────────────────────────────────────────────────────────
 
-pub(crate) async fn auth_logout() -> impl Responder {
-    HttpResponse::Ok().json(serde_json::json!({}))
+/// Logout — closes the stored session of the access token (#751) and clears
+/// the session cookies of the browser.
+pub(crate) async fn auth_logout(
+    req_http: actix_web::HttpRequest,
+    mongo: web::Data<Arc<mongodb::Client>>,
+) -> impl Responder {
+    if let Some(token) = super::super::admin_auth::extract_token(&req_http) {
+        super::session_store::close_session(mongo.get_ref().as_ref(), &token).await;
+    }
+    let mut ok = HttpResponse::Ok();
+    for cookie in super::session_store::cleared_cookies() {
+        ok.cookie(cookie);
+    }
+    ok.json(serde_json::json!({}))
 }
 
-/// Refresh handler — validates the refresh token against MongoDB and issues a new session.
-/// Previously this was a stub that returned a random session without validation.
+/// Refresh handler — rotates the tokens of the stored session of the refresh
+/// token (#751): the old refresh token is worth nothing afterwards. Unknown,
+/// expired or already used: 401.
 pub(crate) async fn auth_refresh(
     req_http: actix_web::HttpRequest,
     mongo: web::Data<Arc<mongodb::Client>>,
 ) -> impl Responder {
-    // Extract refresh token from Authorization header or cookie
-    let refresh_token = extract_refresh_token(&req_http);
-    let token = match refresh_token {
+    let token = match extract_refresh_token(&req_http) {
         Some(t) => t,
         None => {
             return HttpResponse::Unauthorized().json(serde_json::json!({
@@ -78,70 +89,16 @@ pub(crate) async fn auth_refresh(
             }));
         }
     };
-
-    // Validate the refresh token against the database
-    let db_name = std::env::var("MONGODB_DATABASE")
-        .unwrap_or_else(|_| "mailserver".to_string());
-    
-    match lookup_user_session_by_refresh(mongo.as_ref(), &db_name, &token).await {
-        Some(session) => {
-            // Check if refresh token is expired
-            let now = chrono::Utc::now();
-            if let Ok(exp) = chrono::DateTime::parse_from_rfc3339(&session.refresh_expires_at.to_string()) {
-                if now > exp {
-                    return HttpResponse::Unauthorized().json(serde_json::json!({
-                        "code": "AUTH_INVALID",
-                        "message": "Refresh token expired"
-                    }));
-                }
-            }
-
-            // Issue new tokens
-            let new_access_token = uuid::Uuid::new_v4().to_string();
-            let new_refresh_token = uuid::Uuid::new_v4().to_string();
-            let access_expires_at = now.timestamp_millis() + 3_600_000; // 1 hour
-            let refresh_expires_at = now.timestamp_millis() + 604_800_000; // 7 days
-
-            // Persist the new session to MongoDB
-            if let Err(e) = update_user_session_tokens(
-                mongo.as_ref(),
-                &db_name,
-                &session.refresh_token,
-                &new_access_token,
-                &new_refresh_token,
-                access_expires_at,
-                refresh_expires_at,
-            ).await {
-                eprintln!("auth_refresh: failed to update session: {}", e);
-            }
-
-            // Return the new session
-            HttpResponse::Ok().json(serde_json::json!({
-                "session": {
-                    "id": uuid::Uuid::new_v4().to_string(),
-                    "user": {
-                        "id": session.user_id,
-                        "email": session.email,
-                        "display_name": session.display_name,
-                        "role": session.role,
-                        "two_factor_enabled": false,
-                        "created_at": session.created_at,
-                        "updated_at": now.to_rfc3339(),
-                    },
-                    "accessToken": new_access_token,
-                    "refreshToken": new_refresh_token,
-                    "expiresAt": access_expires_at as u64,
-                    "refreshExpiresAt": refresh_expires_at as u64,
-                    "issuedAt": now.timestamp_millis() as u64,
-                }
-            }))
+    match super::session_store::rotate_session(mongo.get_ref().as_ref(), &token).await {
+        Some(stored) => {
+            let response = super::session_store::response_of(&stored);
+            let body = serde_json::to_value(&response).unwrap_or_default();
+            super::session_store::with_session(HttpResponse::Ok(), &response, body)
         }
-        None => {
-            HttpResponse::Unauthorized().json(serde_json::json!({
-                "code": "AUTH_INVALID",
-                "message": "Session token unknown or expired"
-            }))
-        }
+        None => HttpResponse::Unauthorized().json(serde_json::json!({
+            "code": "AUTH_INVALID",
+            "message": "Session token unknown or expired"
+        })),
     }
 }
 
