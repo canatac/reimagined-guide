@@ -12,6 +12,7 @@ pub(crate) mod two_factor;
 pub(crate) mod gdpr;
 pub(crate) mod anonymous_register;
 pub(crate) mod session_store;
+pub(crate) mod challenge;
 
 pub(crate) use session::*;
 pub(crate) use login::*;
