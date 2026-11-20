@@ -7,7 +7,9 @@ use mongodb::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
+use super::challenge;
 use super::login::make_session;
+use super::session_store::{open_session, with_session};
 use super::totp::{generate_totp_secret, verify_totp};
 
 // ── Request / Response types ──────────────────────────────────────────────
@@ -32,7 +34,10 @@ pub(crate) struct TwoFactorDisableRequest {
 
 #[derive(Deserialize)]
 pub(crate) struct RecoveryCodeLoginRequest {
-    pub email: String,
+    /// The challenge of the password sign-in (#753).
+    #[serde(rename = "challengeId", alias = "challenge_id")]
+    pub challenge_id: String,
+    #[serde(alias = "recoveryCode")]
     pub recovery_code: String,
 }
 
@@ -399,29 +404,21 @@ pub(crate) async fn api_2fa_recovery(
     body: web::Json<RecoveryCodeLoginRequest>,
     mongo: web::Data<Client>,
 ) -> impl Responder {
-    let email = body.email.trim().to_lowercase();
     let recovery_code = body.recovery_code.trim().to_uppercase();
-
-    if email.is_empty() || recovery_code.is_empty() {
+    if recovery_code.is_empty() {
         return HttpResponse::BadRequest().json(serde_json::json!({
-            "error": "email and recovery_code are required"
+            "error": "challengeId and recovery_code are required"
         }));
     }
-
-    // Find user
-    let user_doc = match find_user_by_email(mongo.as_ref(), &email).await {
-        Ok(Some(d)) => d,
-        Ok(None) => {
-            return HttpResponse::Unauthorized().json(serde_json::json!({
-                "verified": false,
-                "error": "Invalid recovery code"
-            }));
-        }
-        Err(e) => {
-            return HttpResponse::InternalServerError().json(serde_json::json!({
-                "error": e.to_string()
-            }));
-        }
+    // A recovery code alone opens nothing: it must answer a challenge of a
+    // correct password (#753).
+    let email = match challenge::attempt(mongo.get_ref(), &body.challenge_id).await {
+        Some(email) => email,
+        None => return challenge::refused(),
+    };
+    let user_doc = match challenge::two_factor_account(mongo.get_ref(), &email).await {
+        Some(d) => d,
+        None => return challenge::refused(),
     };
 
     // Check if 2FA is enabled
@@ -476,11 +473,16 @@ pub(crate) async fn api_2fa_recovery(
         )
         .await;
 
-    // Issue session
+    if !challenge::consume(mongo.get_ref(), &body.challenge_id).await {
+        return challenge::refused();
+    }
+    // The session stored, so that the API recognises its token (#751).
     let display = email.split('@').next().unwrap_or(&email).to_string();
-    let session = make_session(&email, &display);
-
-    HttpResponse::Ok().json(serde_json::json!({
+    let session = match open_session(mongo.get_ref(), &email, &display).await {
+        Ok(session) => session,
+        Err(unavailable) => return unavailable,
+    };
+    with_session(HttpResponse::Ok(), &session, serde_json::json!({
         "verified": true,
         "session": session.session
     }))

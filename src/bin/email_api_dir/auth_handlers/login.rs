@@ -3,6 +3,7 @@
 use super::super::*;
 use super::session::LoginRequest;
 use super::session_store::signed_in;
+use super::challenge::challenge_started;
 
 pub(crate) fn make_session(email: &str, display_name: &str) -> AuthResponse {
     make_session_with_token(email, display_name, &Uuid::new_v4().to_string())
@@ -69,11 +70,7 @@ pub(crate) async fn auth_login(
         Ok(Some(user)) => {
             // Issue 2FA: if TOTP enabled, return 202 + requires_2fa (no session yet).
             if totp_enabled_db().await {
-                return HttpResponse::Accepted().json(serde_json::json!({
-                    "requires_2fa": true,
-                    "message": "Password correct. Provide TOTP code or recovery code.",
-                    "methods": ["totp", "recovery"]
-                }));
+                return challenge_started(mongo.get_ref().as_ref(), &req.email).await;
             }
             let display = if user.mailbox.is_empty() { req.email.clone() } else { user.mailbox.clone() };
             // The session stored, so that the API recognises its token (#751).
@@ -86,11 +83,7 @@ pub(crate) async fn auth_login(
                 if req.password == env_pass {
                     // Issue 2FA: env-admin with TOTP enabled also requires 2FA step.
                     if totp_enabled_db().await {
-                        return HttpResponse::Accepted().json(serde_json::json!({
-                            "requires_2fa": true,
-                            "message": "Password correct. Provide TOTP code or recovery code.",
-                            "methods": ["totp", "recovery"]
-                        }));
+                        return challenge_started(mongo.get_ref().as_ref(), &req.email).await;
                     }
                     return signed_in(mongo.get_ref().as_ref(), &req.email, &env_user).await;
                 }
