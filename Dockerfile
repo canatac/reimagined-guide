@@ -1,5 +1,5 @@
 # Stage 1: Builder — cache dependencies separately from app code
-FROM rust:1.89 AS builder
+FROM rust:1.89-bookworm AS builder
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
