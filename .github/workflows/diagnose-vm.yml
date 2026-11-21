@@ -82,6 +82,15 @@ jobs:
           sudo nft list chain inet filter input 2>/dev/null | grep -oE 'policy (drop|accept)' || echo "  no inet filter input chain"
           echo "=== mongod: its log file, last errors ==="
           sudo tail -n 400 /var/log/mongodb/mongod.log 2>/dev/null | grep -iE '"s":"(E|F)"|bind|listen' | tail -n 6 | mask | cut -c1-300
+          echo "=== who answers /api/auth/callback (GET, no session, no cookie) ==="
+          for target in "web (3001)|http://127.0.0.1:3001/api/auth/callback" "api (8000)|http://127.0.0.1:8000/api/auth/callback"; do
+            label=${target%%|*}; url=${target#*|}
+            echo "  $label: $(curl -s -o /dev/null -w '%{http_code} -> %{redirect_url}' --max-time 10 "$url" | mask)"
+          done
+          echo "  through caddy: $(curl -s -o /dev/null -w '%{http_code} -> %{redirect_url}' --max-time 10 --resolve mail.misfits.ai:443:127.0.0.1 https://mail.misfits.ai/api/auth/callback | mask)"
+          echo "  Caddyfile on the VM, lines with auth/callback: $(grep -c 'auth/callback' /home/debian/Caddyfile)"
+          echo "  Caddyfile seen by caddy, lines with auth/callback: $(sudo docker exec caddy grep -c 'auth/callback' /etc/caddy/Caddyfile 2>&1)"
+          echo "  caddy started: $(sudo docker inspect caddy --format '{{.State.StartedAt}}')"
           echo "=== containers ==="
           sudo docker ps -a --format '{{.Names}}: {{.Status}}' | mask
           for c in email-api smtp-server imap-server; do
