@@ -501,6 +501,33 @@ jobs:
             # Wait & check containers
             sudo -E docker compose -f /home/debian/docker-compose.deploy.yml --env-file /home/debian/.env.deploy ps
 
+            # Every container runs, does not restart and, when it has a healthcheck,
+            # is healthy, within 180 s; else the deploy fails (#759: on 20/11/2026
+            # email-api, smtp-server and imap-server restarted in a loop and the
+            # deploy passed). Names and states only in the log.
+            deadline=$((SECONDS + 180))
+            while :; do
+              bad=""
+              for c in caddy dkim-service email-api imap-server misfits-web smtp-server; do
+                state=$(sudo docker inspect "$c" \
+                  --format '{{.State.Status}} {{.RestartCount}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' \
+                  2>/dev/null || echo "missing 0 none")
+                read -r status restarts health <<<"$state"
+                if [ "$status" != running ] || [ "$restarts" -gt 0 ] || { [ "$health" != healthy ] && [ "$health" != none ]; }; then
+                  bad="$bad $c($status, restarts=$restarts, $health)"
+                fi
+              done
+              if [ -z "$bad" ]; then
+                echo "containers: all running, none restarting, healthy (#759)"
+                break
+              fi
+              if [ "$SECONDS" -ge "$deadline" ]; then
+                echo "ERROR: containers not healthy after 180 s:$bad (#759)"
+                exit 1
+              fi
+              sleep 10
+            done
+
             # Guardrail: ensure email-api received non-empty Hermes env vars from .env.deploy
             HERMES_API_KEY_LEN=$(sudo docker inspect email-api --format '{{range .Config.Env}}{{println .}}{{end}}' \
               | awk -F= '/^HERMES_API_KEY=/{print length(substr($0,index($0,"=")+1))}' \
