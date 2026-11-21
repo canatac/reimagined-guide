@@ -95,9 +95,10 @@ services:
       - ADMIN_INVITE_FROM=${ADMIN_INVITE_FROM:-}
     command: ["email_api"]
     # Image HEALTHCHECK probes :8025 (SMTP). Override for API binary.
-    # wget --spider treats some 2xx oddly; use full GET + HTTP code check.
+    # The public route that answers and pings MongoDB (#768): /api/emails needs
+    # a session since ADMIN_RBAC_ENFORCE=1 (#751) and always failed the check.
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8000/api/emails || exit 1"]
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8000/api/monitoring/mongo-health | grep -q '\"status\":\"healthy\"' || exit 1"]
       interval: 30s
       timeout: 5s
       start_period: 10s
