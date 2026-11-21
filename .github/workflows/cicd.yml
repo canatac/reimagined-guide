@@ -42,6 +42,12 @@ jobs:
       - name: Clippy domain hard-gate (deny warnings)
         run: cargo clippy -p simple-smtp-domain --all-targets -- -D warnings
 
+      - name: Caddyfile of the VM - valid, and its routes (misfits-web#1192)
+        run: |
+          docker run --rm -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine \
+            caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+          bash scripts/caddy_routes_check.sh Caddyfile
+
       - name: LOC guard (max 300 lines per file)
         run: bash scripts/loc_guard.sh
 
