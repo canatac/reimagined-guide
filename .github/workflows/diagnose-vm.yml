@@ -1,0 +1,72 @@
+name: Diagnose VM (read-only)
+
+# Read-only diagnosis of the VM (incident of 20/11/2026: MongoDB refused the
+# connections of the containers after the deploy). It changes nothing on the
+# VM. Every line it prints is masked: no address, no URI, no e-mail, no
+# secret; the logs of a public repository are public.
+on:
+  pull_request:
+    paths: [".github/workflows/diagnose-vm.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    name: Diagnose VM (read-only)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure 1Password service account
+        uses: 1password/load-secrets-action/configure@v2
+        with:
+          service-account-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+
+      - name: Load the SSH key from 1Password
+        uses: 1password/load-secrets-action@v4
+        with:
+          export-env: true
+        env:
+          VM_SSH_KEY: op://hermes/ssh-hermes-smtp/private-key
+
+      - name: Install SSH key
+        uses: shimataro/ssh-key-action@v2
+        with:
+          key: ${{ env.VM_SSH_KEY }}
+          known_hosts: ${{ secrets.VM_KNOWN_HOSTS }}
+
+      - name: Read the state of MongoDB and of the containers
+        run: |
+          ssh -o StrictHostKeyChecking=no debian@${{ secrets.VM_IP }} 'bash -s' <<'REMOTE'
+          set +e
+          mask() {
+            sed -E 's/[0-9]{1,3}(\.[0-9]{1,3}){3}(\/[0-9]+)?/<ip>/g;
+                    s/mongodb(\+srv)?:\/\/[^ "]*/<uri>/g;
+                    s/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}/<email>/g;
+                    s/(password|secret|token|key)=[^ ]*/\1=<hidden>/Ig'
+          }
+          echo "=== mongod: state ==="
+          systemctl show mongod -p ActiveState -p SubState -p NRestarts -p ExecMainStatus -p ActiveEnterTimestamp
+          echo "=== mongod: each bindIp address, by kind, and whether the VM has it ==="
+          for ip in $(sed -nE 's/^\s*bindIp:\s*//p' /etc/mongod.conf | tr ',' ' '); do
+            case "$ip" in
+              127.0.0.1) kind=loopback ;;
+              0.0.0.0) kind=all ;;
+              172.*) kind=docker-range ;;
+              *) kind=other ;;
+            esac
+            if [ "$ip" = 0.0.0.0 ] || ip -4 -o addr show | grep -q " inet $ip/"; then have=present; else have=ABSENT; fi
+            echo "  $kind: $have"
+          done
+          echo "=== listening on 27017, by kind ==="
+          sudo ss -ltnH 'sport = :27017' | awk '{print $4}' | sed -E 's/^127\.0\.0\.1:.*/loopback/; s/^172\.[0-9.]+:.*/docker-range/; s/^0\.0\.0\.0:.*/all/; s/^[0-9.]+:.*/other/' | sort | uniq -c
+          echo "=== mongod: last errors of its journal ==="
+          sudo journalctl -u mongod -n 200 --no-pager -o cat | grep -iE 'error|exception|bind|Waiting for connections|shutdown|fatal' | tail -n 15 | mask | cut -c1-300
+          echo "=== containers ==="
+          sudo docker ps -a --format '{{.Names}}: {{.Status}}' | mask
+          for c in email-api smtp-server imap-server; do
+            echo "  $c: $(sudo docker inspect "$c" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}no healthcheck{{end}}, restarts={{.RestartCount}}' 2>/dev/null)"
+          done
+          echo "=== email-api: last lines about MongoDB, errors and start ==="
+          sudo docker logs email-api --since 2h 2>&1 | grep -iE 'mongo|error|panic|listen|start|oauth|session' | tail -n 20 | mask | cut -c1-300
+          REMOTE
