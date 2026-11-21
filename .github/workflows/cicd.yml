@@ -348,15 +348,39 @@ jobs:
             fi
             sudo nft list ruleset | sudo tee /etc/nftables.conf > /dev/null
 
-            # Ensure MongoDB listens on Docker bridge interfaces (permanent fix for #670)
+            # MongoDB listens on the loopback and on the address the containers
+            # use (the host of MONGODB_URL, an address of the VM), nothing else
+            # (#763). The former step appended Docker bridge addresses at each
+            # deploy and restarted mongod before Docker recreated its networks:
+            # on 20/11/2026 bindIp held 66 of them and mongod stopped with
+            # exitCode 48. It is set once, and mongod restarted only when it
+            # changes; the deploy fails when mongod does not run.
             if [ -f /etc/mongod.conf ]; then
-              if ! grep -q '172.16.0.0/12\|172.19.0.0/16\|bindIpAll' /etc/mongod.conf; then
-                sudo sed -i 's/bindIp: 127.0.0.1/bindIp: 127.0.0.1,172.16.12.2,172.19.0.1/' /etc/mongod.conf
-                sudo systemctl restart mongod || sudo service mongod restart || true
-                echo "mongod.conf: added Docker bridge IPs to bindIp"
-              else
-                echo "mongod.conf: already configured for Docker bridge access"
+              mongo_host=$(sed -nE 's/^MONGODB_URL=//p' /home/debian/.env.deploy | tr -d '\r"' \
+                | sed -E 's#^mongodb(\+srv)?://##; s#^[^@/]*@##; s#[:/,?].*##')
+              want=127.0.0.1
+              if [ -n "$mongo_host" ] && [ "$mongo_host" != 127.0.0.1 ] && [ "$mongo_host" != localhost ] \
+                 && ip -4 -o addr show | grep -q " inet $mongo_host/"; then
+                want="127.0.0.1,$mongo_host"
               fi
+              have=$(sed -nE 's/^[[:space:]]*bindIp:[[:space:]]*//p' /etc/mongod.conf | head -n 1 | tr -d ' ')
+              if [ "$have" != "$want" ]; then
+                sudo sed -i -E "s/^([[:space:]]*)bindIp:.*/\\1bindIp: $want/" /etc/mongod.conf
+                sudo systemctl restart mongod
+                echo "mongod.conf: bindIp set to the loopback and the MongoDB host of the containers, mongod restarted"
+              else
+                echo "mongod.conf: bindIp already right"
+              fi
+              sudo systemctl is-active --quiet mongod || sudo systemctl restart mongod
+              for _ in $(seq 1 30); do
+                sudo ss -ltnH 'sport = :27017' | grep -q . && break
+                sleep 1
+              done
+              if ! sudo systemctl is-active --quiet mongod || ! sudo ss -ltnH 'sport = :27017' | grep -q .; then
+                echo "ERROR: mongod is not running or not listening on 27017 (#763)"
+                exit 1
+              fi
+              echo "mongod: running, listening on 27017"
             fi
 
             mkdir -p /home/debian/dkim
