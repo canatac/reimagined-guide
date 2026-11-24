@@ -1,3 +1,4 @@
 row_id,feature,repo,status,evidence
 MW-2026-062,OAuth2 IMAP authentication,reimagined-guide,FAIL,Gherkin scenarios written for issue #728 (AC1-AC11); implementation pending
 MW-2026-063,Build & Push SMTP image (SCW Registry) green on master,reimagined-guide,FAIL,Gherkin scenarios written for issue #740 (AC1-AC3); check red on master, fix pending
+MW-2026-064,Periodic sync date deserialization (BSON Date / RFC 3339),reimagined-guide,FAIL,Gherkin scenarios written for issue #769 (AC1-AC3); implementation pending
