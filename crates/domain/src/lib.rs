@@ -390,3 +390,142 @@ pub struct RetentionAuditEntry {
     pub oldest_retained: Option<String>,
     pub note: Option<String>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+    use serde_json::json;
+
+    #[test]
+    fn calendar_event_new_sets_defaults() {
+        let start = Utc::now();
+        let end = Utc::now();
+        let ev = CalendarEvent::new("user-1", "standup", start, end);
+
+        assert_eq!(ev.user_id, "user-1");
+        assert_eq!(ev.title, "standup");
+        assert_eq!(ev.description, "");
+        assert_eq!(ev.event_type, "default");
+        assert_eq!(ev.color, "#3788d8");
+        assert_eq!(ev.location, "");
+        assert!(!ev.id.is_empty());
+    }
+
+    #[test]
+    fn email_new_sets_initial_values() {
+        let email = Email::new("id-1", "a@example.com", "b@example.com", "subject", "body");
+
+        assert_eq!(email.id, "id-1");
+        assert_eq!(email.from, "a@example.com");
+        assert_eq!(email.to, "b@example.com");
+        assert_eq!(email.subject, "subject");
+        assert_eq!(email.body, "body");
+        assert!(email.headers.is_empty());
+        assert!(email.flags.is_empty());
+        assert_eq!(email.sequence_number, 0);
+        assert_eq!(email.uid, 0);
+        assert_eq!(email.dkim_signature, None);
+    }
+
+    #[test]
+    fn serde_defaults_are_applied_on_deserialize() {
+        let event = json!({
+            "id": "evt-1",
+            "userId": "u-1",
+            "title": "meeting",
+            "start": "2026-01-01T10:00:00Z",
+            "end": "2026-01-01T11:00:00Z",
+            "createdAt": "2026-01-01T09:00:00Z",
+            "updatedAt": "2026-01-01T09:00:00Z"
+        });
+        let parsed_event: CalendarEvent = serde_json::from_value(event).expect("calendar event parse");
+        assert_eq!(parsed_event.description, "");
+        assert_eq!(parsed_event.location, "");
+        assert_eq!(parsed_event.event_type, "default");
+        assert_eq!(parsed_event.color, "#3788d8");
+
+        let cr = json!({
+            "id": "cr-1",
+            "title": "Improve CI",
+            "problem": "soft guards",
+            "desiredOutcome": "hard guards",
+            "scope": "backend",
+            "priority": "P1",
+            "status": "open",
+            "requestedBy": "root",
+            "linkedRepo": "canatac/reimagined-guide",
+            "createdAt": "2026-01-01T09:00:00Z",
+            "updatedAt": "2026-01-01T09:00:00Z",
+            "takenInChargeAt": null,
+            "takenInChargeBy": null,
+            "targetReleaseWindow": "2026-W01",
+            "acceptanceCriteria": [],
+            "workflow": [],
+            "changelogEntry": null
+        });
+        let parsed_cr: ChangeRequestItem = serde_json::from_value(cr).expect("change request parse");
+        assert_eq!(parsed_cr.execution_state, "idle");
+        assert!(parsed_cr.workflow_events.is_empty());
+        assert_eq!(parsed_cr.execution_run_id, None);
+    }
+
+    #[test]
+    fn external_imap_account_roundtrip() {
+        let acct = ExternalImapAccount {
+            id: "acct-1".into(),
+            owner_user_id: "user-1".into(),
+            provider: "gmail".into(),
+            email: "a@gmail.com".into(),
+            auth_type: "oauth2".into(),
+            secret_ref: Some("ref-1".into()),
+            secret_value: None,
+            oauth_access_token: Some("ya29.token".into()),
+            oauth_refresh_token: Some("1//refresh".into()),
+            oauth_token_expires_at: Some(Utc::now()),
+            oauth_scopes: Some(vec!["https://mail.google.com/".into()]),
+            imap_host: "imap.gmail.com".into(),
+            imap_port: 993,
+            imap_tls: true,
+            smtp_host: Some("smtp.gmail.com".into()),
+            smtp_port: Some(587),
+            smtp_tls: Some(true),
+            status: "active".into(),
+            last_sync_at: None,
+            last_error: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let json = serde_json::to_value(&acct).unwrap();
+        assert_eq!(json["id"], "acct-1");
+        assert_eq!(json["provider"], "gmail");
+        assert_eq!(json["imapPort"], 993);
+        let parsed: ExternalImapAccount = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed.id, "acct-1");
+        assert_eq!(parsed.smtp_port, Some(587));
+    }
+
+    #[test]
+    fn email_roundtrip_with_headers_and_flags() {
+        let email = Email {
+            id: "e-1".into(),
+            from: "a@x.com".into(),
+            to: "b@x.com".into(),
+            subject: "hi".into(),
+            body: "body text".into(),
+            headers: vec![("X-Foo".into(), "bar".into())],
+            flags: vec!["\\Seen".into()],
+            sequence_number: 5,
+            uid: 42,
+            internal_date: Utc::now(),
+            dkim_signature: Some("sig123".into()),
+        };
+        let json = serde_json::to_value(&email).unwrap();
+        assert_eq!(json["from"], "a@x.com");
+        assert_eq!(json["uid"], 42);
+        let parsed: Email = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed.flags, vec!["\\Seen"]);
+        assert_eq!(parsed.headers, vec![("X-Foo".into(), "bar".into())]);
+        assert_eq!(parsed.dkim_signature, Some("sig123".into()));
+    }
+}
