@@ -1,4 +1,2 @@
-row_id,feature,repo,status,evidence
-MW-2026-062,OAuth2 IMAP authentication,reimagined-guide,FAIL,Gherkin scenarios written for issue #728 (AC1-AC11); implementation pending
-MW-2026-063,Build & Push SMTP image (SCW Registry) green on master,reimagined-guide,FAIL,Gherkin scenarios written for issue #740 (AC1-AC3); check red on master, fix pending
-MW-2026-064,Periodic sync date deserialization (BSON Date / RFC 3339),reimagined-guide,FAIL,Gherkin scenarios written for issue #769 (AC1-AC3); implementation pending
+test_id,issue_number,issue_title,scenario_title,feature_file,status,acceptance_criteria
+RG-2026-001,843,Post-deploy check failed: send an email,Post-deploy check "send an email" passes on production after the next deploy,issue-843-post-deploy-check-send-an-email.feature,pending,AC1
