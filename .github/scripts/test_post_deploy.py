@@ -32,9 +32,14 @@ class Fake(http.server.BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(length)) if length else None
         Fake.calls.append((method, self.path))
         Fake.bodies.append(body)
-        code, payload = Fake.codes.get(self.path, (200, {}))
-        signed = "session_token=t" in (self.headers.get("Cookie") or "")
-        if self.path not in ("/api/auth/login", "/api/health/live", "/api/health/ready") and not signed:
+        default = (200, {"accessToken": "t", "user": {"email": "qa@example.org"}}) if self.path == "/api/auth/login" \
+            else (200, {})
+        code, payload = Fake.codes.get(self.path, default)
+        # As the backend behind misfits-web (paperclip-fleet#886): the token
+        # of the login in Authorization, and the email of the user.
+        signed = (self.headers.get("Authorization") == "Bearer t"
+                  and self.headers.get("x-user-email") == "qa@example.org")
+        if self.path not in ("/api/auth/login", "/api/health/live") and not signed:
             code, payload = 401, {"message": "no session"}
         data = json.dumps(payload).encode()
         self.send_response(code)
@@ -79,7 +84,7 @@ class Checks(unittest.TestCase):
         Fake.codes["/api/auth/login"] = (401, {"message": "invalid"})
         failures = api.run(self.client, "qa@example.org", "pw")
         self.assertEqual([f["check"] for f in failures], ["login"])
-        self.assertNotIn(("GET", "/api/account"), Fake.calls)
+        self.assertNotIn(("GET", "/api/unified/folders"), Fake.calls)
         Fake.codes["/api/auth/login"] = (202, {"requires_2fa": True})
         self.assertTrue(api.run(self.client, "qa@example.org", "pw")[0]["detail"].endswith("disable it for the "
                                                                                             "post-deploy checks"))
@@ -105,12 +110,25 @@ class Checks(unittest.TestCase):
         Fake.codes["/api/compose/send"] = (200, {"sent": False})
         passed = []
         api.run(self.client, "qa@example.org", "pw", "me@example.org", passed)
-        self.assertEqual(passed, ["health live", "health ready", "login", "account", "unified folders",
-                                  "external accounts", "logout"])
+        self.assertEqual(passed, ["health live", "login", "unified folders", "external accounts", "logout"])
         Fake.codes["/api/auth/login"] = (401, {})
         passed = []
-        api.run(self.client, "qa@example.org", "pw", "", passed)
-        self.assertEqual(passed, ["health live", "health ready"])
+        api.run(api.Client(self.client.base), "qa@example.org", "pw", "", passed)
+        self.assertEqual(passed, ["health live"])
+
+    def test_signed_in_as_the_browser(self):
+        # paperclip-fleet#886: the session cookie alone answered 401 on
+        # /api/external-accounts in production; the browser sends the
+        # accessToken of the login. Without one, the login fails.
+        self.assertEqual(api.run(self.client, "qa@example.org", "pw"), [])
+        self.assertNotIn(("GET", "/api/account"), Fake.calls)
+        self.assertNotIn(("GET", "/api/health/ready"), Fake.calls)
+        Fake.codes["/api/auth/login"] = (200, {"user": {"email": "qa@example.org"}})
+        passed = []
+        failures = api.run(api.Client(self.client.base), "qa@example.org", "pw", "", passed)
+        self.assertEqual(failures, [{"check": "login",
+                                     "detail": "POST /api/auth/login answered 200 without an access token"}])
+        self.assertEqual(passed, ["health live"])
 
     def test_no_answer_is_a_failure(self):
         client = api.Client("http://127.0.0.1:9")
