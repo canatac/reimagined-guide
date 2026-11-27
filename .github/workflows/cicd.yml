@@ -623,8 +623,10 @@ jobs:
       - name: Checks of the API (read-only; an email only to QA_TEST_RECIPIENT)
         id: checks
         run: python3 -I .github/scripts/post_deploy_api.py "$RUNNER_TEMP/failures.json"
-      - name: Critical bug for each check that failed (#876)
-        if: failure() && steps.checks.outcome == 'failure'
+      # A critical bug for each check that failed (#876); the issue of a
+      # check that passes again closed (#884).
+      - name: Issues of the checks
+        if: always() && (steps.checks.outcome == 'failure' || steps.checks.outcome == 'success')
         env:
           GITHUB_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

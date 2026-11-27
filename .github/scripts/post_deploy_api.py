@@ -5,8 +5,9 @@ Run by the job post-deploy-smoke of .github/workflows/cicd.yml once the
 deploy succeeded. Read-only, with the test account of the operator
 (QA_TEST_LOGIN, QA_TEST_PASSWORD); the sending of an email is checked only
 when QA_TEST_RECIPIENT, an address of the operator, is set. Only the HTTP
-codes are printed, never a body. The failures go to the file given as the
-first argument, for post_deploy_report.py.
+codes are printed, never a body. The failures and the checks passed go to
+the file given as the first argument, {"failures": [...], "passed": [...]},
+for post_deploy_report.py (paperclip-fleet#884).
 
 Standard library only.
 """
@@ -62,16 +63,20 @@ SIGNED_IN = [("account", "GET", "/api/account", {200}),
              ("provider catalogue", "GET", "/api/external-accounts/oauth2/providers", {200})]
 
 
-def run(client: Client, login: str, password: str, recipient: str = "") -> list[dict]:
+def run(client: Client, login: str, password: str, recipient: str = "", passed: list | None = None) -> list[dict]:
     """The failures of the checks, each {"check", "detail"}; prints one line
-    per check."""
+    per check. PASSED, given, gets the names of the checks passed, whose
+    issue the report closes (paperclip-fleet#884); a check not run is not."""
     failures = []
+    done = [] if passed is None else passed
 
     def check(name: str, method: str, path: str, expected: set, body: dict | None = None) -> tuple[int, dict | None]:
         status, payload = client.call(method, path, body)
         ok = status in expected
         print(f"{'PASS' if ok else 'FAIL'}: {name}: {method} {path} -> {status or 'no answer'}", flush=True)
-        if not ok:
+        if ok:
+            done.append(name)
+        else:
             failures.append({"check": name, "detail": f"{method} {path} answered {status or 'nothing'}, expected "
                                                       f"{' or '.join(str(c) for c in sorted(expected))}"})
         return status, payload
@@ -93,6 +98,7 @@ def run(client: Client, login: str, password: str, recipient: str = "") -> list[
             print("FAIL: send an email: answered sent=false", flush=True)
             failures.append({"check": "send an email", "detail": f"POST /api/compose/send answered {status} with "
                                                                   "sent=false"})
+            done.remove("send an email")
     check("logout", "POST", "/api/auth/logout", {200, 204})
     return failures
 
@@ -101,10 +107,17 @@ def main(argv: list[str]) -> int:
     login, password = os.environ.get("QA_TEST_LOGIN", ""), os.environ.get("QA_TEST_PASSWORD", "")
     if not login or not password:
         print("::warning::QA_TEST_LOGIN and QA_TEST_PASSWORD are not set: post-deploy checks skipped")
-        return 0
-    failures = run(Client(os.environ["QA_BASE_URL"]), login, password, os.environ.get("QA_TEST_RECIPIENT", ""))
-    with open(argv[1], "w", encoding="utf-8") as out:
-        json.dump(failures, out)
+        failures, passed = [], []
+    else:
+        passed = []
+        failures = run(Client(os.environ["QA_BASE_URL"]), login, password, os.environ.get("QA_TEST_RECIPIENT", ""),
+                       passed)
+    try:
+        with open(argv[1], "w", encoding="utf-8") as out:
+            json.dump({"failures": failures, "passed": passed}, out)
+    except OSError:
+        if failures or passed:
+            raise
     return 1 if failures else 0
 
 

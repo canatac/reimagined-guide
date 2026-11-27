@@ -97,6 +97,21 @@ class Checks(unittest.TestCase):
         self.assertEqual(api.run(self.client, "qa@example.org", "pw", "me@example.org")[0]["detail"],
                          "POST /api/compose/send answered 200 with sent=false")
 
+    def test_the_checks_passed_and_only_them(self):
+        # paperclip-fleet#884: the provider catalogue in 500, an email sent
+        # with sent=false: neither passed; after a refused login, the checks
+        # not run are not either.
+        Fake.codes["/api/external-accounts/oauth2/providers"] = (500, {})
+        Fake.codes["/api/compose/send"] = (200, {"sent": False})
+        passed = []
+        api.run(self.client, "qa@example.org", "pw", "me@example.org", passed)
+        self.assertEqual(passed, ["health live", "health ready", "login", "account", "unified folders",
+                                  "external accounts", "logout"])
+        Fake.codes["/api/auth/login"] = (401, {})
+        passed = []
+        api.run(self.client, "qa@example.org", "pw", "", passed)
+        self.assertEqual(passed, ["health live", "health ready"])
+
     def test_no_answer_is_a_failure(self):
         client = api.Client("http://127.0.0.1:9")
         failures = api.run(client, "qa@example.org", "pw")
@@ -156,6 +171,34 @@ class Report(unittest.TestCase):
         rep.report(github, [self.FAILURE], "c" * 40, "", [])
         self.assertNotIn("type", github.calls[-1][2])
         self.assertEqual(github.calls[-1][2]["labels"][0], "priority-P1")
+
+    def test_a_check_that_passes_closes_its_issue(self):
+        # paperclip-fleet#884: its acceptance criterion met; a check failed
+        # again or not passed keeps its issue open; a pull request never.
+        github = FakeGitHub([{"number": 7, "title": "Post-deploy check failed: send an email"},
+                             {"number": 8, "title": "Post-deploy check failed: provider catalogue"},
+                             {"number": 9, "title": "Post-deploy check failed: account"},
+                             {"number": 10, "title": "Post-deploy check failed: send an email", "pull_request": {}}])
+        done = rep.report(github, [self.FAILURE], "d" * 40, "https://run", [], ["login", "send an email",
+                                                                                  "provider catalogue"])
+        self.assertEqual(done, ["#8 commented: provider catalogue", "#7 closed: send an email"])
+        self.assertEqual(github.calls[-1], ("PATCH", "/issues/7", {"state": "closed", "state_reason": "completed"}))
+        self.assertIn("its acceptance criterion is met, closed", github.calls[-2][2]["body"])
+        github = FakeGitHub([{"number": 7, "title": "Post-deploy check failed: account"}])
+        self.assertEqual(rep.report(github, [], "e" * 40, "", [], ["account"]), ["#7 closed: account"])
+        self.assertNotIn("/labels", [path for _, path, _ in github.calls])
+
+    def test_the_file_of_the_checks_old_or_new(self):
+        out = Path(__file__).parent / "_report_test.json"
+        self.addCleanup(lambda: out.unlink(missing_ok=True))
+        for found in ([], {"failures": [], "passed": []}):
+            out.write_text(json.dumps(found))
+            self.assertEqual(rep.main(["x", str(out)]), 0)
+        # Without the account: the file written empty, nothing to report.
+        for name in ("QA_TEST_LOGIN", "QA_TEST_PASSWORD"):
+            api.os.environ.pop(name, None)
+        self.assertEqual(api.main(["x", str(out)]), 0)
+        self.assertEqual(json.loads(out.read_text()), {"failures": [], "passed": []})
 
 
 if __name__ == "__main__":
