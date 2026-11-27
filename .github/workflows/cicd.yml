@@ -591,3 +591,41 @@ jobs:
         run: |
           ssh -o StrictHostKeyChecking=no debian@${{ secrets.VM_IP }} \
             "for i in \$(seq 1 12); do if nc -z -w3 127.0.0.1 3002 2>/dev/null; then echo 'DKIM port 3002 open' && exit 0; fi; echo \"retry \$i...\"; sleep 5; done; echo 'DKIM service not reachable on :3002'; exit 1"
+
+  # ============================================================
+  # Post-deploy checks of the API on production (paperclip-fleet#879)
+  # ============================================================
+  post-deploy-scripts:
+    name: Post-deploy scripts - unit tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unit tests of the post-deploy checks (no network)
+        run: python3 -I -m unittest discover -s .github/scripts -v
+
+  post-deploy-smoke:
+    name: Post-deploy checks - API on production
+    needs: deploy
+    if: always() && needs.deploy.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    env:
+      QA_BASE_URL: ${{ vars.QA_BASE_URL || 'https://mail.misfits.ai' }}
+      QA_TEST_LOGIN: ${{ secrets.QA_TEST_LOGIN }}
+      QA_TEST_PASSWORD: ${{ secrets.QA_TEST_PASSWORD }}
+      QA_TEST_RECIPIENT: ${{ secrets.QA_TEST_RECIPIENT }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checks of the API (read-only; an email only to QA_TEST_RECIPIENT)
+        id: checks
+        run: python3 -I .github/scripts/post_deploy_api.py "$RUNNER_TEMP/failures.json"
+      - name: Critical bug for each check that failed (#876)
+        if: failure() && steps.checks.outcome == 'failure'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: python3 -I .github/scripts/post_deploy_report.py "$RUNNER_TEMP/failures.json"
