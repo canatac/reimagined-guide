@@ -25,18 +25,24 @@ TIMEOUT = 30
 
 
 class Client:
-    """HTTP with the cookies of the session (session_token)."""
+    """HTTP as the browser of misfits-web signs its calls (src/lib/api-client.ts,
+    paperclip-fleet#886): the cookies of the session, and once signed in
+    Authorization: Bearer <accessToken of the login> and x-user-email."""
 
     def __init__(self, base: str) -> None:
         self.base = base.rstrip("/")
         self.opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+        self.signed: dict = {}
+
+    def sign_in(self, token: str, email: str) -> None:
+        self.signed = {"Authorization": f"Bearer {token}", "x-user-email": email}
 
     def call(self, method: str, path: str, body: dict | None = None) -> tuple[int, dict | None]:
         data = None if body is None else json.dumps(body).encode()
         request = urllib.request.Request(self.base + path, data=data, method=method,
                                          headers={"Content-Type": "application/json",
                                                   "Accept": "application/json",
-                                                  "User-Agent": "post-deploy-smoke"})
+                                                  "User-Agent": "post-deploy-smoke", **self.signed})
         try:
             with self.opener.open(request, timeout=TIMEOUT) as response:
                 return response.status, _json(response.read())
@@ -55,10 +61,10 @@ def _json(raw: bytes) -> dict | None:
 
 
 # (name, method, path, codes expected); the login comes after the health.
-HEALTH = [("health live", "GET", "/api/health/live", {200}),
-          ("health ready", "GET", "/api/health/ready", {200})]
-SIGNED_IN = [("account", "GET", "/api/account", {200}),
-             ("unified folders", "GET", "/api/unified/folders", {200}),
+# Only routes the domain serves (paperclip-fleet#886): no /api/health/ready,
+# and /api/account answers DELETE only (the deletion of the account).
+HEALTH = [("health live", "GET", "/api/health/live", {200})]
+SIGNED_IN = [("unified folders", "GET", "/api/unified/folders", {200}),
              ("external accounts", "GET", "/api/external-accounts", {200}),
              ("provider catalogue", "GET", "/api/external-accounts/oauth2/providers", {200})]
 
@@ -83,11 +89,19 @@ def run(client: Client, login: str, password: str, recipient: str = "", passed: 
 
     for name, method, path, expected in HEALTH:
         check(name, method, path, expected)
-    status, _ = check("login", "POST", "/api/auth/login", {200}, {"email": login, "password": password})
+    status, payload = check("login", "POST", "/api/auth/login", {200}, {"email": login, "password": password})
     if status == 202:
         failures[-1]["detail"] += ": the test account has 2FA, disable it for the post-deploy checks"
     if status != 200:
         return failures
+    token = (payload or {}).get("accessToken") or (payload or {}).get("access_token")
+    if not isinstance(token, str) or not token:
+        print("FAIL: login: answered 200 without an access token", flush=True)
+        done.remove("login")
+        failures.append({"check": "login", "detail": "POST /api/auth/login answered 200 without an access token"})
+        return failures
+    user = (payload or {}).get("user")
+    client.sign_in(token, (user.get("email") if isinstance(user, dict) else None) or login)
     for name, method, path, expected in SIGNED_IN:
         check(name, method, path, expected)
     if recipient:
