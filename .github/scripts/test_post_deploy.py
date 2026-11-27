@@ -32,8 +32,8 @@ class Fake(http.server.BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(length)) if length else None
         Fake.calls.append((method, self.path))
         Fake.bodies.append(body)
-        default = (200, {"accessToken": "t", "user": {"email": "qa@example.org"}}) if self.path == "/api/auth/login" \
-            else (200, {})
+        default = (200, {"session": {"access_token": "t", "user": {"email": "qa@example.org"}}}) \
+            if self.path == "/api/auth/login" else (200, {})
         code, payload = Fake.codes.get(self.path, default)
         # As the backend behind misfits-web (paperclip-fleet#886): the token
         # of the login in Authorization, and the email of the user.
@@ -123,12 +123,18 @@ class Checks(unittest.TestCase):
         self.assertEqual(api.run(self.client, "qa@example.org", "pw"), [])
         self.assertNotIn(("GET", "/api/account"), Fake.calls)
         self.assertNotIn(("GET", "/api/health/ready"), Fake.calls)
-        Fake.codes["/api/auth/login"] = (200, {"user": {"email": "qa@example.org"}})
-        passed = []
-        failures = api.run(api.Client(self.client.base), "qa@example.org", "pw", "", passed)
-        self.assertEqual(failures, [{"check": "login",
-                                     "detail": "POST /api/auth/login answered 200 without an access token"}])
-        self.assertEqual(passed, ["health live"])
+        # paperclip-fleet#887: the session in "session", camelCase too.
+        Fake.codes["/api/auth/login"] = (200, {"session": {"accessToken": "t", "user": {"email": "qa@example.org"}}})
+        self.assertEqual(api.run(api.Client(self.client.base), "qa@example.org", "pw"), [])
+        for answer, detail in (({"accessToken": "t", "user": {"email": "qa@example.org"}},
+                                "no session with an access token in its answer"),
+                               ({"twoFactorRequired": True, "challengeId": "c", "expiresIn": 300},
+                                "the test account has 2FA, disable it for the post-deploy checks")):
+            Fake.codes["/api/auth/login"] = (200, answer)
+            passed = []
+            failures = api.run(api.Client(self.client.base), "qa@example.org", "pw", "", passed)
+            self.assertEqual(failures, [{"check": "login", "detail": f"POST /api/auth/login answered 200: {detail}"}])
+            self.assertEqual(passed, ["health live"])
 
     def test_no_answer_is_a_failure(self):
         client = api.Client("http://127.0.0.1:9")

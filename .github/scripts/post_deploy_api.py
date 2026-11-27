@@ -94,13 +94,22 @@ def run(client: Client, login: str, password: str, recipient: str = "", passed: 
         failures[-1]["detail"] += ": the test account has 2FA, disable it for the post-deploy checks"
     if status != 200:
         return failures
-    token = (payload or {}).get("accessToken") or (payload or {}).get("access_token")
-    if not isinstance(token, str) or not token:
-        print("FAIL: login: answered 200 without an access token", flush=True)
+    # The answer of the login, as misfits-web reads it (src/types/auth.ts,
+    # LoginResponse; paperclip-fleet#887): {"session": {accessToken, user:
+    # {email}}}, its keys camelCase or snake_case; or a challenge of 2FA,
+    # {twoFactorRequired: true}, answered 200 too.
+    payload = payload or {}
+    session = payload.get("session") if isinstance(payload.get("session"), dict) else {}
+    token = session.get("accessToken") or session.get("access_token")
+    why = ("the test account has 2FA, disable it for the post-deploy checks"
+           if payload.get("twoFactorRequired") or payload.get("two_factor_required")
+           else None if isinstance(token, str) and token else "no session with an access token in its answer")
+    if why:
+        print(f"FAIL: login: {why}", flush=True)
         done.remove("login")
-        failures.append({"check": "login", "detail": "POST /api/auth/login answered 200 without an access token"})
+        failures.append({"check": "login", "detail": f"POST /api/auth/login answered 200: {why}"})
         return failures
-    user = (payload or {}).get("user")
+    user = session.get("user")
     client.sign_in(token, (user.get("email") if isinstance(user, dict) else None) or login)
     for name, method, path, expected in SIGNED_IN:
         check(name, method, path, expected)
