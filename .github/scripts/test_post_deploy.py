@@ -23,6 +23,7 @@ class Fake(http.server.BaseHTTPRequestHandler):
     codes: dict = {}
     calls: list = []
     bodies: list = []
+    cookies: list = []
 
     def log_message(self, *_):
         pass
@@ -32,7 +33,7 @@ class Fake(http.server.BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(length)) if length else None
         Fake.calls.append((method, self.path))
         Fake.bodies.append(body)
-        default = (200, {"session": {"access_token": "t", "user": {"email": "qa@example.org"}}}) \
+        default = (200, {"session": {"id": "s1", "access_token": "t", "user": {"email": "qa@example.org"}}}) \
             if self.path == "/api/auth/login" else (200, {})
         code, payload = Fake.codes.get(self.path, default)
         # As the backend behind misfits-web (paperclip-fleet#886): the token
@@ -41,6 +42,12 @@ class Fake(http.server.BaseHTTPRequestHandler):
                   and self.headers.get("x-user-email") == "qa@example.org")
         if self.path not in ("/api/auth/login", "/api/health/live") and not signed:
             code, payload = 401, {"message": "no session"}
+        # As the middleware of misfits-web on the routes Caddy gives it
+        # (reimagined-guide#841, #842): the cookie mfa_session, which the
+        # browser sets itself once signed in.
+        Fake.cookies.append(self.headers.get("Cookie") or "")
+        if self.path.startswith("/api/external-accounts") and "mfa_session=" not in (self.headers.get("Cookie") or ""):
+            code, payload = 401, {"error": "Unauthorized"}
         data = json.dumps(payload).encode()
         self.send_response(code)
         if self.path == "/api/auth/login" and code == 200:
@@ -59,7 +66,7 @@ class Fake(http.server.BaseHTTPRequestHandler):
 
 class Checks(unittest.TestCase):
     def setUp(self):
-        Fake.codes, Fake.calls, Fake.bodies = {}, [], []
+        Fake.codes, Fake.calls, Fake.bodies, Fake.cookies = {}, [], [], []
         self.server = http.server.HTTPServer(("127.0.0.1", 0), Fake)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.addCleanup(self.server.server_close)
@@ -135,6 +142,21 @@ class Checks(unittest.TestCase):
             failures = api.run(api.Client(self.client.base), "qa@example.org", "pw", "", passed)
             self.assertEqual(failures, [{"check": "login", "detail": f"POST /api/auth/login answered 200: {detail}"}])
             self.assertEqual(passed, ["health live"])
+
+    def test_the_session_cookie_of_the_browser_is_sent(self):
+        # reimagined-guide#841, #842: GET /api/external-accounts and its
+        # provider catalogue answered 401 on production, the middleware of
+        # misfits-web reading the cookie mfa_session the browser sets once
+        # signed in; the session id, as the browser.
+        self.assertEqual(api.run(self.client, "qa@example.org", "pw"), [])
+        at = Fake.calls.index(("GET", "/api/external-accounts"))
+        self.assertIn("mfa_session=s1", Fake.cookies[at])
+        self.assertNotIn("mfa_session", Fake.cookies[Fake.calls.index(("POST", "/api/auth/login"))])
+        # Without a session id in the answer: its access token.
+        Fake.codes["/api/auth/login"] = (200, {"session": {"accessToken": "t", "user": {"email": "qa@example.org"}}})
+        Fake.calls, Fake.cookies = [], []
+        self.assertEqual(api.run(api.Client(self.client.base), "qa@example.org", "pw"), [])
+        self.assertIn("mfa_session=t", Fake.cookies[Fake.calls.index(("GET", "/api/external-accounts"))])
 
     def test_no_answer_is_a_failure(self):
         client = api.Client("http://127.0.0.1:9")
