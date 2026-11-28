@@ -1,4 +1,2 @@
-feature,scenario,status
-issue-784-cant-add-external-account,@AC1,pending
-issue-784-cant-add-external-account,@AC2,pending
-issue-784-cant-add-external-account,@AC3,pending
+file,scenario,status
+issue-861-post-deploy-check-external-accounts,@AC1,pending
