@@ -1,4 +1,4 @@
 feature,scenario,status
-issue-783-dkim-service-reachability,@AC1,pending
-issue-783-dkim-service-reachability,@AC2,pending
-issue-783-dkim-service-reachability,@AC3,pending
+issue-784-cant-add-external-account,@AC1,pending
+issue-784-cant-add-external-account,@AC2,pending
+issue-784-cant-add-external-account,@AC3,pending
