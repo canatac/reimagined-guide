@@ -19,6 +19,7 @@ import json
 import os
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 TIMEOUT = 30
@@ -31,11 +32,21 @@ class Client:
 
     def __init__(self, base: str) -> None:
         self.base = base.rstrip("/")
-        self.opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+        self.jar = http.cookiejar.CookieJar()
+        self.opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(self.jar))
         self.signed: dict = {}
 
-    def sign_in(self, token: str, email: str) -> None:
+    def sign_in(self, token: str, email: str, session_id: str = "") -> None:
         self.signed = {"Authorization": f"Bearer {token}", "x-user-email": email}
+        # reimagined-guide#841, #842: once signed in, the browser sets the
+        # cookie mfa_session itself (misfits-web src/lib/session.ts,
+        # storeSession), which the middleware of misfits-web requires on the
+        # routes Caddy gives it, /api/external-accounts* among them; without
+        # it they answered 401.
+        host = urllib.parse.urlsplit(self.base).hostname or ""
+        self.jar.set_cookie(http.cookiejar.Cookie(
+            0, "mfa_session", session_id or token, None, False, host, False, False, "/", True,
+            False, None, False, None, None, {}))
 
     def call(self, method: str, path: str, body: dict | None = None) -> tuple[int, dict | None]:
         data = None if body is None else json.dumps(body).encode()
@@ -110,7 +121,9 @@ def run(client: Client, login: str, password: str, recipient: str = "", passed: 
         failures.append({"check": "login", "detail": f"POST /api/auth/login answered 200: {why}"})
         return failures
     user = session.get("user")
-    client.sign_in(token, (user.get("email") if isinstance(user, dict) else None) or login)
+    session_id = session.get("id")
+    client.sign_in(token, (user.get("email") if isinstance(user, dict) else None) or login,
+                   session_id if isinstance(session_id, str) else "")
     for name, method, path, expected in SIGNED_IN:
         check(name, method, path, expected)
     if recipient:
