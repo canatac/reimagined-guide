@@ -1,2 +1,2 @@
-test_id,issue_number,issue_title,scenario_title,feature_file,status,acceptance_criteria
-RG-2026-001,843,Post-deploy check failed: send an email,Post-deploy check "send an email" passes on production after the next deploy,issue-843-post-deploy-check-send-an-email.feature,pending,AC1
+file,scenario,status
+issue-861-post-deploy-check-external-accounts,@AC1,pending

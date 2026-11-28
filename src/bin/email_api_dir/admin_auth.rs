@@ -88,7 +88,7 @@ impl AuthUser {
 
 /// Extrait un token depuis un `HttpRequest`.
 ///
-/// Priorité: header `Authorization: Bearer *** puis cookie `session_token`.
+/// Priorité: header `Authorization: Bearer *** puis cookie `session_token` ou `mfa_session`.
 pub(crate) fn extract_token(req: &HttpRequest) -> Option<String> {
     if let Some(h) = req.headers().get("Authorization") {
         if let Ok(s) = h.to_str() {
@@ -100,7 +100,15 @@ pub(crate) fn extract_token(req: &HttpRequest) -> Option<String> {
             }
         }
     }
+    // Check session_token cookie first (legacy)
     if let Some(c) = req.cookie("session_token") {
+        let v = c.value().trim().to_string();
+        if !v.is_empty() {
+            return Some(v);
+        }
+    }
+    // Also check mfa_session cookie (used by misfits-web frontend and post-deploy checks)
+    if let Some(c) = req.cookie("mfa_session") {
         let v = c.value().trim().to_string();
         if !v.is_empty() {
             return Some(v);
@@ -229,7 +237,7 @@ pub async fn require_admin(
                 "message": "Admin role required",
                 "role": session.role,
             }),
-        ));
+        ))
     }
     Ok(AuthUser {
         user_id: session.user_id,
