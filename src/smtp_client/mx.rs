@@ -92,6 +92,32 @@ async fn resolve_mx_target(
     Ok((smtp_server, smtp_port, dns_ms))
 }
 
+/// Whether an MTA-STS result allows delivery on this port (RFC 8461, #856).
+///
+/// The delivery to an MX is on port 25 with STARTTLS: perform_smtp_handshake
+/// negotiates STARTTLS on every port but 465 and fails without it, so a
+/// policy requiring TLS is met there. Port 465 is left in clear by
+/// perform_smtp_handshake (no implicit TLS), so a policy requiring TLS
+/// refuses it rather than deliver in clear.
+pub fn mta_sts_port_check(result: &MtaStsResult, port: u16, domain: &str) -> Result<(), String> {
+    match result {
+        MtaStsResult::TlsRequired if port == 465 => Err(format!(
+            "MTA-STS enforcement: {} requires TLS, never negotiated on port 465",
+            domain
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// The handshake with an MX, for the integration tests (#856): the unit
+/// tests of the lib do not compile on master.
+#[doc(hidden)]
+pub async fn mx_handshake_for_tests(stream: TcpStream, server: &str, port: u16) -> std::io::Result<()> {
+    perform_smtp_handshake(stream, server.to_string(), port, smtp_timeout_budget())
+        .await
+        .map(|_| ())
+}
+
 /// EHLO + STARTTLS + second EHLO chiffré. Retourne le stream prêt pour MAIL FROM.
 async fn perform_smtp_handshake(
     mut stream: TcpStream,
@@ -205,19 +231,17 @@ pub(super) async fn send_via_mx(email: &Email) -> std::io::Result<()> {
     match enforce_mta_sts(recipient_domain, &smtp_server).await {
         Ok(MtaStsResult::TlsRequired) => {
             println!("MTA-STS: policy requires TLS for {} (MX: {})", recipient_domain, smtp_server);
-            // If the only open port is a plaintext port, enforce TLS.
-            if smtp_port == 25 {
+            // Port 25 negotiates STARTTLS in perform_smtp_handshake, which
+            // fails without it (#856): only a port without TLS is refused.
+            if let Err(reason) = mta_sts_port_check(&MtaStsResult::TlsRequired, smtp_port, recipient_domain) {
                 ctx.emit_bounce_soft(
-                    format!("MTA-STS: plaintext port 25 blocked by policy for {}", recipient_domain),
+                    reason.clone(),
                     Some(smtp_server.clone()),
                     None,
                     Some(t_total.elapsed().as_millis() as u64),
                     Some(dns_ms),
                 );
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::PermissionDenied,
-                    format!("MTA-STS enforcement: {} requires TLS but only port 25 is open", recipient_domain),
-                ));
+                return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, reason));
             }
         }
         Ok(MtaStsResult::NoPolicy) => {

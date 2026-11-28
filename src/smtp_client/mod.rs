@@ -206,6 +206,8 @@ pub use session::extract_email_address;
 pub use dane::{lookup_tlsa_records, validate_server_cert_dane, has_tlsa_records, DaneValidationResult};
 pub use mta_sts::{enforce_mta_sts, fetch_sts_policy, generate_tls_rpt_report, MtaStsResult, StsEnforcementLevel};
 pub use external_smtp::send_via_external_smtp;
+#[doc(hidden)]
+pub use mx::{mta_sts_port_check, mx_handshake_for_tests};
 
 pub async fn send_outgoing_email(email: &Email) -> std::io::Result<()> {
     if let Ok(relay_host) = env::var("SMTP_RELAY_HOST") {
