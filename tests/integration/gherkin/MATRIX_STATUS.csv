@@ -1,2 +1,4 @@
-issue,feature,scenario,status
-852,issue-852-post-deploy-check-external-accounts.feature,@AC1,pending
+feature,scenario,status
+issue-783-dkim-service-reachability,@AC1,pending
+issue-783-dkim-service-reachability,@AC2,pending
+issue-783-dkim-service-reachability,@AC3,pending
