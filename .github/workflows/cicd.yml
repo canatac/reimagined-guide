@@ -13,6 +13,15 @@ env:
   SCW_REGISTRY_ENDPOINT: ${{ secrets.SCW_REGISTRY_ENDPOINT }}
   VM_IP: ${{ secrets.VM_IP }}
 
+# One deploy to production at a time (#871): two merges 4 s apart ran two
+# deploys on the VM at once, and the `down` of one removed the containers
+# the other was creating. A newer run waits for the running one, never
+# cancels it; GitHub keeps only the newest waiting run, so the last commit
+# of master is deployed last. A pull request never deploys: its own group.
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('pull-request-{0}', github.run_id) || 'production-deploy' }}
+  cancel-in-progress: false
+
 jobs:
   # ============================================================
   # JOB 1 : Test - Compilation Rust (cargo check)
