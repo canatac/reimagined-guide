@@ -1,4 +1,3 @@
-
 services:
   # MongoDB
   mongodb:
@@ -19,6 +18,38 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # DKIM Service (from studious-octo-rotary-phone repository)
+  # Note: Ensure studious-octo-rotary-phone repository is checked out at ../studious-octo-rotary-phone
+  dkim-service:
+    build:
+      context: ../studious-octo-rotary-phone
+      dockerfile: Dockerfile
+    container_name: dkim-service
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./dkim:/app/dkim
+    environment:
+      - PORT=3000
+      - SMTP_HOST=smtp-server
+      - SMTP_PORT=8025
+      - SMTP_SECURE=false
+      - SMTP_USER=${SMTP_USERNAME}
+      - SMTP_PASS=${SMTP_PASSWORD}
+      - DOMAIN_NAME=${DOMAIN_NAME:-localhost}
+      - DKIM_DOMAINS=${DKIM_DOMAINS:-${DOMAIN_NAME:-localhost}}
+      - KEY_SELECTOR=${KEY_SELECTOR:-default}
+      - PRIVATE_KEY_PATH=dkim/dkim-private.pem
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"const s=require('net').connect(3000,'127.0.0.1',()=>process.exit(0));s.on('error',()=>process.exit(1));\""]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    restart: unless-stopped
+    depends_on:
+      - smtp-server
 
   # SMTP Server
   smtp-server:
@@ -69,7 +100,7 @@ services:
       - SMTP_USERNAME=${SMTP_USERNAME}
       - SMTP_PASSWORD=${SMTP_PASSWORD}
       - RUST_LOG=${RUST_LOG}
-      - DKIM_SERVICE_URL=${DKIM_SERVICE_URL}
+      - DKIM_SERVICE_URL=${DKIM_SERVICE_URL:-http://dkim-service:3000/generate-dkim}
       - SMTP_MONITORING_ENABLED=${SMTP_MONITORING_ENABLED:-true}
       - SMTP_RELAY_HOST=${SMTP_RELAY_HOST}
       - SMTP_RELAY_PORT=${SMTP_RELAY_PORT:-587}
@@ -87,6 +118,8 @@ services:
       smtp-server:
         condition: service_started
       mongodb:
+        condition: service_healthy
+      dkim-service:
         condition: service_healthy
 
   # IMAP Server
@@ -116,5 +149,5 @@ services:
         condition: service_healthy
 
 volumes:
-  emails:      # Stockage local des emails
-  mongo_data:  # Persistance des données MongoDB
+  emails:      # Local email storage
+  mongo_data:  # MongoDB data persistence
