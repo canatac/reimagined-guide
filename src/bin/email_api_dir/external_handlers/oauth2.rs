@@ -182,13 +182,10 @@ pub async fn api_oauth2_callback(
 
 /// API handler: GET /api/external-accounts/oauth2/providers
 /// Returns the provider catalogue for the "Connect an external account" picker.
+/// This endpoint is public and does not require authentication.
 pub async fn api_oauth2_providers_list(
-    req: actix_web::HttpRequest,
-    mongo: web::Data<Arc<mongodb::Client>>,
+    _req: actix_web::HttpRequest,
 ) -> impl Responder {
-    if let Err(resp) = admin_auth::require_auth(&req, &mongo, &mongo_db_name()).await {
-        return resp;
-    }
     HttpResponse::Ok().json(serde_json::json!({
         "providers": oauth2_provider_catalogue()
     }))
@@ -473,15 +470,12 @@ mod tests {
 
     #[test]
     fn oauth2_revoked_error_code_is_stable() {
-        // The handler maps TokenRefreshError::Revoked to this code; keep it
-        // asserted here so a rename breaks the contract test.
         let code = "OAUTH2_TOKEN_REVOKED";
         assert_eq!(code, "OAUTH2_TOKEN_REVOKED");
     }
 
     #[test]
     fn oauth2_refresh_token_missing_code_is_stable() {
-        // The handler returns this code when no refresh token is stored.
         let code = "OAUTH2_REFRESH_TOKEN_MISSING";
         assert_eq!(code, "OAUTH2_REFRESH_TOKEN_MISSING");
     }
